@@ -1,0 +1,28 @@
+## Interface: 120000
+## Title: Toolbox
+## Notes: 工具箱 — 正式服；可扩展模块。
+## Version: 1.0.0
+## IconTexture: Interface\Icons\Trade_Engineering
+## SavedVariables: ToolboxDB
+## Author: WoWPlugin
+
+Core\Namespace.lua
+Core\Locales.lua
+Core\DB.lua
+Core\Chat.lua
+Core\Tooltip.lua
+Core\LockoutsFacade.lua
+Core\EncounterJournalFacade.lua
+Core\MountJournalFacade.lua
+Core\ItemFacade.lua
+Core\MapFacade.lua
+Core\ModuleRegistry.lua
+UI\SettingsHost.lua
+Modules\Mover.lua
+Modules\MicroMenuPanels.lua
+Modules\TooltipAnchor.lua
+Modules\ChatNotify.lua
+Modules\SavedInstancesData.lua
+Modules\SavedInstancesEJ.lua
+Modules\SavedInstances.lua
+Core\Bootstrap.lua
