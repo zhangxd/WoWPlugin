@@ -1,4 +1,4 @@
-# WoWPlugin — Agent / AI 协作说明
+﻿# WoWPlugin — Agent / AI 协作说明
 
 ## 先读文档再写代码
 
@@ -8,6 +8,9 @@
 实现或修改本仓库前，默认已阅读上述两份文档。
 
 **模糊需求时的检查清单（摘要）**：需求未点名文件、未写验收时，建议按顺序：**辨领域**（游戏提示框 / 设置与 Locales / `Toolbox.Chat` / 暴雪 UI 挂接 / 具体模块）→ **必要时先澄清** 1～3 个问题 → **执行 [AI-ONBOARDING.md](docs/AI-ONBOARDING.md) §1 必读表** → **搜索并点名文件阅读**（不通读整个 `Modules/`）→ **按 §1.1 开动** 后再改业务代码 → **收尾按 [AI-ONBOARDING.md](docs/AI-ONBOARDING.md) §4** 更新总设计等处。完整步骤、示例与边界说明见 **§1.2**。
+
+**硬约束**：在「需求含糊」且未完成 **§1.2** 澄清（或 §3 / specs 未补齐、§1.1 未开动）之前，**不得**修改 `Toolbox/Core/**`、`Toolbox/Modules/**`、`Toolbox/UI/**`、`Toolbox/Toolbox.toc` 等业务代码；**禁止**用「猜到的实现」代替向用户确认。细则见 [docs/AI-ONBOARDING.md](docs/AI-ONBOARDING.md) §1.2 **硬约束**。  
+**另**：若仍存在未选定的**数据来源 / 主方案**（例：静态表由谁生成、未知键策略），**禁止**以「是否现在实现」代替让用户选定方案；见 [docs/AI-ONBOARDING.md](docs/AI-ONBOARDING.md) §1.2 **防未选定主方案就问是否实现**。
 
 **改动节奏**：触及模块行为、存档键、TOC、设置 UI 的修改，**须**先对齐设计与文档，并由需求方明确 **「开动」** 后再改业务代码。细则见 [docs/AI-ONBOARDING.md](docs/AI-ONBOARDING.md) §1.1 与 [docs/specs/2026-04-02-design-workflow-and-settings-groups.md](docs/specs/2026-04-02-design-workflow-and-settings-groups.md)（其中 **§B** 为设置页分组需求，**未编码**）。仅错别字或与行为无关的注释，不要求开动。
 

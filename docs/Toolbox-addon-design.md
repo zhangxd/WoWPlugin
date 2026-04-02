@@ -30,7 +30,6 @@ Modules（平级业务，持续增加）
 ├── Mover — 插件自有 Frame
 ├── MicroMenuPanels — 微型菜单打开的面板（白名单拖动）
 ├── TooltipAnchor — GameTooltip 等锚点/跟随鼠标
-└── （另见）SavedInstancesEJ — 冒险手册界面增强（如「仅坐骑」勾选）；**非** `RegisterModule`，由 `Bootstrap` 注册
 
 UI
 ├── SettingsHost — Retail Canvas 类目壳，聚合各模块 RegisterSettings
@@ -42,6 +41,8 @@ UI
 **代码注释**：新增/修改的 Lua 须含文件头与关键逻辑注释（动机、暴雪限制、Frame 名与数据键）；**注释使用简体中文**；细则见 [AGENTS.md](../AGENTS.md)。
 
 **全球化（界面文案）**：玩家可见字符串集中在 [Toolbox/Core/Locales.lua](../Toolbox/Core/Locales.lua)，按 `GetLocale()` 在 `enUS` 与 `zhCN`（及 `zhTW` 暂跟简体）间切换；模块注册使用 `nameKey` 指向 `Toolbox.L` 键名，设置界面与 `RegisterCanvasLayoutCategory` 标题均走 `Toolbox.L`。
+
+**协作与需求确认（AI / 人）**：一句话需求、未写验收或边界时，须先按 [AI-ONBOARDING.md](./AI-ONBOARDING.md) **§1.2** 澄清或补齐 **§3 最小信息包** / `docs/specs/`；**未完成澄清前不得修改** `Toolbox/Core/**`、`Toolbox/Modules/**`、`Toolbox/UI/**`、`Toolbox/Toolbox.toc` 等业务代码（**硬约束**见该节）。**数据来源或主方案仍分叉时**（例：静态表由谁生成、未覆盖键的策略未选定），**不得**以「是否现在实现 / 是否只写文档」代替让用户选定一条路径；见 **§1.2**「**防未选定主方案就问是否实现**」。与仓库根 [AGENTS.md](../AGENTS.md) 文首「模糊需求检查清单」及「改动节奏」一致。
 
 ---
 
@@ -111,7 +112,7 @@ flowchart TB
 | `Toolbox.Chat` | `Core/Chat.lua` | 面向玩家的默认聊天框输出（`PrintAddonMessage`）、插件 TOC 元数据（`GetAddOnMetadata`）。**模块内禁止**直接调用 `DEFAULT_CHAT_FRAME:AddMessage`；新增聊天类能力须先扩展本 API。 |
 | `Toolbox.Tooltip` | `Core/Tooltip.lua` | `InstallDefaultAnchorHook()`、`RefreshDriver()`；读取 `modules.tooltip_anchor`。**模块 tooltip_anchor** 仅负责 `RegisterModule` 与设置 UI，不直接 `hooksecurefunc` GameTooltip。 |
 | `Toolbox.Lockouts` | `Core/Lockouts.lua` | 锁定列表：`GetNumSavedInstances` / `GetSavedInstanceInfo` 等封装（至暗之夜仍以此为主流 API，便于日后替换）。 |
-| `Toolbox.EJ` | `Core/EncounterJournal.lua` | **优先 `C_EncounterJournal`**，兜底时再考虑全局 `EJ_*`；业务模块禁止直接调用 `EJ_*`。 |
+| `Toolbox.EJ` | `Core/EncounterJournal.lua` | **优先 `C_EncounterJournal`**，兜底时再考虑全局 `EJ_*`；业务模块禁止直接调用 `EJ_*`。含 `SetDifficulty` / `IsValidInstanceDifficulty` 等；副本列表语境以 `EncounterJournal.selectedTab` 与 `GetEncounterJournalInstanceListButtonIds` 为准（与 `GetJournalTabId` 可能不是同一套数字）。 |
 | `Toolbox.MountJournal` | `Core/MountJournal.lua` | `C_MountJournal`（坐骑物品、是否已学会）。 |
 | `Toolbox.Item` | `Core/Item.lua` | 物品名/链接、`GameTooltip:SetItemByID` 等展示辅助。 |
 | `Toolbox.Map` | `Core/Map.lua` | `C_Map.OpenWorldMap` 优先。 |
@@ -164,7 +165,7 @@ sequenceDiagram
 | 微型菜单面板拖动 | `micromenu_panels` | `modules.micromenu_panels` | 总开关、按面板重置、维护说明 |
 | Tooltip 锚点 | `tooltip_anchor` | `modules.tooltip_anchor` | 模式：默认/光标锚点/持续跟随、偏移 |
 | 加载聊天提示 | `chat_notify` | `modules.chat_notify` | 是否在加载完成后向默认聊天框输出一行 |
-| 冒险手册界面增强（仅坐骑筛选等） | （`SavedInstancesEJ.lua`，**非** `RegisterModule`） | — | 无独立 `modules.*` 默认块；逻辑见该文件 |
+| 冒险指南仅坐骑筛选 | `ej_mount_filter` | `modules.ej_mount_filter`（`enabled`/`debugChat`/`interfaceBuild`；坐骑判定仅存会话内存，不落盘） | 无（冒险手册内复选框） |
 | （核心不提供业务数据） | — | `global` | 调试、开发者选项可放 `global` |
 
 新增功能时：**新增一行 + 新文件 + TOC 一条**，不必改核心契约。
@@ -263,7 +264,7 @@ ToolboxDB = {
 5. `Core/Tooltip.lua` — 提示框领域对外 API（须在 `Modules/TooltipAnchor.lua` 之前）  
 6. `Core/ModuleRegistry.lua`  
 7. `UI/SettingsHost.lua`  
-8. `Modules/Mover.lua`、`Modules/MicroMenuPanels.lua`、`Modules/TooltipAnchor.lua`、`Modules/ChatNotify.lua`（顺序可按依赖微调）  
+8. `Modules/Mover.lua`、`Modules/MicroMenuPanels.lua`、`Modules/TooltipAnchor.lua`、`Modules/ChatNotify.lua`、`Modules/EJMountFilter.lua`（顺序可按依赖微调）  
 9. `Core/Bootstrap.lua` — `ADDON_LOADED` 中初始化并启用模块  
 
 `## Interface:` 与正式服客户端一致，大版本后更新。
@@ -301,4 +302,8 @@ ToolboxDB = {
 | 2026-04-02 | Core 下锁定/手册/坐骑/物品/地图分别置于 `Lockouts.lua`、`EncounterJournal.lua`、`MountJournal.lua`、`Item.lua`、`Map.lua`；物品对外 API 为 `Toolbox.Item`；文档用语统一为「领域对外 API」 |
 | 2026-04-02 | §5.1 指向 `specs/2026-04-02-design-workflow-and-settings-groups.md`（协作节奏 + 设置页可折叠分组设计草案） |
 | 2026-04-02 | §2.1 增加对 [AGENTS.md](../AGENTS.md)「Lua 开发规范」的引用 |
-| 2026-04-02 | 鸟瞰图与 §2.2、§3：移除已不存在的 `saved_instances` 模块描述；改为 `SavedInstancesEJ`（非 RegisterModule）；§3 示例与旧存档说明 |
+| 2026-04-02 | 鸟瞰图与 §2.2、§3：移除已不存在的 `saved_instances` 模块描述；§3 示例与旧存档说明 |
+| 2026-04-02 | §1 原则区增加「协作与需求确认」：指向 AI-ONBOARDING §1.2 硬约束与 AGENTS 模糊需求清单 |
+| 2026-04-03 | 移除未契约化的冒险手册「仅坐骑」实现（原 `SavedInstancesEJ.lua` / `global.ejMountFilter`）；重做方案见 [specs/2026-04-03-adventure-guide-mount-filter-lockout-redesign.md](./specs/2026-04-03-adventure-guide-mount-filter-lockout-redesign.md)，待开动后按模块模型落地 |
+| 2026-04-03 | 落地 `ej_mount_filter`：`Modules/EJMountFilter.lua`；规格 [superpowers/specs/2026-04-03-ej-mounts-only-filter-design.md](./superpowers/specs/2026-04-03-ej-mounts-only-filter-design.md) |
+| 2026-04-03 | §1「协作与需求确认」补充：数据来源/主方案未分叉前不得以「是否实现」收尾；指向 AI-ONBOARDING §1.2「防未选定主方案就问是否实现」 |
