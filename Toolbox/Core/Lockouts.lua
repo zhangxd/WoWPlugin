@@ -1,5 +1,5 @@
 --[[
-  副本锁定数据门面（12.0+）。
+  副本锁定数据（领域对外 API）（12.0+）。
   暴雪仍将角色锁定列表暴露为 GetNumSavedInstances / GetSavedInstanceInfo / GetSavedInstanceEncounterInfo；
   至暗之夜暂无替代用的 C_Lockouts 公开表，故集中封装于此，便于日后若 API 迁移时单点替换。
   返回值顺序以 warcraft.wiki.gg API_GetSavedInstanceInfo 为准。

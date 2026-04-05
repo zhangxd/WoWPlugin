@@ -1,4 +1,4 @@
---[[
+﻿--[[
   插件入口：事件与斜杠。
   ADDON_LOADED：SV 已就绪，可注册 Settings、构建设置 UI（不依赖角色）。
   PLAYER_LOGIN：角色数据可用，再启用需进世界的模块（示例窗、微型菜单 Hook 等）。
@@ -18,6 +18,9 @@ frame:SetScript("OnEvent", function(_, event, addonName)
     Toolbox.Locale_Apply()
     Toolbox.ModuleRegistry:RunOnModuleLoad()
     Toolbox.SettingsHost:Build()
+    if Toolbox.MinimapButton and Toolbox.MinimapButton.RegisterBuiltinFlyoutCatalog then
+      Toolbox.MinimapButton.RegisterBuiltinFlyoutCatalog()
+    end
     Toolbox.GameMenu_Init()
 
     SLASH_TOOLBOX1 = "/toolbox"
@@ -31,36 +34,28 @@ frame:SetScript("OnEvent", function(_, event, addonName)
       local cmd, rest = m:match("^(%S+)%s*(.*)$")
       cmd = cmd and string.lower(cmd) or ""
       if cmd == "instances" or cmd == "cd" or cmd == "saved" then
-        if not Toolbox.SavedInstances or not Toolbox.SavedInstances.Toggle then
-          local L = Toolbox.L or {}
-          Toolbox.Chat.PrintAddonMessage(L.SAVED_INST_SLASH_MISSING or "Saved Instances not loaded.")
-          return
-        end
         local ok, err = pcall(function()
-          Toolbox.SavedInstances.Show()
+          local ejName = "Blizzard_EncounterJournal"
+          if C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded(ejName) then
+            -- 已加载
+          elseif C_AddOns and C_AddOns.LoadAddOn then
+            pcall(C_AddOns.LoadAddOn, ejName)
+          elseif LoadAddOn then
+            LoadAddOn(ejName)
+          end
+          if ToggleEncounterJournal then
+            ToggleEncounterJournal()
+          end
         end)
         if not ok then
-          Toolbox.Chat.PrintAddonMessage(string.format((Toolbox.L and Toolbox.L.SAVED_INST_ERR_UI) or "%s", tostring(err)))
+          local L = Toolbox.L or {}
+          Toolbox.Chat.PrintAddonMessage(string.format(L.SAVED_INST_ERR_UI or "%s", tostring(err)))
         end
         return
       end
       if cmd == "mmadd" or cmd == "addframe" then
-        local name = (rest or ""):match("^%s*(%S+)")
-        local L = Toolbox.L
-        if not name or name == "" then
-          Toolbox.Chat.PrintAddonMessage(L.MICROMENU_SLASH_MMADD_USAGE)
-          return
-        end
-        local ok, err = Toolbox.MicroMenuPanels.AddExtraFrame(name)
-        if ok then
-          Toolbox.Chat.PrintAddonMessage(string.format(L.MICROMENU_ADD_OK_FMT, name))
-        elseif err == "invalid" then
-          Toolbox.Chat.PrintAddonMessage(L.MICROMENU_ADD_ERR_INVALID)
-        elseif err == "builtin" then
-          Toolbox.Chat.PrintAddonMessage(L.MICROMENU_ADD_ERR_BUILTIN)
-        elseif err == "dup" then
-          Toolbox.Chat.PrintAddonMessage(L.MICROMENU_ADD_ERR_DUP)
-        end
+        local L = Toolbox.L or {}
+        Toolbox.Chat.PrintAddonMessage(L.MICROMENU_MMADD_REMOVED or "")
         return
       end
       Toolbox.SettingsHost:Open()

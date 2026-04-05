@@ -1,6 +1,6 @@
-# WoWPlugin（工具箱）
+﻿# WoWPlugin（工具箱）
 
-魔兽世界 **正式服（Retail）** 插件工程：统一入口、可扩展模块。
+魔兽世界 **正式服（Retail）** 插件工程：统一入口、可扩展模块（`RegisterModule`）。
 
 ## 安装
 
@@ -23,22 +23,28 @@
 
 ## 功能概览
 
-- **窗口拖动**：示例面板可拖；存档在 `ToolboxDB`。
-- **微型菜单面板**：白名单内暴雪主界面可拖（见 `Modules/MicroMenuPanels.lua`）。
-- **Tooltip 位置**：默认 / 贴近鼠标 / 跟随鼠标。
-- **聊天提示**：加载完成后默认聊天框一行提示（**聊天提示**模块，可关）。
-- **副本进度**：锁定列表、首领、坐骑与掉落节选（`C_EncounterJournal`）；**`/toolbox instances`** 或 **`/toolbox cd`** 打开面板。
-- **入口**：ESC 游戏菜单「工具箱」、系统 **选项 → 插件 → 工具箱**、命令 **`/toolbox`**。
+- **窗口拖动（mover）**：其它插件可通过 `Toolbox.Mover.RegisterFrame` 接入；本插件可选拖动暴雪顶层窗口（`ShowUIPanel` 路径 + 标题栏，接近 BlizzMove）；内置名单见 `Modules/Mover.lua` 中 `PANEL_KEYS`。旧「微型菜单面板」设置已迁移至 `modules.mover`。
+- **Tooltip 位置**：默认 / 贴近鼠标 / 跟随（`TooltipAnchor` + `Core/Tooltip.lua`）。
+- **聊天提示**：加载完成后在默认聊天框一行提示（可关）。
+- **冒险手册**：**`/toolbox instances`**、**`/toolbox cd`**、**`/toolbox saved`** 会尝试打开冒险手册；在地下城/团队副本列表旁可勾选 **仅坐骑**（模块 `ej_mount_filter`），按手册战利品筛掉无坐骑掉落的副本。
+- **入口**：ESC 游戏菜单「工具箱」、系统 **选项 → 插件 → 工具箱**、命令 **`/toolbox`**（无参数打开设置）。
+
+## 设置
+
+- 界面语言：设置页顶部 **自动 / 简体中文 / English**，存于 `ToolboxDB.global.locale`。
+- `Toolbox` 在正式服 `Settings` 中注册为**主类目总览页**，各功能与“关于”均作为**真实子页面**显示。
+- 每个功能页面统一提供：**启用开关**、**调试开关**、**清理并重建**，再加上该功能自己的专属设置区。
 
 ## 文档
 
 | 文档 | 说明 |
 |------|------|
-| [AGENTS.md](AGENTS.md) | AI/协作者入口（含 **代码须含注释** 等约束） |
-| [docs/Toolbox-addon-design.md](docs/Toolbox-addon-design.md) | 总设计 |
-| [docs/AI-ONBOARDING.md](docs/AI-ONBOARDING.md) | 读档与协作约定 |
+| [docs/Toolbox-addon-design.md](docs/Toolbox-addon-design.md) | 总设计：架构、模块契约、`ToolboxDB`、能力边界 |
+| [AGENTS.md](AGENTS.md) | AI / 协作者必读：行为规则、Lua 规范、领域 API、暴雪 UI 挂接 |
+| [docs/AI-ONBOARDING.md](docs/AI-ONBOARDING.md) | 读档顺序、文档分层、最小信息包模板 |
+| [docs/specs/](docs/specs/) | 按需求归档的短期规格 |
 
-源码目录：`Toolbox/Core`（含 **Locales.lua** 多语言）、`Toolbox/UI`、`Toolbox/Modules`。界面文案在 `Locales.lua` 的 `enUS` / `zhCN` 中维护。**设置页顶部**可选「自动 / 简体中文 / English」，存于 `ToolboxDB.global.locale`；选「自动」时按游戏客户端语言选用文案。
+源码目录：`Toolbox/Core`（含 **Locales.lua** `enUS` / `zhCN`）、`Toolbox/UI`、`Toolbox/Modules`。玩家可见字符串集中在 `Locales.lua`，代码里用 `Toolbox.L.键名`。
 
 ## 发布
 

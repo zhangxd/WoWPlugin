@@ -1,4 +1,4 @@
-## Interface: 120000
+﻿## Interface: 120000, 120001
 ## Title: Toolbox
 ## Notes: 工具箱 — 正式服；可扩展模块。
 ## Version: 1.0.0
@@ -11,18 +11,19 @@ Core\Locales.lua
 Core\DB.lua
 Core\Chat.lua
 Core\Tooltip.lua
-Core\LockoutsFacade.lua
-Core\EncounterJournalFacade.lua
-Core\MountJournalFacade.lua
-Core\ItemFacade.lua
-Core\MapFacade.lua
+Core\Lockouts.lua
+Core\EncounterJournal.lua
+Core\MountJournal.lua
+Core\DungeonRaidDirectory.lua
+Core\Item.lua
+Core\Map.lua
 Core\ModuleRegistry.lua
 UI\SettingsHost.lua
 Modules\Mover.lua
 Modules\MicroMenuPanels.lua
 Modules\TooltipAnchor.lua
 Modules\ChatNotify.lua
-Modules\SavedInstancesData.lua
-Modules\SavedInstancesEJ.lua
-Modules\SavedInstances.lua
+Modules\MinimapButton.lua
+Modules\DungeonRaidDirectory.lua
+Modules\EJMountFilter.lua
 Core\Bootstrap.lua

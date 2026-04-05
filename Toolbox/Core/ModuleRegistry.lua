@@ -3,6 +3,13 @@
   Bootstrap 在 ADDON_LOADED 里 RunOnModuleLoad，PLAYER_LOGIN 里 RunOnModuleEnable。
   dependencies 用于拓扑排序：被依赖的模块先执行。
   模块定义可含 nameKey（对应 Toolbox.L 键），由 SettingsHost 显示本地化标题。
+  设置页相关约定：
+  - settingsIntroKey：页面简介文案键
+  - settingsOrder：子页面顺序（数字越小越靠前）
+  - RegisterSettings(box)：仅绘制模块专属设置区
+  - OnEnabledSettingChanged(enabled)：公共启用开关变化后同步模块状态
+  - OnDebugSettingChanged(enabled)：公共调试开关变化后同步模块状态
+  - ResetToDefaultsAndRebuild()：公共“清理并重建”入口
 ]]
 
 local list = {}

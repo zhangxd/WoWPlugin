@@ -44,7 +44,7 @@ cd d:\WoWPlugin
 指定 AddOns 路径（自动查找失败时）：
 
 ```powershell
-.\scripts\Release.ps1 -AddonPath "D:\World of Warcraft\_retail_\Interface\AddOns"
+.\scripts\Release.ps1 -AddonPath "<你的路径>\_retail_\Interface\AddOns"
 ```
 
 **自动查找顺序**：环境变量 `WOW_RETAIL_ADDONS` → 注册表 `InstallPath`（若已指向 `_retail_` 则拼 `Interface\AddOns`）→ `Program Files` 下常见路径。
@@ -72,7 +72,7 @@ cd d:\WoWPlugin
 | 原因 | 说明 |
 |------|------|
 | **本机没装正式服** | 只装了怀旧服时，路径是 `_classic_` 等，不是 `_retail_\Interface\AddOns`。 |
-| **安装位置不在默认列表** | 只试了环境变量、几处注册表、`C:\Program Files*`，以及 **D/E/F 盘**下若干常见子路径。装在其他盘符或深目录（如 `D:\Blizzard\WoW\...`）可能探测不到。 |
+| **安装位置不在默认列表** | 脚本仅探测环境变量、注册表及常见标准路径。若安装位置特殊，请使用环境变量 `WOW_RETAIL_ADDONS` 或 `-AddonPath` 参数手动指定。 |
 | **注册表没有 InstallPath** | 部分拷贝客户端、绿色版或从未用战网安装，可能没有暴雪标准注册表项。 |
 | **路径存在但拼错** | 必须是**已存在**的文件夹，且路径以 `\AddOns` 结尾（大小写不敏感）。 |
 

@@ -6,26 +6,34 @@
 Toolbox.RegisterModule({
   id = "tooltip_anchor",
   nameKey = "MODULE_TOOLTIP",
+  settingsIntroKey = "MODULE_TOOLTIP_INTRO",
+  settingsOrder = 40,
   OnModuleLoad = function()
     Toolbox.Tooltip.InstallDefaultAnchorHook()
   end,
   OnModuleEnable = function()
     Toolbox.Tooltip.RefreshDriver()
   end,
+  OnEnabledSettingChanged = function(enabled)
+    local L = Toolbox.L or {}
+    local key = enabled and "SETTINGS_MODULE_ENABLED_FMT" or "SETTINGS_MODULE_DISABLED_FMT"
+    Toolbox.Chat.PrintAddonMessage(string.format(L[key] or "%s", L.MODULE_TOOLTIP or "tooltip_anchor"))
+    Toolbox.Tooltip.RefreshDriver()
+  end,
+  OnDebugSettingChanged = function(enabled)
+    local L = Toolbox.L or {}
+    local key = enabled and "SETTINGS_MODULE_DEBUG_ON_FMT" or "SETTINGS_MODULE_DEBUG_OFF_FMT"
+    Toolbox.Chat.PrintAddonMessage(string.format(L[key] or "%s", L.MODULE_TOOLTIP or "tooltip_anchor"))
+    Toolbox.Tooltip.RefreshDriver()
+  end,
+  ResetToDefaultsAndRebuild = function()
+    Toolbox.DB.ResetModule("tooltip_anchor")
+    Toolbox.Tooltip.RefreshDriver()
+  end,
   RegisterSettings = function(box)
     local L = Toolbox.L
     local db = Toolbox.DB.GetModule("tooltip_anchor")
     local y = 0
-
-    local en = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
-    en:SetPoint("TOPLEFT", 0, y)
-    en.Text:SetText(L.TOOLTIP_ENABLE)
-    en:SetChecked(db.enabled)
-    en:SetScript("OnClick", function(self)
-      db.enabled = self:GetChecked()
-      Toolbox.Tooltip.RefreshDriver()
-    end)
-    y = y - 32
 
     local modeButtons = {}
     local function setMode(mode)
@@ -51,7 +59,6 @@ Toolbox.RegisterModule({
 
     makeMode("default", L.TOOLTIP_MODE_DEFAULT)
     makeMode("cursor", L.TOOLTIP_MODE_CURSOR)
-    makeMode("follow", L.TOOLTIP_MODE_FOLLOW)
 
     setMode(db.mode or "default")
 
@@ -67,6 +74,7 @@ Toolbox.RegisterModule({
     ox:SetScript("OnEnterPressed", function(self)
       db.offsetX = tonumber(self:GetText()) or 0
       self:ClearFocus()
+      Toolbox.Tooltip.RefreshDriver()
     end)
     y = y - 32
 
@@ -81,6 +89,7 @@ Toolbox.RegisterModule({
     oy:SetScript("OnEnterPressed", function(self)
       db.offsetY = tonumber(self:GetText()) or 0
       self:ClearFocus()
+      Toolbox.Tooltip.RefreshDriver()
     end)
     y = y - 40
 
@@ -94,3 +103,4 @@ Toolbox.RegisterModule({
     box.realHeight = math.abs(y) + 8
   end,
 })
+

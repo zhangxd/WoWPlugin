@@ -1,5 +1,5 @@
 --[[
-  坐骑收藏门面：仅使用 C_MountJournal（12.0+），供副本掉落等模块查询「物品是否为坐骑 / 是否已学会」。
+  坐骑收藏（领域对外 API）：仅使用 C_MountJournal（12.0+），供副本掉落等模块查询「物品是否为坐骑 / 是否已学会」。
 ]]
 
 Toolbox.MountJournal = Toolbox.MountJournal or {}

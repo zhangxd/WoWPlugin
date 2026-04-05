@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   将 Toolbox 打成 zip，并可选择复制到正式服 Interface\AddOns。
 
@@ -33,7 +33,7 @@
   .\scripts\Release.ps1
   .\scripts\Release.ps1 -ShowAddonSearch -SkipDeploy
   .\scripts\Release.ps1 -SkipDeploy
-  .\scripts\Release.ps1 -AddonPath "D:\World of Warcraft\_retail_\Interface\AddOns"
+  .\scripts\Release.ps1 -AddonPath "<你的路径>\_retail_\Interface\AddOns"
   .\scripts\Release.ps1 -SkipZip
 #>
 
@@ -233,7 +233,7 @@ if ($doDeploy) {
 未找到正式服 Interface\AddOns，已跳过复制（zip 若未 SkipZip 则仍已生成）。
 请任选其一：
   1) 设置用户环境变量 WOW_RETAIL_ADDONS = 你的 ...\_retail_\Interface\AddOns 完整路径
-  2) 运行: .\scripts\Release.ps1 -AddonPath `"D:\你的路径\_retail_\Interface\AddOns`"
+  2) 运行: .\scripts\Release.ps1 -AddonPath `"<你的路径>\_retail_\Interface\AddOns`"
   3) 若只想打 zip 不需要复制: 加 -SkipDeploy
 "@
         if ($SkipZip) {

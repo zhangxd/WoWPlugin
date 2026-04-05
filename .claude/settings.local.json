@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(grep -rn \"Settings\\\\\\\\.Register\\\\|RegisterCanvasLayout\" /d/WoWPlugin/Toolbox --include=\"*.lua\")",
+      "Skill(update-config)"
+    ]
+  }
+}

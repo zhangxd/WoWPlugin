@@ -1,5 +1,5 @@
 --[[
-  世界地图门面：优先 C_Map.OpenWorldMap（现代客户端），避免直接依赖可能变更的全局 OpenWorldMap。
+  世界地图（领域对外 API）：优先 C_Map.OpenWorldMap（现代客户端），避免直接依赖可能变更的全局 OpenWorldMap。
 ]]
 
 Toolbox.Map = Toolbox.Map or {}
