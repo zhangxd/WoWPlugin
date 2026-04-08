@@ -48,7 +48,7 @@ function Toolbox.Tooltip.InstallDefaultAnchorHook()
   hooked = true
   hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tooltip, parent)
     local db = getDb()
-    if not db or db.enabled == false or db.mode ~= "cursor" then
+    if not db or db.enabled == false or (db.mode ~= "cursor" and db.mode ~= "follow") then
       return
     end
     if not tooltip or not parent then

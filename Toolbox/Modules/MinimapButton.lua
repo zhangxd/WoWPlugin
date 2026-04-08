@@ -1337,7 +1337,16 @@ Toolbox.RegisterModule({
       for id in pairs(flyoutCatalog) do
         t[#t + 1] = id
       end
-      table.sort(t)
+      table.sort(t, function(leftId, rightId)
+        local leftDef = flyoutCatalog[leftId]
+        local rightDef = flyoutCatalog[rightId]
+        local leftOrder = tonumber(leftDef and leftDef.order) or 100
+        local rightOrder = tonumber(rightDef and rightDef.order) or 100
+        if leftOrder ~= rightOrder then
+          return leftOrder < rightOrder
+        end
+        return leftId < rightId
+      end)
       return t
     end
 

@@ -129,6 +129,43 @@ def validate_encounter_journal_regressions() -> None:
     # 关闭叠加后应主动清理已绘制文本，避免残留显示。
     require_contains(text, "function LockoutOverlay:clearAllFrames()", "encounter journal clear overlay helper")
     require_contains(text, "self:clearAllFrames()", "encounter journal clears overlays when disabled")
+    # 模块禁用后应停用高频更新事件，避免后台空调度。
+    require_contains(text, 'eventFrame:UnregisterEvent("UPDATE_INSTANCE_INFO")', "encounter journal unregisters lockout event when disabled")
+    require_contains(text, 'eventFrame:RegisterEvent("UPDATE_INSTANCE_INFO")', "encounter journal re-registers lockout event when enabled")
+    require_contains(text, "if isModuleEnabled() then", "encounter journal guards update callbacks by enabled state")
+
+
+def validate_mover_regressions() -> None:
+    text = read_text("Toolbox", "Modules", "Mover.lua")
+    # RegisterFrame 在模块关闭时也要登记，便于后续重新开启自动生效。
+    require_contains(text, "pushAddonRegistry(frame, key, opts)", "mover pushes addon registry in RegisterFrame")
+    require_contains(text, "if db.enabled == false then", "mover register disabled guard")
+    if text.find("pushAddonRegistry(frame, key, opts)") > text.find("if db.enabled == false then"):
+        raise AssertionError("mover should push addon registry before disabled guard")
+    # 模块关闭时除暴雪面板外，还要关闭已登记自定义 frame 的拖动行为。
+    require_contains(text, "disableAddonRegisteredFrames()", "mover disables addon-registered drags when disabled")
+
+
+def validate_tooltip_anchor_regressions() -> None:
+    module_text = read_text("Toolbox", "Modules", "TooltipAnchor.lua")
+    core_text = read_text("Toolbox", "Core", "API", "Tooltip.lua")
+    # 设置页应暴露 follow 模式，和 locale 文案保持一致。
+    require_contains(module_text, 'makeMode("follow"', "tooltip anchor follow mode option")
+    # 核心锚点逻辑应识别 follow 模式（与 cursor 同行为兼容）。
+    require_contains(
+        core_text,
+        'db.mode ~= "cursor" and db.mode ~= "follow"',
+        "tooltip core treats follow mode as active cursor anchor",
+    )
+
+
+def validate_minimap_button_regressions() -> None:
+    text = read_text("Toolbox", "Modules", "MinimapButton.lua")
+    # flyout 目录排序应先看 order，再按 id 兜底，避免声明顺序与显示顺序不一致。
+    require_contains(text, "local leftOrder = tonumber(leftDef and leftDef.order) or 100", "minimap flyout order sort left")
+    require_contains(text, "local rightOrder = tonumber(rightDef and rightDef.order) or 100", "minimap flyout order sort right")
+    require_contains(text, "if leftOrder ~= rightOrder then", "minimap flyout order priority compare")
+    require_contains(text, "return leftId < rightId", "minimap flyout order tie-break by id")
 
 
 def main() -> int:
@@ -139,6 +176,9 @@ def main() -> int:
     validate_modules()
     validate_toc()
     validate_encounter_journal_regressions()
+    validate_mover_regressions()
+    validate_tooltip_anchor_regressions()
+    validate_minimap_button_regressions()
     print("OK: settings subcategories structure validated")
     return 0
 

@@ -446,6 +446,14 @@ function RefreshScheduler:schedule(reason)
   self:execute()
 end
 
+function RefreshScheduler:cancel()
+  if self.timer and self.timer.Cancel then
+    self.timer:Cancel()
+  end
+  self.timer = nil
+  self.token = (self.token or 0) + 1
+end
+
 function RefreshScheduler:execute()
   local success, err = pcall(refreshAll)
   if not success then
@@ -503,13 +511,24 @@ end
 --- 事件管理器
 local eventFrame = nil
 
+local function setLockoutUpdateEventEnabled(enabled)
+  if not eventFrame then
+    return
+  end
+  if enabled then
+    eventFrame:RegisterEvent("UPDATE_INSTANCE_INFO")
+  else
+    eventFrame:UnregisterEvent("UPDATE_INSTANCE_INFO")
+  end
+end
+
 local function registerIntegration()
   if eventFrame then return end
 
   eventFrame = CreateFrame("Frame", "ToolboxEncounterJournalHost")
   eventFrame:RegisterEvent("ADDON_LOADED")
-  eventFrame:RegisterEvent("UPDATE_INSTANCE_INFO")
   eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+  setLockoutUpdateEventEnabled(isModuleEnabled())
 
   eventFrame:SetScript("OnEvent", function(self, event, name)
     if event == "ADDON_LOADED" and name == "Blizzard_EncounterJournal" then
@@ -517,7 +536,9 @@ local function registerIntegration()
       initHooks()
       RequestRaidInfo()
     elseif event == "UPDATE_INSTANCE_INFO" then
-      RefreshScheduler:schedule("lockout_update")
+      if isModuleEnabled() then
+        RefreshScheduler:schedule("lockout_update")
+      end
     elseif event == "PLAYER_ENTERING_WORLD" then
       self:UnregisterEvent("PLAYER_ENTERING_WORLD")
       RequestRaidInfo()
@@ -547,6 +568,7 @@ Toolbox.RegisterModule({
   end,
 
   OnModuleEnable = function()
+    setLockoutUpdateEventEnabled(true)
     MountFilter:syncCheckbox()
     if type(_G.EncounterJournal_ListInstances) == "function" then
       pcall(_G.EncounterJournal_ListInstances)
@@ -557,6 +579,13 @@ Toolbox.RegisterModule({
     local loc = Toolbox.L or {}
     local msgKey = enabled and "SETTINGS_MODULE_ENABLED_FMT" or "SETTINGS_MODULE_DISABLED_FMT"
     Toolbox.Chat.PrintAddonMessage(string.format(loc[msgKey] or "%s", loc.MODULE_ENCOUNTER_JOURNAL or MODULE_ID))
+    setLockoutUpdateEventEnabled(enabled)
+    if enabled then
+      RequestRaidInfo()
+    else
+      RefreshScheduler:cancel()
+      LockoutOverlay:clearAllFrames()
+    end
     MountFilter:syncCheckbox()
     if type(_G.EncounterJournal_ListInstances) == "function" then
       pcall(_G.EncounterJournal_ListInstances)
