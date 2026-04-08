@@ -238,17 +238,48 @@ local function refreshAddonRegisteredFramesOnly()
   end
 end
 
+--- 关闭单个 RegisterFrame 自定义窗体的拖动行为（不影响其业务逻辑）。
+---@param frame Frame
+---@param opts table|nil
+local function disableAddonFrameDrag(frame, opts)
+  if not frame then
+    return
+  end
+  opts = opts or {}
+  stripDragSurface(opts.dragRegion)
+  stripDragSurface(frame)
+  stripDragSurface(frame.__toolbox_mm_draglayer)
+  if frame.__toolbox_mm_draglayer then
+    pcall(function()
+      frame.__toolbox_mm_draglayer:Hide()
+    end)
+  end
+end
+
+--- 关闭所有 RegisterFrame 已登记窗体的拖动行为（用于模块禁用态）。
+local function disableAddonRegisteredFrames()
+  for i = 1, #addonDragRegistry do
+    local e = addonDragRegistry[i]
+    if e and e.frame then
+      pcall(function()
+        disableAddonFrameDrag(e.frame, e.opts)
+      end)
+    end
+  end
+end
+
 --- 为本插件自建框体启用拖动与位置记忆；战斗中是否可拖由 `allowDragInCombat` 与 `shouldBlockDragDueToCombat` 决定。
 ---@param frame Frame 目标框体
 ---@param key string 存档键
 ---@param opts table|nil 可选；`dragRegion` 为仅作为拖动命中区的子 Region（指定时忽略命中模式）
 function Toolbox.Mover.RegisterFrame(frame, key, opts)
   opts = opts or {}
+  pushAddonRegistry(frame, key, opts)
   local db = getMoverDb()
   if db.enabled == false then
+    disableAddonFrameDrag(frame, opts)
     return
   end
-  pushAddonRegistry(frame, key, opts)
   applyAddonFrameDrag(frame, key, opts)
 end
 
@@ -1142,6 +1173,7 @@ Toolbox.RegisterModule({
         enteringWorldHookFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
       end
       blizzardRunHooks()
+      refreshAddonRegisteredFramesOnly()
     else
       -- 持久监听 Frame 禁用时注销，避免模块关闭后仍触发回调
       if addonLoadedHookFrame then
@@ -1151,6 +1183,7 @@ Toolbox.RegisterModule({
         enteringWorldHookFrame:UnregisterEvent("PLAYER_ENTERING_WORLD")
       end
       disableVisibleBlizzardPanels()
+      disableAddonRegisteredFrames()
     end
   end,
   OnDebugSettingChanged = function(enabled)

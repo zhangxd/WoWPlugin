@@ -20,6 +20,7 @@ Core\Foundation\ModuleRegistry.lua
 Core\API\Chat.lua
 Core\API\Tooltip.lua
 Core\API\EncounterJournal.lua
+Core\API\QuestlineProgress.lua
 
 # ============================================================================
 # UI（表现层）
@@ -40,6 +41,7 @@ Modules\MinimapButton.lua
 # ============================================================================
 Data\InstanceMapIDs.lua
 Data\InstanceDrops_Mount.lua
+Data\InstanceQuestlines.lua
 
 # ============================================================================
 # Modules（功能模块 - 依赖 Data）

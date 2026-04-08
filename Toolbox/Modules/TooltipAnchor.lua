@@ -59,6 +59,7 @@ Toolbox.RegisterModule({
 
     makeMode("default", L.TOOLTIP_MODE_DEFAULT)
     makeMode("cursor", L.TOOLTIP_MODE_CURSOR)
+    makeMode("follow", L.TOOLTIP_MODE_FOLLOW)
 
     setMode(db.mode or "default")
 
@@ -73,4 +74,3 @@ Toolbox.RegisterModule({
     box.realHeight = math.abs(y) + 8
   end,
 })
-

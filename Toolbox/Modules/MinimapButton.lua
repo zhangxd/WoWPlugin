@@ -16,6 +16,9 @@ Toolbox.MinimapButton = Toolbox.MinimapButton or {}
 
 local MODULE_ID = "minimap_button"
 local launcher
+local minimapCoordsText  -- 小地图坐标文本
+local worldMapCoordsText  -- 大地图左下角坐标文本
+local coordsDriverFrame  -- 坐标刷新驱动 Frame
 --- 悬停展开面板（UIParent 子级，锚在 launcher 左侧）；子级含圆形按钮与「桥接」透明层（缝补与主按钮之间的空隙，避免误触发隐藏）。
 local flyoutFrame
 --- 透明命中层：填补主按钮左缘与展开区右缘之间的缝，使光标移入子按钮时不会先被判定为离开。
@@ -33,6 +36,9 @@ local MINIMAP_ICON_RADIUS_EXTRA = 5
 
 --- 默认角度（度），与 LibDBIcon 默认一致。
 local DEFAULT_MINIMAP_ANGLE = 225
+local MINIMAP_COORDS_ANCHOR_TOP = "top"
+local MINIMAP_COORDS_ANCHOR_BOTTOM = "bottom"
+local COORDS_UPDATE_INTERVAL_SEC = 0.1
 
 local rad, cos, sin, sqrt, max, min, deg, atan2 = math.rad, math.cos, math.sin, math.sqrt, math.max, math.min, math.deg, math.atan2
 
@@ -179,6 +185,240 @@ local function applyLauncherPosition()
     angle = DEFAULT_MINIMAP_ANGLE
   end
   updateLauncherPositionFromAngle(launcher, angle)
+end
+
+--- 返回小地图坐标锚点（top / bottom）；非法值回退 bottom 并写档。
+---@return string
+local function getMinimapCoordsAnchor()
+  local db = Toolbox.Config.GetModule(MODULE_ID)  -- 小地图按钮模块存档
+  local anchor = db.minimapCoordsAnchor  -- 小地图坐标锚点字符串
+  if anchor ~= MINIMAP_COORDS_ANCHOR_TOP and anchor ~= MINIMAP_COORDS_ANCHOR_BOTTOM then
+    anchor = MINIMAP_COORDS_ANCHOR_BOTTOM
+    db.minimapCoordsAnchor = anchor
+  end
+  return anchor
+end
+
+--- 获取玩家当前最佳地图 id。
+---@return number|nil
+local function getPlayerBestMapID()
+  if not C_Map or type(C_Map.GetBestMapForUnit) ~= "function" then
+    return nil
+  end
+  local ok, mapID = pcall(C_Map.GetBestMapForUnit, "player")
+  if not ok or type(mapID) ~= "number" or mapID <= 0 then
+    return nil
+  end
+  return mapID
+end
+
+--- 读取指定地图下玩家归一化坐标（0~1）。
+---@param mapID number|nil
+---@return number|nil, number|nil
+local function getPlayerNormalizedCoords(mapID)
+  if type(mapID) ~= "number" or mapID <= 0 then
+    return nil, nil
+  end
+  if not C_Map or type(C_Map.GetPlayerMapPosition) ~= "function" then
+    return nil, nil
+  end
+  local ok, mapPos = pcall(C_Map.GetPlayerMapPosition, mapID, "player")
+  if not ok or not mapPos then
+    return nil, nil
+  end
+  local posX = mapPos.x  -- 玩家坐标 X（0~1）
+  local posY = mapPos.y  -- 玩家坐标 Y（0~1）
+  if type(posX) ~= "number" or type(posY) ~= "number" then
+    return nil, nil
+  end
+  return posX, posY
+end
+
+--- 读取当前大地图显示地图 id。
+---@return number|nil
+local function getWorldMapShownMapID()
+  local worldMapFrame = _G.WorldMapFrame  -- 大地图根 Frame
+  if not worldMapFrame or type(worldMapFrame.GetMapID) ~= "function" then
+    return nil
+  end
+  local ok, mapID = pcall(worldMapFrame.GetMapID, worldMapFrame)
+  if not ok or type(mapID) ~= "number" or mapID <= 0 then
+    return nil
+  end
+  return mapID
+end
+
+--- 读取大地图当前鼠标归一化坐标（0~1）；鼠标不在地图区域时返回 nil。
+---@return number|nil, number|nil
+local function getWorldMapMouseNormalizedCoords()
+  local worldMapFrame = _G.WorldMapFrame  -- 大地图根 Frame
+  if not worldMapFrame or not worldMapFrame:IsShown() then
+    return nil, nil
+  end
+  local scrollFrame = worldMapFrame.ScrollContainer  -- 地图滚动容器
+  if not scrollFrame or type(scrollFrame.GetNormalizedCursorPosition) ~= "function" then
+    return nil, nil
+  end
+  if type(scrollFrame.IsMouseOver) == "function" and not scrollFrame:IsMouseOver() then
+    return nil, nil
+  end
+  local ok, posX, posY = pcall(scrollFrame.GetNormalizedCursorPosition, scrollFrame)
+  if not ok or type(posX) ~= "number" or type(posY) ~= "number" then
+    return nil, nil
+  end
+  if posX < 0 or posX > 1 or posY < 0 or posY > 1 then
+    return nil, nil
+  end
+  return posX, posY
+end
+
+--- 将归一化坐标格式化为百分比文本（保留 1 位小数）。
+---@param posX number|nil
+---@param posY number|nil
+---@return string
+local function formatPercentCoords(posX, posY)
+  local loc = Toolbox.L or {}
+  local unknown = loc.WORLD_MAP_COORDS_UNKNOWN or "--, --"
+  if type(posX) ~= "number" or type(posY) ~= "number" then
+    return unknown
+  end
+  return string.format("%.1f, %.1f", posX * 100, posY * 100)
+end
+
+--- 确保小地图坐标文本已创建并按设置锚点摆放。
+---@return FontString|nil
+local function ensureMinimapCoordsText()
+  local minimapFrame = _G.Minimap  -- 小地图根 Frame
+  if not minimapFrame then
+    return nil
+  end
+  if not minimapCoordsText then
+    minimapCoordsText = minimapFrame:CreateFontString("ToolboxMinimapCoordsText", "OVERLAY", "GameFontNormalSmall")
+    minimapCoordsText:SetWidth(170)
+    minimapCoordsText:SetJustifyH("CENTER")
+    minimapCoordsText:SetTextColor(1, 0.82, 0.18, 1)
+  end
+  minimapCoordsText:ClearAllPoints()
+  local anchor = getMinimapCoordsAnchor()
+  if anchor == MINIMAP_COORDS_ANCHOR_TOP then
+    minimapCoordsText:SetPoint("BOTTOM", minimapFrame, "TOP", 0, 2)
+  else
+    minimapCoordsText:SetPoint("TOP", minimapFrame, "BOTTOM", 0, -2)
+  end
+  return minimapCoordsText
+end
+
+--- 确保大地图左下角坐标文本已创建并锚定。
+---@return FontString|nil
+local function ensureWorldMapCoordsText()
+  local worldMapFrame = _G.WorldMapFrame  -- 大地图根 Frame
+  if not worldMapFrame then
+    return nil
+  end
+  local anchorParent = worldMapFrame.BorderFrame or worldMapFrame  -- 左下角锚点父级
+  if not anchorParent then
+    return nil
+  end
+  if worldMapCoordsText and worldMapCoordsText:GetParent() ~= anchorParent then
+    worldMapCoordsText:SetParent(anchorParent)
+    worldMapCoordsText:ClearAllPoints()
+  end
+  if not worldMapCoordsText then
+    worldMapCoordsText = anchorParent:CreateFontString("ToolboxWorldMapCoordsText", "OVERLAY", "GameFontHighlightSmall")
+    worldMapCoordsText:SetWidth(420)
+    worldMapCoordsText:SetJustifyH("LEFT")
+    worldMapCoordsText:SetTextColor(1, 0.82, 0.18, 1)
+  end
+  worldMapCoordsText:ClearAllPoints()
+  worldMapCoordsText:SetPoint("BOTTOMLEFT", anchorParent, "BOTTOMLEFT", 16, 10)
+  return worldMapCoordsText
+end
+
+--- 刷新小地图坐标文本（玩家坐标）。
+local function updateMinimapCoordsText()
+  local db = Toolbox.Config.GetModule(MODULE_ID)  -- 小地图按钮模块存档
+  local coordsText = ensureMinimapCoordsText()  -- 小地图坐标文本对象
+  if not coordsText then
+    return
+  end
+  if db.enabled == false or db.showCoordsOnMinimap == false then
+    coordsText:Hide()
+    return
+  end
+  local mapID = getPlayerBestMapID()
+  local playerX, playerY = getPlayerNormalizedCoords(mapID)
+  local loc = Toolbox.L or {}
+  coordsText:SetText(string.format(loc.MINIMAP_COORDS_PLAYER_FMT or "Player: %s", formatPercentCoords(playerX, playerY)))
+  coordsText:Show()
+end
+
+--- 刷新大地图左下角坐标文本（玩家坐标 + 鼠标坐标）。
+local function updateWorldMapCoordsText()
+  local db = Toolbox.Config.GetModule(MODULE_ID)  -- 小地图按钮模块存档
+  if db.enabled == false then
+    if worldMapCoordsText then
+      worldMapCoordsText:Hide()
+    end
+    return
+  end
+  local worldMapFrame = _G.WorldMapFrame  -- 大地图根 Frame
+  if not worldMapFrame or not worldMapFrame:IsShown() then
+    if worldMapCoordsText then
+      worldMapCoordsText:Hide()
+    end
+    return
+  end
+  local coordsText = ensureWorldMapCoordsText()  -- 大地图坐标文本对象
+  if not coordsText then
+    return
+  end
+  local mapID = getWorldMapShownMapID() or getPlayerBestMapID()
+  local playerX, playerY = getPlayerNormalizedCoords(mapID)
+  local mouseX, mouseY = getWorldMapMouseNormalizedCoords()
+  local loc = Toolbox.L or {}
+  local playerText = string.format(loc.WORLD_MAP_COORDS_PLAYER_FMT or "Player: %s", formatPercentCoords(playerX, playerY))
+  local mouseText = string.format(loc.WORLD_MAP_COORDS_MOUSE_FMT or "Mouse: %s", formatPercentCoords(mouseX, mouseY))
+  coordsText:SetText(playerText .. "    " .. mouseText)
+  coordsText:Show()
+end
+
+--- 停止坐标刷新驱动并隐藏相关文本。
+local function stopCoordinateDisplays()
+  if coordsDriverFrame then
+    coordsDriverFrame:SetScript("OnUpdate", nil)
+    coordsDriverFrame._toolboxCoordElapsed = 0
+  end
+  if minimapCoordsText then
+    minimapCoordsText:Hide()
+  end
+  if worldMapCoordsText then
+    worldMapCoordsText:Hide()
+  end
+end
+
+--- 刷新坐标显示生命周期：模块启用时启动节流刷新，禁用时关闭。
+local function refreshCoordinateDisplays()
+  local db = Toolbox.Config.GetModule(MODULE_ID)  -- 小地图按钮模块存档
+  if db.enabled == false then
+    stopCoordinateDisplays()
+    return
+  end
+  if not coordsDriverFrame then
+    coordsDriverFrame = CreateFrame("Frame", "ToolboxMapCoordDriver", UIParent)
+  end
+  coordsDriverFrame._toolboxCoordElapsed = COORDS_UPDATE_INTERVAL_SEC
+  coordsDriverFrame:SetScript("OnUpdate", function(self, elapsed)
+    local elapsedTotal = (self._toolboxCoordElapsed or 0) + elapsed
+    if elapsedTotal < COORDS_UPDATE_INTERVAL_SEC then
+      self._toolboxCoordElapsed = elapsedTotal
+      return
+    end
+    self._toolboxCoordElapsed = 0
+    updateMinimapCoordsText()
+    updateWorldMapCoordsText()
+  end)
+  updateMinimapCoordsText()
+  updateWorldMapCoordsText()
 end
 
 --- 与主按钮同 31×31。横向贴靠距离 flyoutLauncherGap；竖直间距 flyoutPad / flyoutGap（设置页可改，重建时读取）。
@@ -426,6 +666,9 @@ local function showFlyoutButtonTooltip(owner, def, L)
     end
   elseif type(def.tooltip) == "string" and def.tooltip ~= "" then
     GameTooltip:AddLine(def.tooltip, 0.82, 0.88, 1, true)
+  end
+  if type(def.augmentTooltip) == "function" then
+    pcall(def.augmentTooltip)
   end
   GameTooltip:Show()
 end
@@ -784,23 +1027,24 @@ end
 
 --- 刷新显示与位置。
 function Toolbox.MinimapButton.Refresh()
-  if not ensureLauncher() then
-    return
+  local launcherReady = ensureLauncher()  -- 小地图按钮是否已创建
+  if launcherReady then
+    migrateLegacyMinimapDb()
+    applyLauncherPosition()
+    if shouldShowLauncher() then
+      launcher:Show()
+    else
+      hideFlyoutPanel()
+      launcher:Hide()
+    end
+    -- 与 ensureLauncher 内创建链一致；保证提交间距后必有 flyoutFrame 可重建（避免仅 rebuild 时早退）
+    ensureFlyoutFrame()
+    rebuildFlyoutButtons()
+    if launcher and launcher._tb_bg then
+      applyLauncherSkin(launcher)
+    end
   end
-  migrateLegacyMinimapDb()
-  applyLauncherPosition()
-  if shouldShowLauncher() then
-    launcher:Show()
-  else
-    hideFlyoutPanel()
-    launcher:Hide()
-  end
-  -- 与 ensureLauncher 内创建链一致；保证提交间距后必有 flyoutFrame 可重建（避免仅 rebuild 时早退）
-  ensureFlyoutFrame()
-  rebuildFlyoutButtons()
-  if launcher and launcher._tb_bg then
-    applyLauncherSkin(launcher)
-  end
+  refreshCoordinateDisplays()
 end
 
 local clusterHooked
@@ -881,6 +1125,50 @@ Toolbox.RegisterModule({
     hint:SetJustifyH("LEFT")
     hint:SetText(L.MINIMAP_BUTTON_SETTING_HINT or "")
     y = y - math.max(40, math.ceil((hint:GetStringHeight() or 0) + 12))
+
+    local showCoordsCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
+    showCoordsCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
+    showCoordsCheck.Text:SetText(L.MINIMAP_COORDS_SETTING_SHOW or "")
+    showCoordsCheck:SetChecked(db.showCoordsOnMinimap ~= false)
+    showCoordsCheck:SetScript("OnClick", function(self)
+      db.showCoordsOnMinimap = self:GetChecked() == true
+      refreshCoordinateDisplays()
+      Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(MODULE_ID))
+    end)
+    y = y - 30
+
+    local coordsAnchorLabel = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    coordsAnchorLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 28, y)
+    coordsAnchorLabel:SetText(L.MINIMAP_COORDS_SETTING_ANCHOR or "")
+    y = y - 20
+
+    local anchorTopCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
+    anchorTopCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 28, y)
+    anchorTopCheck.Text:SetText(L.MINIMAP_COORDS_SETTING_ANCHOR_TOP or "")
+    local anchorBottomCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
+    anchorBottomCheck:SetPoint("LEFT", anchorTopCheck, "RIGHT", 20, 0)
+    anchorBottomCheck.Text:SetText(L.MINIMAP_COORDS_SETTING_ANCHOR_BOTTOM or "")
+
+    local function syncAnchorChecks()
+      local anchor = getMinimapCoordsAnchor()
+      anchorTopCheck:SetChecked(anchor == MINIMAP_COORDS_ANCHOR_TOP)
+      anchorBottomCheck:SetChecked(anchor == MINIMAP_COORDS_ANCHOR_BOTTOM)
+      local enabled = db.showCoordsOnMinimap ~= false
+      anchorTopCheck:SetEnabled(enabled)
+      anchorBottomCheck:SetEnabled(enabled)
+    end
+    syncAnchorChecks()
+    anchorTopCheck:SetScript("OnClick", function()
+      db.minimapCoordsAnchor = MINIMAP_COORDS_ANCHOR_TOP
+      syncAnchorChecks()
+      refreshCoordinateDisplays()
+    end)
+    anchorBottomCheck:SetScript("OnClick", function()
+      db.minimapCoordsAnchor = MINIMAP_COORDS_ANCHOR_BOTTOM
+      syncAnchorChecks()
+      refreshCoordinateDisplays()
+    end)
+    y = y - 34
 
     if type(db.flyoutSlotIds) ~= "table" or #db.flyoutSlotIds == 0 then
       db.flyoutSlotIds = { "reload_ui" }
@@ -1337,7 +1625,16 @@ Toolbox.RegisterModule({
       for id in pairs(flyoutCatalog) do
         t[#t + 1] = id
       end
-      table.sort(t)
+      table.sort(t, function(leftId, rightId)
+        local leftDef = flyoutCatalog[leftId]
+        local rightDef = flyoutCatalog[rightId]
+        local leftOrder = tonumber(leftDef and leftDef.order) or 100
+        local rightOrder = tonumber(rightDef and rightDef.order) or 100
+        if leftOrder ~= rightOrder then
+          return leftOrder < rightOrder
+        end
+        return leftId < rightId
+      end)
       return t
     end
 
@@ -1658,6 +1955,33 @@ function Toolbox.MinimapButton.RegisterBuiltinFlyoutCatalog()
     titleKey = "MINIMAP_FLYOUT_ADVENTURE_JOURNAL",
     tooltipKey = "MINIMAP_FLYOUT_ADVENTURE_JOURNAL_TOOLTIP",
     icon = "Interface\\Icons\\Achievement_Zone_EasternKingdoms",
+    augmentTooltip = function()
+      local loc = Toolbox.L or {}
+      local sectionTitle = loc.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_TITLE or "Current lockouts"
+      local emptyText = loc.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_EMPTY or "No saved instance lockouts."
+      local moreFmt = loc.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_MORE_FMT or "+%d more..."
+
+      GameTooltip:AddLine(" ")
+      GameTooltip:AddLine(sectionTitle, 1, 0.82, 0.2)
+
+      if not Toolbox.EJ or type(Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines) ~= "function" then
+        GameTooltip:AddLine(emptyText, 0.75, 0.75, 0.75, true)
+        return
+      end
+
+      local lines, overflow = Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines(8)
+      if type(lines) ~= "table" or #lines == 0 then
+        GameTooltip:AddLine(emptyText, 0.75, 0.75, 0.75, true)
+        return
+      end
+
+      for _, line in ipairs(lines) do
+        GameTooltip:AddLine(line, 0.82, 0.88, 1, true)
+      end
+      if type(overflow) == "number" and overflow > 0 then
+        GameTooltip:AddLine(string.format(moreFmt, overflow), 0.6, 0.6, 0.6, true)
+      end
+    end,
     onClick = function()
       pcall(function()
         local ejName = "Blizzard_EncounterJournal"
