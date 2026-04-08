@@ -119,7 +119,7 @@ flowchart TB
 | `Toolbox.MountJournal` | `Core/API/MountJournal.lua` | `C_MountJournal`（坐骑物品、是否已学会）。 |
 | `Toolbox.Item` | `Core/API/Item.lua` | 物品名/链接、`GameTooltip:SetItemByID` 等展示辅助。 |
 | `Toolbox.Map` | `Core/API/Map.lua` | `C_Map.OpenWorldMap` 优先。 |
-| `Toolbox.MinimapButton` | `Modules/MinimapButton.lua` | `RegisterFlyoutEntry(def)` 供其他模块向小地图按钮悬停菜单追加项；`def` 须含 `id`、`label`/`labelKey`、`onClick`。禁止直接操作 `flyoutRegistry` 或 `flyoutSlotIds`。 |
+| `Toolbox.MinimapButton` | `Modules/MinimapButton.lua` | `RegisterFlyoutEntry(def)` 供其他模块向小地图按钮悬停菜单追加项；`def` 至少包含 `id` 与 `onClick`，可选 `titleKey`/`tooltipKey`/`icon`/`order`/`augmentTooltip`（用于在悬停提示中追加动态内容）。禁止直接操作 `flyoutRegistry` 或 `flyoutSlotIds`。 |
 
 **模块间协作原则**
 
@@ -167,7 +167,7 @@ sequenceDiagram
 |------|-----------------|------|------|
 | 窗口拖动（自建 + 可选暴雪） | `mover` | `modules.mover`（`enabled`/`debug`/`frames`/`blizzardDragHitMode`/`allowDragInCombat`）；旧 `micromenu_panels.frames` 一次性迁入 `mover` | 独立子页面：启用、调试、清理并重建、拖动命中模式、战斗中是否允许拖；暴雪顶层仅代码内 `PANEL_KEYS` |
 | Tooltip 锚点 | `tooltip_anchor` | `modules.tooltip_anchor`（`enabled`/`debug`/`mode`/`offsetX`/`offsetY`） | 独立子页面：启用、调试、清理并重建、锚点模式与偏移 |
-| 小地图打开设置按钮 | `minimap_button` | `modules.minimap_button`（`enabled`/`debug`/`showMinimapButton`/`minimapPos`/`buttonShape`/`flyoutExpand`/`flyoutSlotIds`/`flyoutLauncherGap`/`flyoutPad`/`flyoutGap`） | 独立子页面：启用、调试、清理并重建、是否显示小地图按钮、恢复默认位置；款式（圆/方）、展开方式（纵向/横向）、悬停项顺序与功能池拖放、`flyoutSlotIds`；预览区为居中微缩按钮 + 展开示意（缝宽/内边距/项间距拖动，非游戏内角度）；游戏内沿小地图边缘拖动定角；悬停向左展开（扩展见 `RegisterFlyoutEntry`） |
+| 小地图打开设置按钮 | `minimap_button` | `modules.minimap_button`（`enabled`/`debug`/`showMinimapButton`/`minimapPos`/`buttonShape`/`flyoutExpand`/`flyoutSlotIds`/`flyoutLauncherGap`/`flyoutPad`/`flyoutGap`） | 独立子页面：启用、调试、清理并重建、是否显示小地图按钮、恢复默认位置；款式（圆/方）、展开方式（纵向/横向）、悬停项顺序与功能池拖放、`flyoutSlotIds`；预览区为居中微缩按钮 + 展开示意（缝宽/内边距/项间距拖动，非游戏内角度）；游戏内沿小地图边缘拖动定角；悬停向左展开（扩展见 `RegisterFlyoutEntry`）；内置“冒险手册”悬停项通过 `augmentTooltip` 追加当前副本锁定摘要。 |
 | 加载聊天提示 | `chat_notify` | `modules.chat_notify`（`enabled`/`debug`） | 独立子页面：启用、调试、清理并重建、说明文案 |
 | 地下城 / 团队副本共享目录页面与开关 | `dungeon_raid_directory` | `modules.dungeon_raid_directory`（`enabled`/`debug`）+ `global.dungeonRaidDirectory`（`schemaVersion` / `interfaceBuild` / `lastBuildAt` / `tierNames` / `difficultyMeta` / `records`） | 独立子页面：启用、调试、清理并重建、状态、进度、手动重建、调试快照 |
 | 冒险指南仅坐骑筛选 | `ej_mount_filter` | `modules.ej_mount_filter`（`enabled`/`debug`）；掉落判断统一读取 `global.dungeonRaidDirectory.records[*].summary`，并允许目录层按名称补源已知假阴性；仅当**当前页签 + 当前资料片**下全部副本摘要就绪时才启用复选框，勾选后由覆盖列表接管显示 | 冒险手册内复选框 + 独立设置子页面 |
@@ -349,3 +349,4 @@ ToolboxDB = {
 | 2026-04-04 | §1、§5.3：区分 **`mover`（本插件窗体 + `RegisterFrame`）** 与 **`micromenu_panels`（暴雪白名单）**；白名单说明以 `PANEL_KEYS` 为准并写明商城不纳入；补充拖动挂点（TitleContainer）与战斗限制 |
 | 2026-04-04 | 暴雪窗口拖动并入 **`mover`**：`ShowUIPanel` 全局挂接 + 原懒加载补挂；`micromenu_panels` 存档迁移；`MicroMenuPanels.lua` 兼容委托 |
 | 2026-04-05 | 规范重构：三关关 3 触发条件精确化（移除「新 ToolboxDB 键」）；RegisterSettings 补充允许读取存档值；§5.3 After(0.06) 加限制条件；§2.1 领域对外 API 表补充 `Toolbox.MinimapButton.RegisterFlyoutEntry`；§3 补充账号级 vs 角色级存档约定 |
+| 2026-04-08 | 小地图悬停菜单增强：内置“冒险手册”项在 tooltip 中追加当前副本锁定摘要（实例/难度/重置时间，团队本含进度）；`Toolbox.EJ` 增加锁定摘要与 tooltip 行构建接口 |

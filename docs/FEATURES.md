@@ -42,6 +42,7 @@
 - 一键打开设置面板
 - 显示模块启用状态
 - 支持拖拽调整位置
+- 悬停“冒险手册”菜单项时，tooltip 显示当前副本 CD 摘要（实例、难度、重置时间；团队本含进度）
 
 ## 模块化架构
 
@@ -149,6 +150,12 @@ local bosses = Toolbox.EJ.GetKilledBosses(journalInstanceID)
 
 -- 检查副本是否掉落坐骑
 local hasMounts = Toolbox.EJ.HasMountDrops(journalInstanceID)
+
+-- 获取当前角色的副本锁定摘要（按剩余时间排序）
+local summary = Toolbox.EJ.GetSavedInstanceLockoutSummary()
+
+-- 构建用于 tooltip 展示的锁定行文本
+local lines, overflow = Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines(8)
 
 -- 打印消息到聊天
 Toolbox.Chat.PrintAddonMessage("消息内容")
