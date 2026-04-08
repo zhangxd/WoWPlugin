@@ -188,6 +188,19 @@ def validate_adventure_journal_tooltip_lockout_feature() -> None:
     require_contains(locales, "MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_MORE_FMT", "locale lockout overflow text")
 
 
+def validate_adventure_journal_lockout_summary_filter_regression() -> None:
+    ej_api = read_text("Toolbox", "Core", "API", "EncounterJournal.lua")
+
+    # 回归：副本重置摘要不应被 isLocked 强约束过滤，否则会漏掉有效 CD。
+    require_contains(
+        ej_api,
+        "if ok and resetTime and resetTime > 0 then",
+        "ej lockout summary keeps active reset entries without hard isLocked gate",
+    )
+    if "if ok and isLocked and resetTime and resetTime > 0 then" in ej_api:
+        raise AssertionError("ej lockout summary should not require isLocked before including active reset entries")
+
+
 def validate_map_coordinate_feature() -> None:
     config_text = read_text("Toolbox", "Core", "Foundation", "Config.lua")
     locale_text = read_text("Toolbox", "Core", "Foundation", "Locales.lua")
@@ -238,6 +251,17 @@ def validate_encounter_journal_detail_page_feature() -> None:
     require_contains(locale_text, "EJ_DETAIL_LOCKOUT_NONE", "locale detail lockout empty")
 
 
+def validate_encounter_journal_micro_button_tooltip_lockouts_feature() -> None:
+    module_text = read_text("Toolbox", "Modules", "EncounterJournal.lua")
+
+    # 右下角微型菜单「冒险手册」按钮：悬停 tooltip 需追加副本 CD 摘要。
+    require_contains(module_text, "_G.EJMicroButton", "encounter journal retail micro button global reference")
+    require_contains(module_text, "_G.EncounterJournalMicroButton", "encounter journal legacy micro button fallback")
+    require_contains(module_text, 'microButton:HookScript("OnEnter"', "encounter journal hooks micro button OnEnter")
+    require_contains(module_text, "Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines", "micro button tooltip uses shared ej lockout summary api")
+    require_contains(module_text, "refreshAdventureGuideMicroButtonTooltipIfOwned()", "encounter journal refreshes micro button tooltip on lockout update")
+
+
 def validate_encounter_journal_questline_tree_feature() -> None:
     toc_text = read_text("Toolbox", "Toolbox.toc")
     config_text = read_text("Toolbox", "Core", "Foundation", "Config.lua")
@@ -279,8 +303,10 @@ def main() -> int:
     validate_tooltip_anchor_regressions()
     validate_minimap_button_regressions()
     validate_adventure_journal_tooltip_lockout_feature()
+    validate_adventure_journal_lockout_summary_filter_regression()
     validate_map_coordinate_feature()
     validate_encounter_journal_detail_page_feature()
+    validate_encounter_journal_micro_button_tooltip_lockouts_feature()
     validate_encounter_journal_questline_tree_feature()
     print("OK: settings subcategories structure validated")
     return 0

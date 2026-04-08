@@ -701,6 +701,113 @@ local function refreshAll()
   LockoutOverlay:hookTooltips()
 end
 
+-- ============================================================================
+-- 微型菜单「冒险手册」按钮 Tooltip 增补（右下角菜单排）
+-- ============================================================================
+
+local microButtonTooltipHooked = false
+
+--- 获取冒险手册微型菜单按钮（Retail 主路径为 EJMicroButton，旧名仅作兜底）。
+---@return Button|nil
+local function getAdventureGuideMicroButton()
+  local microButton = _G.EJMicroButton -- Retail 微型菜单按钮全局名
+  if not microButton then
+    microButton = _G.EncounterJournalMicroButton -- 历史命名兜底
+  end
+  return microButton
+end
+
+--- 向当前冒险手册微型按钮 tooltip 追加副本 CD 摘要（带一次悬停去重）。
+local function appendAdventureGuideMicroButtonLockoutLines()
+  if not isModuleEnabled() then
+    return
+  end
+  if not GameTooltip or not GameTooltip.AddLine then
+    return
+  end
+  if GameTooltip._toolboxEJMicroLockoutsAdded then
+    return
+  end
+  GameTooltip._toolboxEJMicroLockoutsAdded = true
+
+  local localeTable = Toolbox.L or {} -- 本地化字符串表
+  local sectionTitle = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_TITLE or "Current lockouts" -- 标题文案
+  local emptyText = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_EMPTY or "No saved instance lockouts." -- 空态文案
+  local moreFormat = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_MORE_FMT or "+%d more..." -- 溢出计数文案
+
+  GameTooltip:AddLine(" ")
+  GameTooltip:AddLine(sectionTitle, 1, 0.82, 0.2)
+
+  if not Toolbox.EJ or type(Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines) ~= "function" then
+    GameTooltip:AddLine(emptyText, 0.75, 0.75, 0.75, true)
+    return
+  end
+
+  local lineList, overflowCount = Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines(8) -- 锁定摘要行与溢出数量
+  if type(lineList) ~= "table" or #lineList == 0 then
+    GameTooltip:AddLine(emptyText, 0.75, 0.75, 0.75, true)
+    return
+  end
+
+  for _, lineText in ipairs(lineList) do
+    GameTooltip:AddLine(lineText, 0.82, 0.88, 1, true)
+  end
+  if type(overflowCount) == "number" and overflowCount > 0 then
+    GameTooltip:AddLine(string.format(moreFormat, overflowCount), 0.6, 0.6, 0.6, true)
+  end
+end
+
+--- 若当前 tooltip 正在显示冒险手册微型按钮提示，则重建一次（用于 UPDATE_INSTANCE_INFO 回刷）。
+local function refreshAdventureGuideMicroButtonTooltipIfOwned()
+  local microButton = getAdventureGuideMicroButton() -- 冒险手册微型菜单按钮
+  if not microButton then
+    return
+  end
+  if not GameTooltip or not GameTooltip.IsOwned or not GameTooltip:IsOwned(microButton) then
+    return
+  end
+  GameTooltip._toolboxEJMicroLockoutsAdded = nil
+  local onEnterHandler = microButton.GetScript and microButton:GetScript("OnEnter") -- 微型按钮 OnEnter 脚本
+  if type(onEnterHandler) == "function" then
+    pcall(onEnterHandler, microButton)
+    appendAdventureGuideMicroButtonLockoutLines()
+    GameTooltip:Show()
+    return
+  end
+  appendAdventureGuideMicroButtonLockoutLines()
+  GameTooltip:Show()
+end
+
+--- 在右下角微型菜单的冒险手册按钮 tooltip 末尾追加当前角色副本 CD 摘要。
+local function hookAdventureGuideMicroButtonTooltip()
+  local microButton = getAdventureGuideMicroButton() -- 冒险手册微型菜单按钮
+  if not microButton then
+    return
+  end
+
+  if not microButtonTooltipHooked and microButton.HookScript then
+    microButtonTooltipHooked = true
+    microButton:HookScript("OnEnter", function()
+      pcall(function()
+        if type(RequestRaidInfo) == "function" then
+          pcall(RequestRaidInfo)
+        end
+        if GameTooltip then
+          GameTooltip._toolboxEJMicroLockoutsAdded = nil
+        end
+        appendAdventureGuideMicroButtonLockoutLines()
+        GameTooltip:Show()
+      end)
+    end)
+    microButton:HookScript("OnLeave", function()
+      if GameTooltip then
+        GameTooltip._toolboxEJMicroLockoutsAdded = nil
+      end
+    end)
+  end
+
+end
+
 --- 刷新调度器（防抖）
 local RefreshScheduler = {
   timer = nil,
@@ -842,6 +949,9 @@ local function initHooks()
       end)
     end)
   end
+
+  -- Hook 4: 右下角微型菜单的冒险手册按钮 tooltip
+  hookAdventureGuideMicroButtonTooltip()
 end
 
 --- 事件管理器
@@ -872,12 +982,14 @@ local function registerIntegration()
       initHooks()
       RequestRaidInfo()
     elseif event == "UPDATE_INSTANCE_INFO" then
+      refreshAdventureGuideMicroButtonTooltipIfOwned()
       if isModuleEnabled() then
         RefreshScheduler:schedule("lockout_update")
       end
     elseif event == "PLAYER_ENTERING_WORLD" then
       self:UnregisterEvent("PLAYER_ENTERING_WORLD")
       RequestRaidInfo()
+      hookAdventureGuideMicroButtonTooltip()
     end
   end)
 

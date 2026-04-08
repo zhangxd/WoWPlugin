@@ -160,7 +160,9 @@ function Toolbox.EJ.GetSavedInstanceLockoutSummary()
     local ok, instanceName, lockoutId, resetTime, difficultyId, isLocked, isExtended,
       instanceIDMostSig, isRaid, maxPlayers, difficultyName, numEncounters,
       encounterProgress = pcall(GetSavedInstanceInfo, idx)
-    if ok and isLocked and resetTime and resetTime > 0 then
+    -- Retail 下部分有效 CD 记录会出现 isLocked=false（尤其是非实例 ID 绑定场景），
+    -- 这里以 resetTime>0 作为“仍有锁定信息”的主判据，避免摘要漏报。
+    if ok and resetTime and resetTime > 0 then
       lockouts[#lockouts + 1] = {
         instanceName = instanceName or "",
         difficultyName = difficultyName or "",
