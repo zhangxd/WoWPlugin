@@ -109,6 +109,15 @@ function Toolbox.EJ.GetKilledBosses(journalInstanceID)
 
   local killed = {}
 
+  -- 保存当前选中的 EJ 副本，避免本查询影响 UI 上下文
+  local previousInstanceID = nil
+  if type(EJ_GetCurrentInstance) == "function" then
+    local currentSuccess, currentID = pcall(EJ_GetCurrentInstance)
+    if currentSuccess and type(currentID) == "number" then
+      previousInstanceID = currentID
+    end
+  end
+
   -- 选择副本
   local success = pcall(EJ_SelectInstance, journalInstanceID)
   if not success then
@@ -136,6 +145,11 @@ function Toolbox.EJ.GetKilledBosses(journalInstanceID)
         })
       end
     end
+  end
+
+  -- 恢复调用前的选中上下文，避免对用户当前 EJ 页面造成副作用
+  if previousInstanceID and previousInstanceID ~= journalInstanceID then
+    pcall(EJ_SelectInstance, previousInstanceID)
   end
 
   return killed
@@ -185,4 +199,3 @@ function Toolbox.EJ.HasMountDrops(journalInstanceID)
   local drops = Toolbox.Data and Toolbox.Data.MountDrops
   return drops ~= nil and drops[journalInstanceID] ~= nil
 end
-

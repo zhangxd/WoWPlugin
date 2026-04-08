@@ -300,7 +300,10 @@ end
 
 --- 更新所有 frame 的锁定显示
 function LockoutOverlay:updateFrames()
-  if not self:isEnabled() then return end
+  if not self:isEnabled() then
+    self:clearAllFrames()
+    return
+  end
 
   local box = getCurrentScrollBox()
   if not box or type(box.ForEachFrame) ~= "function" then return end
@@ -315,6 +318,23 @@ function LockoutOverlay:updateFrames()
 
       local lockouts = Toolbox.EJ.GetAllLockoutsForInstance(jid)
       self:renderLockoutText(frame, lockouts)
+    end)
+  end)
+end
+
+--- 清理所有可见列表项上的锁定叠加文本（用于关闭功能时立即去残留）
+function LockoutOverlay:clearAllFrames()
+  local box = getCurrentScrollBox()
+  if not box or type(box.ForEachFrame) ~= "function" then return end
+
+  pcall(function()
+    box:ForEachFrame(function(frame)
+      if not frame then return end
+      local fontString = frame[OVERLAY_FS_KEY]
+      if fontString then
+        fontString:SetText("")
+        fontString:Hide()
+      end
     end)
   end)
 end
@@ -382,6 +402,7 @@ end
 --- 刷新调度器（防抖）
 local RefreshScheduler = {
   timer = nil,
+  token = 0,
   delays = {
     frame_show = 0.15,
     list_refresh = 0.05,
@@ -391,13 +412,38 @@ local RefreshScheduler = {
 }
 
 function RefreshScheduler:schedule(reason)
-  if self.timer then
+  if self.timer and self.timer.Cancel then
     self.timer:Cancel()
   end
+  self.timer = nil
+
   local delay = self.delays[reason] or 0.1
-  self.timer = C_Timer.After(delay, function()
-    self:execute()
-  end)
+  self.token = (self.token or 0) + 1
+  local currentToken = self.token
+
+  if C_Timer and C_Timer.NewTimer then
+    self.timer = C_Timer.NewTimer(delay, function()
+      if self.token ~= currentToken then
+        return
+      end
+      self.timer = nil
+      self:execute()
+    end)
+    return
+  end
+
+  if C_Timer and C_Timer.After then
+    C_Timer.After(delay, function()
+      if self.token ~= currentToken then
+        return
+      end
+      self.timer = nil
+      self:execute()
+    end)
+    return
+  end
+
+  self:execute()
 end
 
 function RefreshScheduler:execute()
@@ -551,6 +597,9 @@ Toolbox.RegisterModule({
     lockoutOverlayCheck:SetChecked(moduleDb.lockoutOverlayEnabled ~= false)
     lockoutOverlayCheck:SetScript("OnClick", function(self)
       moduleDb.lockoutOverlayEnabled = self:GetChecked() and true or false
+      if moduleDb.lockoutOverlayEnabled == false then
+        LockoutOverlay:clearAllFrames()
+      end
       RefreshScheduler:schedule("settings_change")
     end)
     yOffset = yOffset - 36

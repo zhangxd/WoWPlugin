@@ -47,14 +47,13 @@ def validate_config() -> None:
         ("allowDragInCombat", "mover combat drag default"),
         ("micromenu_panels = {", "micromenu defaults (legacy)"),
         ("tooltip_anchor = {", "tooltip defaults"),
-        ("dungeon_raid_directory = {", "directory module defaults"),
-        ("ej_mount_filter = {", "ej module defaults"),
+        ("encounter_journal = {", "encounter journal module defaults"),
+        ("mountFilterEnabled = true", "encounter journal mount filter default"),
+        ("lockoutOverlayEnabled = true", "encounter journal lockout overlay default"),
         ("minimap_button = {", "minimap button module defaults"),
         ("showMinimapButton", "minimap button visibility default"),
         ("minimapPos", "minimap button angle storage"),
         ("debug = false", "module debug defaults"),
-        ("debugChat", "legacy debug migration reference"),
-        ("dungeonRaidDirectoryDebugChat", "legacy directory debug migration reference"),
     ]:
         require_contains(text, needle, label)
 
@@ -79,8 +78,9 @@ def validate_locales() -> None:
         ("SETTINGS_MODULE_ENABLE", "shared enable locale"),
         ("SETTINGS_MODULE_DEBUG", "shared debug locale"),
         ("SETTINGS_MODULE_RESET_REBUILD", "shared reset locale"),
-        ("MODULE_DUNGEON_RAID_DIRECTORY", "directory module locale"),
-        ("MODULE_EJ_MOUNT_FILTER", "ej module locale"),
+        ("MODULE_ENCOUNTER_JOURNAL", "encounter journal module locale"),
+        ("MODULE_ENCOUNTER_JOURNAL_INTRO", "encounter journal intro locale"),
+        ("EJ_MOUNT_FILTER_LABEL", "encounter journal mount filter locale"),
         ("MODULE_MINIMAP_BUTTON", "minimap button module locale"),
     ]:
         require_contains(text, needle, label)
@@ -89,38 +89,46 @@ def validate_locales() -> None:
 def validate_modules() -> None:
     files = [
         "ChatNotify.lua",
+        "EncounterJournal.lua",
         "MinimapButton.lua",
         "Mover.lua",
         "TooltipAnchor.lua",
-        "EJMountFilter.lua",
-        "DungeonRaidDirectory.lua",
     ]
     for file_name in files:
         require_file("Toolbox", "Modules", file_name)
         text = read_text("Toolbox", "Modules", file_name)
-        for needle, label in [
+        common_needles = [
             ("settingsIntroKey", "settings intro key"),
             ("settingsOrder", "settings order"),
             ("OnEnabledSettingChanged", "enabled callback"),
-            ("OnDebugSettingChanged", "debug callback"),
             ("ResetToDefaultsAndRebuild", "reset callback"),
-        ]:
+        ]
+        for needle, label in common_needles:
             require_contains(text, needle, f"{file_name} {label}")
+
+        # EncounterJournal 当前不暴露模块级 debug 开关回调，其余模块保留。
+        if file_name != "EncounterJournal.lua":
+            require_contains(text, "OnDebugSettingChanged", f"{file_name} debug callback")
 
     require_file("Toolbox", "Modules", "MicroMenuPanels.lua")
     micromenu = read_text("Toolbox", "Modules", "MicroMenuPanels.lua")
     require_contains(micromenu, "Toolbox.Mover.BlizzardPanelsRefresh", "micromenu refresh delegate to mover")
 
-    ej_filter = read_text("Toolbox", "Modules", "EJMountFilter.lua")
-    require_contains(ej_filter, "ensureDirectoryBuildForCurrentList", "ej filter self-heal helper")
-    require_contains(ej_filter, "Toolbox.DungeonRaidDirectory.RebuildCache()", "ej filter rebuild fallback")
-
 
 def validate_toc() -> None:
     text = read_text("Toolbox", "Toolbox.toc")
-    require_contains(text, "Modules\\DungeonRaidDirectory.lua", "directory module toc entry")
+    require_contains(text, "Modules\\EncounterJournal.lua", "encounter journal module toc entry")
     require_contains(text, "Modules\\MinimapButton.lua", "minimap button module toc entry")
     require_contains(text, "## Interface: 120000, 120001", "retail toc compatibility range")
+
+
+def validate_encounter_journal_regressions() -> None:
+    text = read_text("Toolbox", "Modules", "EncounterJournal.lua")
+    # 调度器应使用可取消句柄，避免 C_Timer.After 防抖失效导致并发刷新。
+    require_contains(text, "C_Timer.NewTimer", "encounter journal uses cancellable timer")
+    # 关闭叠加后应主动清理已绘制文本，避免残留显示。
+    require_contains(text, "function LockoutOverlay:clearAllFrames()", "encounter journal clear overlay helper")
+    require_contains(text, "self:clearAllFrames()", "encounter journal clears overlays when disabled")
 
 
 def main() -> int:
@@ -130,6 +138,7 @@ def main() -> int:
     validate_locales()
     validate_modules()
     validate_toc()
+    validate_encounter_journal_regressions()
     print("OK: settings subcategories structure validated")
     return 0
 
