@@ -37,6 +37,10 @@ local defaults = {
       debug = false,
       -- 模块启用时是否在小地图旁显示打开设置的按钮（可与「启用本模块」独立）
       showMinimapButton = true,
+      -- 是否在小地图上/下显示玩家当前坐标
+      showCoordsOnMinimap = true,
+      -- 小地图坐标锚点：top（上）| bottom（下）
+      minimapCoordsAnchor = "bottom",
       -- 沿小地图边缘的角度（度），与 LibDBIcon 一致；nil 表示默认 225°（左上象限靠外）
       minimapPos = nil,
       -- 悬停展开菜单：首项相对面板左上内边距、相邻两项之间的额外竖直间距（像素）；布局见 MinimapButton.lua

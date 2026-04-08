@@ -188,6 +188,29 @@ def validate_adventure_journal_tooltip_lockout_feature() -> None:
     require_contains(locales, "MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_MORE_FMT", "locale lockout overflow text")
 
 
+def validate_map_coordinate_feature() -> None:
+    config_text = read_text("Toolbox", "Core", "Foundation", "Config.lua")
+    locale_text = read_text("Toolbox", "Core", "Foundation", "Locales.lua")
+    minimap_module_text = read_text("Toolbox", "Modules", "MinimapButton.lua")
+
+    # 坐标显示配置默认值。
+    require_contains(config_text, "showCoordsOnMinimap = true", "minimap coords visibility default")
+    require_contains(config_text, 'minimapCoordsAnchor = "bottom"', "minimap coords anchor default")
+
+    # 本地化键（中英共用同一键集，最终由 Locale_Apply 合并）。
+    require_contains(locale_text, "MINIMAP_COORDS_PLAYER_FMT", "locale minimap player coords format")
+    require_contains(locale_text, "WORLD_MAP_COORDS_PLAYER_FMT", "locale world map player coords format")
+    require_contains(locale_text, "WORLD_MAP_COORDS_MOUSE_FMT", "locale world map mouse coords format")
+    require_contains(locale_text, "WORLD_MAP_COORDS_UNKNOWN", "locale unknown coords text")
+
+    # 模块实现要包含刷新逻辑与可见性控制。
+    require_contains(minimap_module_text, "updateMinimapCoordsText()", "minimap coords refresh function")
+    require_contains(minimap_module_text, "updateWorldMapCoordsText()", "world map coords refresh function")
+    require_contains(minimap_module_text, "refreshCoordinateDisplays()", "coordinate display lifecycle refresh")
+    require_contains(minimap_module_text, "showCoordsOnMinimap", "module uses minimap coords visibility setting")
+    require_contains(minimap_module_text, "minimapCoordsAnchor", "module uses minimap coords anchor setting")
+
+
 def validate_encounter_journal_detail_page_feature() -> None:
     config_text = read_text("Toolbox", "Core", "Foundation", "Config.lua")
     locale_text = read_text("Toolbox", "Core", "Foundation", "Locales.lua")
@@ -215,6 +238,35 @@ def validate_encounter_journal_detail_page_feature() -> None:
     require_contains(locale_text, "EJ_DETAIL_LOCKOUT_NONE", "locale detail lockout empty")
 
 
+def validate_encounter_journal_questline_tree_feature() -> None:
+    toc_text = read_text("Toolbox", "Toolbox.toc")
+    config_text = read_text("Toolbox", "Core", "Foundation", "Config.lua")
+    locale_text = read_text("Toolbox", "Core", "Foundation", "Locales.lua")
+    module_text = read_text("Toolbox", "Modules", "EncounterJournal.lua")
+    require_file("Toolbox", "Data", "InstanceQuestlines.lua")
+    require_file("Toolbox", "Core", "API", "QuestlineProgress.lua")
+    questline_api_text = read_text("Toolbox", "Core", "API", "QuestlineProgress.lua")
+
+    require_contains(toc_text, "Data\\InstanceQuestlines.lua", "questline data toc entry")
+    require_contains(toc_text, "Core\\API\\QuestlineProgress.lua", "questline api toc entry")
+
+    require_contains(config_text, "questlineTreeEnabled", "encounter journal questline tree setting default")
+    require_contains(config_text, "questlineTreeCollapsed", "encounter journal questline tree collapsed default")
+
+    require_contains(locale_text, "EJ_QUESTLINE_TREE_LABEL", "questline tree label locale")
+    require_contains(locale_text, "EJ_QUESTLINE_TREE_EMPTY", "questline tree empty locale")
+    require_contains(locale_text, "EJ_QUESTLINE_TREE_TYPE_MAP", "questline tree map type locale")
+
+    require_contains(questline_api_text, "Toolbox.Questlines", "questline namespace")
+    require_contains(questline_api_text, "function Toolbox.Questlines.RegisterType(", "questline register type api")
+    require_contains(questline_api_text, "function Toolbox.Questlines.GetInstanceTree(", "questline instance tree api")
+    require_contains(questline_api_text, "function Toolbox.Questlines.GetChainProgress(", "questline chain progress api")
+
+    require_contains(module_text, "QuestlineTreeView", "encounter journal questline tree view")
+    require_contains(module_text, "questlineTreeEnabled", "encounter journal questline tree setting usage")
+    require_contains(module_text, "Toolbox.Questlines.GetInstanceTree", "encounter journal uses questline api")
+
+
 def main() -> int:
     validate_settings_host()
     validate_config()
@@ -227,7 +279,9 @@ def main() -> int:
     validate_tooltip_anchor_regressions()
     validate_minimap_button_regressions()
     validate_adventure_journal_tooltip_lockout_feature()
+    validate_map_coordinate_feature()
     validate_encounter_journal_detail_page_feature()
+    validate_encounter_journal_questline_tree_feature()
     print("OK: settings subcategories structure validated")
     return 0
 
