@@ -69,6 +69,14 @@ local defaults = {
       mountFilterEnabled = true,
       lockoutOverlayEnabled = true,
       detailMountOnlyEnabled = false,
+      -- 任务页签（与 EJ 副本 ID 解耦，仅作为展示容器）
+      questlineTreeEnabled = true,
+      -- 折叠状态：key=true 表示该节点折叠（由任务树视图使用）
+      questlineTreeCollapsed = {},
+      -- 根页签顺序（按页签 ID，自定义任务页签固定 ID=203）
+      rootTabOrderIds = {},
+      -- 根页签隐藏开关（按页签 ID）：[id]=true 表示隐藏对应页签
+      rootTabHiddenIds = {},
     },
   },
 }
@@ -205,6 +213,21 @@ function Toolbox.Config.Init()
     end
 
     ToolboxDB.version = 2
+  end
+
+  -- encounter_journal：任务树字段迁移（幂等，不依赖全局 version）。
+  local encounterJournalDb = ToolboxDB.modules and ToolboxDB.modules.encounter_journal
+  if type(encounterJournalDb) == "table" then
+    -- 旧字段 questlineTreeExpanded（true=展开）迁到 questlineTreeCollapsed（true=折叠）
+    if type(encounterJournalDb.questlineTreeExpanded) == "table" and type(encounterJournalDb.questlineTreeCollapsed) ~= "table" then
+      encounterJournalDb.questlineTreeCollapsed = {}
+      for collapseKey, expanded in pairs(encounterJournalDb.questlineTreeExpanded) do
+        if expanded == false then
+          encounterJournalDb.questlineTreeCollapsed[collapseKey] = true
+        end
+      end
+    end
+    encounterJournalDb.questlineTreeExpanded = nil
   end
 end
 

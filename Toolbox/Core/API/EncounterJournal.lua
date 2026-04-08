@@ -311,26 +311,37 @@ end
 --- 检查当前是否在副本列表标签页
 ---@return boolean
 function Toolbox.EJ.IsRaidOrDungeonInstanceListTab()
-  local ej = _G.EncounterJournal
-  if not ej or not ej.instanceSelect then
+  local encounterJournalFrame = _G.EncounterJournal -- 冒险手册根框体
+  if not encounterJournalFrame then
     return false
   end
 
-  -- 检查 instanceSelect 是否可见
-  if not ej.instanceSelect:IsVisible() then
-    return false
-  end
-
-  -- 检查 ScrollBox 是否显示
-  local scrollBox = ej.instanceSelect.ScrollBox or ej.instanceSelect.scrollBox
-  if scrollBox and scrollBox.IsShown then
-    local success, shown = pcall(function() return scrollBox:IsShown() end)
-    if success and not shown then
-      return false
+  local journalIsOpen = true -- 冒险手册是否打开
+  if encounterJournalFrame.IsShown then
+    local shownSuccess, shownValue = pcall(function() return encounterJournalFrame:IsShown() end)
+    if shownSuccess then
+      journalIsOpen = shownValue == true
     end
   end
+  if not journalIsOpen then
+    return false
+  end
 
-  return true
+  local dungeonTabButton = encounterJournalFrame.dungeonsTab -- 地下城页签按钮
+  local raidTabButton = encounterJournalFrame.raidsTab -- 团队副本页签按钮
+
+  local dungeonTabID = dungeonTabButton and dungeonTabButton.GetID and dungeonTabButton:GetID() or nil -- 地下城页签 ID
+  local raidTabID = raidTabButton and raidTabButton.GetID and raidTabButton:GetID() or nil -- 团队副本页签 ID
+  if type(dungeonTabID) ~= "number" and type(raidTabID) ~= "number" then
+    return false
+  end
+
+  local selectedRootTabID = encounterJournalFrame.selectedTab -- 当前选中的根页签 ID
+  if type(selectedRootTabID) ~= "number" then
+    return false
+  end
+
+  return selectedRootTabID == dungeonTabID or selectedRootTabID == raidTabID
 end
 
 -- ============================================================================
