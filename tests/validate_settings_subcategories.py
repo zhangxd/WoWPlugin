@@ -188,6 +188,33 @@ def validate_adventure_journal_tooltip_lockout_feature() -> None:
     require_contains(locales, "MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_MORE_FMT", "locale lockout overflow text")
 
 
+def validate_encounter_journal_detail_page_feature() -> None:
+    config_text = read_text("Toolbox", "Core", "Foundation", "Config.lua")
+    locale_text = read_text("Toolbox", "Core", "Foundation", "Locales.lua")
+    api_text = read_text("Toolbox", "Core", "API", "EncounterJournal.lua")
+    module_text = read_text("Toolbox", "Modules", "EncounterJournal.lua")
+
+    # 模块存档：详情页“仅坐骑”开关状态。
+    require_contains(config_text, "detailMountOnlyEnabled", "encounter journal detail mount-only setting default")
+
+    # 领域 API：详情页筛选与难度匹配锁定查询所需接口。
+    require_contains(api_text, "function Toolbox.EJ.GetMountItemSetForInstance(", "ej api mount item set helper")
+    require_contains(api_text, "function Toolbox.EJ.GetSelectedDifficultyID(", "ej api selected difficulty helper")
+    require_contains(api_text, "function Toolbox.EJ.GetLockoutForInstanceAndDifficulty(", "ej api difficulty lockout helper")
+
+    # 详情页增强：仅坐骑筛选 + 标题后锁定文本。
+    require_contains(module_text, "detailMountOnlyEnabled", "encounter journal module uses detail mount-only setting")
+    require_contains(module_text, "EncounterJournal_LootUpdate", "encounter journal hooks detail loot update")
+    require_contains(module_text, "EJ_SetDifficulty", "encounter journal hooks difficulty switch")
+    require_contains(module_text, "EJ_DETAIL_MOUNT_ONLY_LABEL", "encounter journal detail mount-only locale key")
+    require_contains(module_text, "EJ_DETAIL_LOCKOUT_FMT", "encounter journal detail lockout locale key")
+
+    # 本地化：详情页筛选与“重置：xxxx”文案键。
+    require_contains(locale_text, "EJ_DETAIL_MOUNT_ONLY_LABEL", "locale detail mount-only label")
+    require_contains(locale_text, "EJ_DETAIL_LOCKOUT_FMT", "locale detail lockout format")
+    require_contains(locale_text, "EJ_DETAIL_LOCKOUT_NONE", "locale detail lockout empty")
+
+
 def main() -> int:
     validate_settings_host()
     validate_config()
@@ -200,6 +227,7 @@ def main() -> int:
     validate_tooltip_anchor_regressions()
     validate_minimap_button_regressions()
     validate_adventure_journal_tooltip_lockout_feature()
+    validate_encounter_journal_detail_page_feature()
     print("OK: settings subcategories structure validated")
     return 0
 

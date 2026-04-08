@@ -222,6 +222,10 @@ local enUS = {
   EJ_MOUNT_FILTER_HINT = "Shows instances that can drop mounts in the current expansion.",
   EJ_MOUNT_FILTER_EMPTY = "No mount-dropping instances are available in the current expansion list.",
   EJ_MOUNT_FILTER_SETTINGS_DEPENDENCY_DISABLED = "The dungeon/raid directory feature is disabled, so this filter cannot run.",
+  EJ_DETAIL_MOUNT_ONLY_LABEL = "Mounts only",
+  EJ_DETAIL_MOUNT_ONLY_HINT = "Filter loot list to mount items for this instance.",
+  EJ_DETAIL_LOCKOUT_FMT = "Resets in: %s",
+  EJ_DETAIL_LOCKOUT_NONE = "Resets in: none",
 
   EJ_LOCKOUT_OVERLAY_LABEL = "Show instance CD in Adventure Guide",
   EJ_LOCKOUT_INLINE_FMT = "|cffff9900[CD] %s|r",
@@ -453,6 +457,10 @@ local zhCN = {
   EJ_MOUNT_FILTER_HINT = "开启后列出当前资料片可能掉坐骑的副本。",
   EJ_MOUNT_FILTER_EMPTY = "当前资料片列表里没有可显示的坐骑副本。",
   EJ_MOUNT_FILTER_SETTINGS_DEPENDENCY_DISABLED = "地下城 / 团队副本目录功能已关闭，因此该筛选当前不可用。",
+  EJ_DETAIL_MOUNT_ONLY_LABEL = "仅坐骑",
+  EJ_DETAIL_MOUNT_ONLY_HINT = "仅显示当前副本掉落列表中的坐骑物品。",
+  EJ_DETAIL_LOCKOUT_FMT = "重置：%s",
+  EJ_DETAIL_LOCKOUT_NONE = "重置：无",
 
   EJ_LOCKOUT_OVERLAY_LABEL = "在冒险指南中显示副本 CD",
   EJ_LOCKOUT_INLINE_FMT = "|cffff9900[CD] %s|r",

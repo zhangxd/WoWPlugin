@@ -107,6 +107,45 @@ function Toolbox.EJ.GetAllLockoutsForInstance(journalInstanceID)
   return lockouts
 end
 
+--- 获取冒险手册当前选中的难度 ID（来自右侧难度下拉）。
+---@return number|nil difficultyID
+function Toolbox.EJ.GetSelectedDifficultyID()
+  if type(EJ_GetDifficulty) ~= "function" then
+    return nil
+  end
+  local ok, difficultyID = pcall(EJ_GetDifficulty)
+  if ok and type(difficultyID) == "number" then
+    return difficultyID
+  end
+  return nil
+end
+
+--- 获取指定副本在指定难度下的锁定信息（精确匹配难度 ID）。
+---@param journalInstanceID number
+---@param difficultyID number|nil
+---@return table|nil lockout
+function Toolbox.EJ.GetLockoutForInstanceAndDifficulty(journalInstanceID, difficultyID)
+  if type(journalInstanceID) ~= "number" then
+    return nil
+  end
+  local lockouts = Toolbox.EJ.GetAllLockoutsForInstance(journalInstanceID)
+  if #lockouts == 0 then
+    return nil
+  end
+  if type(difficultyID) == "number" then
+    for _, lockout in ipairs(lockouts) do
+      if lockout and lockout.difficultyID == difficultyID then
+        return lockout
+      end
+    end
+    return nil
+  end
+  if #lockouts == 1 then
+    return lockouts[1]
+  end
+  return nil
+end
+
 --- 汇总当前角色所有已锁定副本（按剩余时间升序）。
 ---@return table[] lockouts
 --- 返回格式：[{ instanceName=string, difficultyName=string, resetTime=number, isRaid=boolean, encounterProgress=number, numEncounters=number, isExtended=boolean }]
@@ -296,14 +335,36 @@ end
 -- 坐骑查询 API
 -- ============================================================================
 
+local mountItemSetCache = {}
+
+--- 获取副本坐骑掉落 itemID 集合（集合键为 itemID，值为 true）。
+---@param journalInstanceID number
+---@return table|nil itemSet
+function Toolbox.EJ.GetMountItemSetForInstance(journalInstanceID)
+  if type(journalInstanceID) ~= "number" then
+    return nil
+  end
+  if mountItemSetCache[journalInstanceID] then
+    return mountItemSetCache[journalInstanceID]
+  end
+  local drops = Toolbox.Data and Toolbox.Data.MountDrops
+  local itemList = drops and drops[journalInstanceID]
+  if type(itemList) ~= "table" then
+    return nil
+  end
+  local itemSet = {}
+  for _, itemID in ipairs(itemList) do
+    if type(itemID) == "number" then
+      itemSet[itemID] = true
+    end
+  end
+  mountItemSetCache[journalInstanceID] = itemSet
+  return itemSet
+end
+
 --- 检查副本是否掉落坐骑
 ---@param journalInstanceID number
 ---@return boolean
 function Toolbox.EJ.HasMountDrops(journalInstanceID)
-  if type(journalInstanceID) ~= "number" then
-    return false
-  end
-
-  local drops = Toolbox.Data and Toolbox.Data.MountDrops
-  return drops ~= nil and drops[journalInstanceID] ~= nil
+  return Toolbox.EJ.GetMountItemSetForInstance(journalInstanceID) ~= nil
 end

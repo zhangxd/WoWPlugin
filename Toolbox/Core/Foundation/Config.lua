@@ -64,6 +64,7 @@ local defaults = {
       debug = false,
       mountFilterEnabled = true,
       lockoutOverlayEnabled = true,
+      detailMountOnlyEnabled = false,
     },
   },
 }
