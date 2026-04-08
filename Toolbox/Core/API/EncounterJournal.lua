@@ -32,6 +32,23 @@ local function mapInstanceIDToJournalID(instanceID, difficultyID)
   return nil
 end
 
+--- 格式化重置剩余时间（用于 tooltip 文本）。
+---@param seconds number
+---@return string
+local function formatResetDuration(seconds)
+  local loc = Toolbox.L or {}
+  local days = math.floor(seconds / 86400)
+  local hours = math.floor((seconds % 86400) / 3600)
+  local mins = math.floor((seconds % 3600) / 60)
+  if days > 0 then
+    return string.format(loc.EJ_LOCKOUT_TIME_DAY_HOUR_FMT or "%dd %dh", days, hours)
+  end
+  if hours > 0 then
+    return string.format(loc.EJ_LOCKOUT_TIME_HOUR_MIN_FMT or "%dh %dm", hours, mins)
+  end
+  return string.format(loc.EJ_LOCKOUT_TIME_MIN_FMT or "%dm", mins)
+end
+
 -- ============================================================================
 -- 锁定查询 API
 -- ============================================================================
@@ -88,6 +105,97 @@ function Toolbox.EJ.GetAllLockoutsForInstance(journalInstanceID)
   end
 
   return lockouts
+end
+
+--- 汇总当前角色所有已锁定副本（按剩余时间升序）。
+---@return table[] lockouts
+--- 返回格式：[{ instanceName=string, difficultyName=string, resetTime=number, isRaid=boolean, encounterProgress=number, numEncounters=number, isExtended=boolean }]
+function Toolbox.EJ.GetSavedInstanceLockoutSummary()
+  if not GetNumSavedInstances or not GetSavedInstanceInfo then
+    return {}
+  end
+
+  local lockouts = {}
+  local savedCount = GetNumSavedInstances()
+  for idx = 1, savedCount do
+    local ok, instanceName, lockoutId, resetTime, difficultyId, isLocked, isExtended,
+      instanceIDMostSig, isRaid, maxPlayers, difficultyName, numEncounters,
+      encounterProgress = pcall(GetSavedInstanceInfo, idx)
+    if ok and isLocked and resetTime and resetTime > 0 then
+      lockouts[#lockouts + 1] = {
+        instanceName = instanceName or "",
+        difficultyName = difficultyName or "",
+        resetTime = resetTime or 0,
+        isRaid = isRaid == true,
+        encounterProgress = encounterProgress or 0,
+        numEncounters = numEncounters or 0,
+        isExtended = isExtended == true,
+      }
+    end
+  end
+
+  table.sort(lockouts, function(left, right)
+    local leftReset = left.resetTime or 0
+    local rightReset = right.resetTime or 0
+    if leftReset ~= rightReset then
+      return leftReset < rightReset
+    end
+    local leftName = left.instanceName or ""
+    local rightName = right.instanceName or ""
+    if leftName ~= rightName then
+      return leftName < rightName
+    end
+    local leftDifficulty = left.difficultyName or ""
+    local rightDifficulty = right.difficultyName or ""
+    return leftDifficulty < rightDifficulty
+  end)
+
+  return lockouts
+end
+
+--- 构建“当前副本锁定”tooltip 行文本。
+---@param maxLines number|nil 最多行数，默认 8，上限 30
+---@return string[] lines
+---@return number overflow 未显示的其余条数
+function Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines(maxLines)
+  local lineLimit = tonumber(maxLines) or 8
+  if lineLimit < 1 then
+    lineLimit = 1
+  end
+  if lineLimit > 30 then
+    lineLimit = 30
+  end
+
+  local loc = Toolbox.L or {}
+  local allLockouts = Toolbox.EJ.GetSavedInstanceLockoutSummary()
+  local lineCount = math.min(#allLockouts, lineLimit)
+  local lines = {}
+
+  for idx = 1, lineCount do
+    local lockout = allLockouts[idx]
+    local instanceName = lockout.instanceName or ""
+    local difficultyName = lockout.difficultyName or ""
+    local resetText = formatResetDuration(lockout.resetTime or 0)
+    local lineText
+    if lockout.isRaid and (lockout.numEncounters or 0) > 0 then
+      lineText = string.format(
+        "%s · %s %d/%d · %s",
+        instanceName,
+        difficultyName,
+        lockout.encounterProgress or 0,
+        lockout.numEncounters or 0,
+        resetText
+      )
+    else
+      lineText = string.format("%s · %s · %s", instanceName, difficultyName, resetText)
+    end
+    if lockout.isExtended then
+      lineText = lineText .. " " .. (loc.EJ_LOCKOUT_EXTENDED or "(Extended)")
+    end
+    lines[#lines + 1] = lineText
+  end
+
+  return lines, math.max(0, #allLockouts - lineCount)
 end
 
 -- ============================================================================

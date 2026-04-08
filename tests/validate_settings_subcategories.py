@@ -168,6 +168,26 @@ def validate_minimap_button_regressions() -> None:
     require_contains(text, "return leftId < rightId", "minimap flyout order tie-break by id")
 
 
+def validate_adventure_journal_tooltip_lockout_feature() -> None:
+    ej_api = read_text("Toolbox", "Core", "API", "EncounterJournal.lua")
+    minimap = read_text("Toolbox", "Modules", "MinimapButton.lua")
+    locales = read_text("Toolbox", "Core", "Foundation", "Locales.lua")
+
+    # EJ API：提供可复用的锁定摘要查询（供 flyout tooltip 使用）。
+    require_contains(ej_api, "function Toolbox.EJ.GetSavedInstanceLockoutSummary(", "ej api lockout summary function")
+    require_contains(ej_api, "function Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines(", "ej api tooltip line builder")
+
+    # Minimap flyout：冒险手册项应带动态 tooltip 增补回调。
+    require_contains(minimap, "augmentTooltip = function()", "minimap ej flyout augment tooltip callback")
+    require_contains(minimap, "Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines", "minimap uses ej lockout tooltip lines")
+    require_contains(minimap, "MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_TITLE", "minimap uses lockout section title locale")
+
+    # 本地化：中英都应提供 tooltip 锁定小节文案。
+    require_contains(locales, "MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_TITLE", "locale lockout section title")
+    require_contains(locales, "MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_EMPTY", "locale lockout empty text")
+    require_contains(locales, "MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_MORE_FMT", "locale lockout overflow text")
+
+
 def main() -> int:
     validate_settings_host()
     validate_config()
@@ -179,6 +199,7 @@ def main() -> int:
     validate_mover_regressions()
     validate_tooltip_anchor_regressions()
     validate_minimap_button_regressions()
+    validate_adventure_journal_tooltip_lockout_feature()
     print("OK: settings subcategories structure validated")
     return 0
 

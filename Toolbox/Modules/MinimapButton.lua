@@ -427,6 +427,9 @@ local function showFlyoutButtonTooltip(owner, def, L)
   elseif type(def.tooltip) == "string" and def.tooltip ~= "" then
     GameTooltip:AddLine(def.tooltip, 0.82, 0.88, 1, true)
   end
+  if type(def.augmentTooltip) == "function" then
+    pcall(def.augmentTooltip)
+  end
   GameTooltip:Show()
 end
 
@@ -1667,6 +1670,33 @@ function Toolbox.MinimapButton.RegisterBuiltinFlyoutCatalog()
     titleKey = "MINIMAP_FLYOUT_ADVENTURE_JOURNAL",
     tooltipKey = "MINIMAP_FLYOUT_ADVENTURE_JOURNAL_TOOLTIP",
     icon = "Interface\\Icons\\Achievement_Zone_EasternKingdoms",
+    augmentTooltip = function()
+      local loc = Toolbox.L or {}
+      local sectionTitle = loc.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_TITLE or "Current lockouts"
+      local emptyText = loc.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_EMPTY or "No saved instance lockouts."
+      local moreFmt = loc.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_MORE_FMT or "+%d more..."
+
+      GameTooltip:AddLine(" ")
+      GameTooltip:AddLine(sectionTitle, 1, 0.82, 0.2)
+
+      if not Toolbox.EJ or type(Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines) ~= "function" then
+        GameTooltip:AddLine(emptyText, 0.75, 0.75, 0.75, true)
+        return
+      end
+
+      local lines, overflow = Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines(8)
+      if type(lines) ~= "table" or #lines == 0 then
+        GameTooltip:AddLine(emptyText, 0.75, 0.75, 0.75, true)
+        return
+      end
+
+      for _, line in ipairs(lines) do
+        GameTooltip:AddLine(line, 0.82, 0.88, 1, true)
+      end
+      if type(overflow) == "number" and overflow > 0 then
+        GameTooltip:AddLine(string.format(moreFmt, overflow), 0.6, 0.6, 0.6, true)
+      end
+    end,
     onClick = function()
       pcall(function()
         local ejName = "Blizzard_EncounterJournal"
