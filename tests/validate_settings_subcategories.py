@@ -344,6 +344,12 @@ def validate_encounter_journal_questline_tree_feature() -> None:
     require_contains(module_text, "QuestlineTreeView", "encounter journal questline tree view")
     require_contains(module_text, "questlineTreeEnabled", "encounter journal questline tree setting usage")
     require_contains(module_text, "Toolbox.Questlines.GetExpansionTree", "encounter journal uses decoupled questline api")
+    require_contains(module_text, "Toolbox.Questlines.GetQuestLinesForSelection", "encounter journal uses selection questline query api")
+    require_contains(module_text, "Toolbox.Questlines.GetQuestListByQuestLineID", "encounter journal uses questline task list api")
+    require_contains(module_text, "Toolbox.Questlines.GetQuestDetailByID", "encounter journal uses quest detail api")
+    require_contains(module_text, "selectedKind", "encounter journal quest tab uses selection state machine")
+    require_contains(module_text, "leftTree", "encounter journal quest tab has left tree container")
+    require_contains(module_text, "rightContent", "encounter journal quest tab has right content container")
     require_contains(module_text, "EJ_QUESTLINE_TREE_LABEL", "encounter journal renders questline tab label")
     require_contains(module_text, "if journalFrame and type(journalFrame.Tabs) == \"table\" then", "encounter journal reads native root tabs from encounter journal tabs list")
     if "_G.EncounterJournalRaidTab" in module_text or "_G.EncounterJournalTutorialsTab" in module_text:
