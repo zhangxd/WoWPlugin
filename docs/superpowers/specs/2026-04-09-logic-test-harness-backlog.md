@@ -1,4 +1,17 @@
-# 待开发需求：Logic Test Harness（离线逻辑测试）
+# 已落地：Logic Test Harness（离线逻辑测试）
+
+- 日期：2026-04-09
+- 状态：Phase 1 已落地（2026-04-10）
+
+## 落地结果（2026-04-10）
+
+1. 已提供统一入口：`python tests/run_all.py`（静态校验 + logic 测试）。
+2. 已落地 `tests/logic/harness/**` fake runtime 能力（frame/timer/tooltip）。
+3. 已落地 EncounterJournal 逻辑测试与 golden 对比。
+4. 已新增 QuestlineProgress 逻辑测试：
+   - `tests/logic/spec/questline_progress_spec.lua`（mock 注入链路）
+   - `tests/logic/spec/questline_progress_live_data_spec.lua`（live 数据容错链路）
+5. 当前基线：`python tests/run_all.py` 通过（12 successes）。
 
 ## 背景
 

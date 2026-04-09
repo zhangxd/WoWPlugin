@@ -1,8 +1,9 @@
 --[[
   任务线进度领域 API（Toolbox.Questlines）。
   设计目标：
-    1. 以 schema v2（quests/questLines/questLineQuestIDs/expansionQuestLineIDs）作为唯一数据源。
+    1. 以 schema v3（quests/questLines/questLineQuestIDs）作为唯一数据源。
     2. 提供 strict 校验、任务页签查询模型与任务详情查询接口。
+    3. 字段名与 wow.db 对齐：ID/Name_lang/UiMapID。
 ]]
 
 Toolbox.Questlines = Toolbox.Questlines or {}
@@ -13,9 +14,20 @@ local runtimeCache = { -- 运行时模型缓存
   model = nil,
   errorObject = nil,
 }
+local dataOverrideTable = nil -- 测试框架注入的数据源（nil 表示使用 live 数据）
 
 local getLogIndexForQuestID = C_QuestLog and C_QuestLog.GetLogIndexForQuestID or GetQuestLogIndexByID -- 任务日志索引查询函数
 local isQuestCompletedFn = C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted or IsQuestFlaggedCompleted -- 任务完成状态函数
+
+--- 清空任务线运行时缓存，确保后续按当前数据源重新构建模型。
+local function resetRuntimeCache()
+  runtimeCache = {
+    dataRef = nil,
+    generatedAt = nil,
+    model = nil,
+    errorObject = nil,
+  }
+end
 
 --- 构建校验错误对象。
 ---@param errorCode string 错误码
@@ -55,24 +67,17 @@ local function getQuestNameByID(questID)
   return nil
 end
 
---- 查询地图名（按 mapID）。
----@param mapID number
+--- 查询地图名（按 UiMapID）。
+---@param uiMapID number
 ---@return string
-local function getMapNameByID(mapID)
-  if type(mapID) == "number" and C_Map and C_Map.GetMapInfo then
-    local success, mapInfo = pcall(C_Map.GetMapInfo, mapID) -- 地图信息查询
+local function getMapNameByID(uiMapID)
+  if type(uiMapID) == "number" and C_Map and C_Map.GetMapInfo then
+    local success, mapInfo = pcall(C_Map.GetMapInfo, uiMapID) -- 地图信息查询
     if success and type(mapInfo) == "table" and type(mapInfo.name) == "string" and mapInfo.name ~= "" then
       return mapInfo.name
     end
   end
-  return "Map #" .. tostring(mapID or "?")
-end
-
---- 查询资料片名（按 expansionID）。
----@param expansionID number
----@return string
-local function getExpansionNameByID(expansionID)
-  return "Expansion #" .. tostring(expansionID or "?")
+  return "Map #" .. tostring(uiMapID or "?")
 end
 
 --- 获取任务状态（completed | active | pending）。
@@ -143,10 +148,20 @@ end
 --- 获取任务页签静态数据根对象。
 ---@return table|nil
 local function getQuestlineDataTable()
+  if dataOverrideTable ~= nil then
+    return dataOverrideTable
+  end
   return Toolbox.Data and Toolbox.Data.InstanceQuestlines
 end
 
---- strict 校验 schema v2 数据。
+--- 覆盖任务线数据源（仅供测试框架调用）。传 nil 恢复 live 数据源。
+---@param dataTable table|nil 覆盖数据表
+function Toolbox.Questlines.SetDataOverride(dataTable)
+  dataOverrideTable = dataTable
+  resetRuntimeCache()
+end
+
+--- strict 校验 schema v3 数据。
 ---@param dataTable table|nil 数据根对象
 ---@param strictMode boolean|nil strict 开关
 ---@return boolean ok
@@ -165,7 +180,6 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     "quests",
     "questLines",
     "questLineQuestIDs",
-    "expansionQuestLineIDs",
   }
   for _, fieldName in ipairs(requiredRootFields) do
     if dataTable[fieldName] == nil then
@@ -173,8 +187,8 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     end
   end
 
-  if strictEnabled and dataTable.schemaVersion ~= 2 then
-    return false, buildValidationError("E_INVALID_SCHEMA", "schemaVersion", "schemaVersion must be 2")
+  if strictEnabled and dataTable.schemaVersion ~= 3 then
+    return false, buildValidationError("E_INVALID_SCHEMA", "schemaVersion", "schemaVersion must be 3")
   end
 
   if type(dataTable.sourceMode) ~= "string" then
@@ -197,9 +211,6 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
   if type(dataTable.questLineQuestIDs) ~= "table" then
     return false, buildValidationError("E_TYPE_MISMATCH", "questLineQuestIDs", "table expected")
   end
-  if type(dataTable.expansionQuestLineIDs) ~= "table" then
-    return false, buildValidationError("E_TYPE_MISMATCH", "expansionQuestLineIDs", "table expected")
-  end
 
   local questExistsByID = {} -- 任务存在集合
   for questKey, questEntry in pairs(dataTable.quests) do
@@ -210,85 +221,15 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     if type(questEntry) ~= "table" then
       return false, buildValidationError("E_TYPE_MISMATCH", "quests[" .. tostring(questID) .. "]", "table expected")
     end
-    if type(questEntry.questID) ~= "number" then
-      return false, buildValidationError("E_MISSING_FIELD", "quests[" .. tostring(questID) .. "].questID", "questID missing")
+    if type(questEntry.ID) ~= "number" then
+      return false, buildValidationError("E_MISSING_FIELD", "quests[" .. tostring(questID) .. "].ID", "ID missing")
     end
-    if questEntry.questID ~= questID then
-      return false, buildValidationError("E_KEY_VALUE_MISMATCH", "quests[" .. tostring(questID) .. "].questID", "questID must match key")
+    if questEntry.ID ~= questID then
+      return false, buildValidationError("E_KEY_VALUE_MISMATCH", "quests[" .. tostring(questID) .. "].ID", "ID must match key")
     end
-    if type(questEntry.mapID) ~= "number" or questEntry.mapID <= 0 then
-      return false, buildValidationError("E_TYPE_MISMATCH", "quests[" .. tostring(questID) .. "].mapID", "positive number expected")
+    if type(questEntry.UiMapID) ~= "number" or questEntry.UiMapID <= 0 then
+      return false, buildValidationError("E_TYPE_MISMATCH", "quests[" .. tostring(questID) .. "].UiMapID", "positive number expected")
     end
-    if questEntry.startNpcID ~= nil and type(questEntry.startNpcID) ~= "number" then
-      return false, buildValidationError("E_TYPE_MISMATCH", "quests[" .. tostring(questID) .. "].startNpcID", "number expected")
-    end
-    if questEntry.turnInNpcID ~= nil and type(questEntry.turnInNpcID) ~= "number" then
-      return false, buildValidationError("E_TYPE_MISMATCH", "quests[" .. tostring(questID) .. "].turnInNpcID", "number expected")
-    end
-
-    local prerequisiteOk, prerequisiteError = validateNumberArray(
-      questEntry.prerequisiteQuestIDs,
-      false,
-      "quests[" .. tostring(questID) .. "].prerequisiteQuestIDs"
-    )
-    if not prerequisiteOk then
-      return false, prerequisiteError
-    end
-
-    local nextQuestOk, nextQuestError = validateNumberArray(
-      questEntry.nextQuestIDs,
-      false,
-      "quests[" .. tostring(questID) .. "].nextQuestIDs"
-    )
-    if not nextQuestOk then
-      return false, nextQuestError
-    end
-
-    if questEntry.unlockConditions ~= nil then
-      if type(questEntry.unlockConditions) ~= "table" then
-        return false, buildValidationError("E_TYPE_MISMATCH", "quests[" .. tostring(questID) .. "].unlockConditions", "table expected")
-      end
-      local unlockConditions = questEntry.unlockConditions -- 解锁条件对象
-      if unlockConditions.minLevel ~= nil and type(unlockConditions.minLevel) ~= "number" then
-        return false, buildValidationError("E_TYPE_MISMATCH", "quests[" .. tostring(questID) .. "].unlockConditions.minLevel", "number expected")
-      end
-
-      local classOk, classError = validateNumberArray(
-        unlockConditions.classIDs,
-        false,
-        "quests[" .. tostring(questID) .. "].unlockConditions.classIDs"
-      )
-      if not classOk then
-        return false, classError
-      end
-
-      local stateFlagOk, stateFlagError = validateNumberArray(
-        unlockConditions.worldStateFlags,
-        false,
-        "quests[" .. tostring(questID) .. "].unlockConditions.worldStateFlags"
-      )
-      if not stateFlagOk then
-        return false, stateFlagError
-      end
-
-      if unlockConditions.renown ~= nil then
-        if type(unlockConditions.renown) ~= "table" then
-          return false, buildValidationError("E_TYPE_MISMATCH", "quests[" .. tostring(questID) .. "].unlockConditions.renown", "table expected")
-        end
-        for renownIndex, renownEntry in ipairs(unlockConditions.renown) do
-          if type(renownEntry) ~= "table" then
-            return false, buildValidationError("E_TYPE_MISMATCH", "quests[" .. tostring(questID) .. "].unlockConditions.renown[" .. tostring(renownIndex) .. "]", "table expected")
-          end
-          if type(renownEntry.factionID) ~= "number" then
-            return false, buildValidationError("E_MISSING_FIELD", "quests[" .. tostring(questID) .. "].unlockConditions.renown[" .. tostring(renownIndex) .. "].factionID", "number expected")
-          end
-          if type(renownEntry.minLevel) ~= "number" then
-            return false, buildValidationError("E_MISSING_FIELD", "quests[" .. tostring(questID) .. "].unlockConditions.renown[" .. tostring(renownIndex) .. "].minLevel", "number expected")
-          end
-        end
-      end
-    end
-
     questExistsByID[questID] = true
   end
 
@@ -301,20 +242,17 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     if type(questLineEntry) ~= "table" then
       return false, buildValidationError("E_TYPE_MISMATCH", "questLines[" .. tostring(questLineID) .. "]", "table expected")
     end
-    if type(questLineEntry.questLineID) ~= "number" then
-      return false, buildValidationError("E_MISSING_FIELD", "questLines[" .. tostring(questLineID) .. "].questLineID", "number expected")
+    if type(questLineEntry.ID) ~= "number" then
+      return false, buildValidationError("E_MISSING_FIELD", "questLines[" .. tostring(questLineID) .. "].ID", "number expected")
     end
-    if questLineEntry.questLineID ~= questLineID then
-      return false, buildValidationError("E_KEY_VALUE_MISMATCH", "questLines[" .. tostring(questLineID) .. "].questLineID", "questLineID must match key")
+    if questLineEntry.ID ~= questLineID then
+      return false, buildValidationError("E_KEY_VALUE_MISMATCH", "questLines[" .. tostring(questLineID) .. "].ID", "ID must match key")
     end
-    if type(questLineEntry.name) ~= "string" or questLineEntry.name == "" then
-      return false, buildValidationError("E_MISSING_FIELD", "questLines[" .. tostring(questLineID) .. "].name", "non-empty string expected")
+    if type(questLineEntry.Name_lang) ~= "string" or questLineEntry.Name_lang == "" then
+      return false, buildValidationError("E_MISSING_FIELD", "questLines[" .. tostring(questLineID) .. "].Name_lang", "non-empty string expected")
     end
-    if type(questLineEntry.expansionID) ~= "number" then
-      return false, buildValidationError("E_MISSING_FIELD", "questLines[" .. tostring(questLineID) .. "].expansionID", "number expected")
-    end
-    if type(questLineEntry.primaryMapID) ~= "number" or questLineEntry.primaryMapID <= 0 then
-      return false, buildValidationError("E_MISSING_FIELD", "questLines[" .. tostring(questLineID) .. "].primaryMapID", "positive number expected")
+    if type(questLineEntry.UiMapID) ~= "number" or questLineEntry.UiMapID <= 0 then
+      return false, buildValidationError("E_MISSING_FIELD", "questLines[" .. tostring(questLineID) .. "].UiMapID", "positive number expected")
     end
     questLineExistsByID[questLineID] = true
   end
@@ -347,34 +285,6 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
           return false, buildValidationError("E_DUPLICATE_REF", "questLineQuestIDs[" .. tostring(questLineID) .. "][" .. tostring(questIndex) .. "]", "questID bound to multiple questLines")
         end
         questOwnerByID[questID] = questLineID
-      end
-    end
-  end
-
-  for expansionKey, questLineIDList in pairs(dataTable.expansionQuestLineIDs) do
-    local expansionID = tonumber(expansionKey) -- 规范化 expansionID
-    if type(expansionID) ~= "number" then
-      return false, buildValidationError("E_TYPE_MISMATCH", "expansionQuestLineIDs[" .. tostring(expansionKey) .. "]", "numeric key required")
-    end
-
-    local expansionListOk, expansionListError = validateNumberArray(
-      questLineIDList,
-      strictEnabled,
-      "expansionQuestLineIDs[" .. tostring(expansionID) .. "]"
-    )
-    if not expansionListOk then
-      return false, expansionListError
-    end
-
-    if type(questLineIDList) == "table" then
-      for questLineIndex, questLineID in ipairs(questLineIDList) do
-        local questLineEntry = dataTable.questLines[questLineID] -- 任务线对象
-        if type(questLineEntry) ~= "table" then
-          return false, buildValidationError("E_BAD_REF", "expansionQuestLineIDs[" .. tostring(expansionID) .. "][" .. tostring(questLineIndex) .. "]", "questLineID not found")
-        end
-        if questLineEntry.expansionID ~= expansionID then
-          return false, buildValidationError("E_BAD_REF", "questLines[" .. tostring(questLineID) .. "].expansionID", "questLine expansionID mismatch")
-        end
       end
     end
   end
@@ -413,7 +323,7 @@ function Toolbox.Questlines.GetChainProgress(chain)
       questStatus = getQuestStatus(questID)
       questName = getQuestNameByID(questID) or ("Quest #" .. tostring(questID))
     elseif type(questEntry) == "table" then
-      questID = tonumber(questEntry.id or questEntry.questID)
+      questID = tonumber(questEntry.id or questEntry.ID)
       questStatus = questEntry.status or getQuestStatus(questID)
       questName = questEntry.name or (type(questID) == "number" and (getQuestNameByID(questID) or ("Quest #" .. tostring(questID))) or "Unknown Quest")
     end
@@ -462,7 +372,7 @@ local function buildQuestListByQuestLineID(dataTable, questLineID)
         id = questID,
         name = questName,
         status = getQuestStatus(questID),
-        mapID = questRecord.mapID,
+        UiMapID = questRecord.UiMapID,
         quest = questRecord,
       }
     end
@@ -499,83 +409,77 @@ local function buildMapProgress(questLineList)
   }
 end
 
+--- 判断 strict 校验失败是否可按“降级模式”继续构建模型。
+---@param errorObject table|nil
+---@return boolean
+local function isRecoverableValidationError(errorObject)
+  if type(errorObject) ~= "table" then
+    return false
+  end
+  local errorCode = errorObject.code -- 错误码
+  return errorCode == "E_BAD_REF" or errorCode == "E_DUPLICATE_REF"
+end
+
 --- 构建任务页签运行时模型。
 ---@param dataTable table 根数据
 ---@return table|nil model
 ---@return table|nil errorObject
 local function buildQuestTabModel(dataTable)
   local valid, validationError = Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, true) -- strict 校验结果
-  if not valid then
+  if not valid and not isRecoverableValidationError(validationError) then
     return nil, validationError
   end
 
   local model = {
-    expansions = {},
-    expansionByID = {},
+    maps = {},
+    mapByID = {},
     questLineByID = {},
     questToQuestLineID = {},
   }
 
-  local expansionIDList = {} -- 资料片 ID 列表
-  for expansionID in pairs(dataTable.expansionQuestLineIDs) do
-    if type(expansionID) == "number" then
-      expansionIDList[#expansionIDList + 1] = expansionID
-    end
+  -- 按 UiMapID 分组任务线，保持 questLines 定义顺序
+  local orderedQuestLineIDList = {} -- 有序任务线 ID 列表
+  for questLineID in pairs(dataTable.questLines) do
+    orderedQuestLineIDList[#orderedQuestLineIDList + 1] = questLineID
   end
-  table.sort(expansionIDList)
+  table.sort(orderedQuestLineIDList)
 
-  for _, expansionID in ipairs(expansionIDList) do
-    local expansionEntry = { -- 资料片模型
-      id = expansionID,
-      name = getExpansionNameByID(expansionID),
-      maps = {},
-      mapByID = {},
-      questLineIDs = {},
-    }
-
-    local orderedQuestLineIDList = dataTable.expansionQuestLineIDs[expansionID] or {} -- 资料片下任务线顺序
-    for _, questLineID in ipairs(orderedQuestLineIDList) do
-      local questLineRecord = dataTable.questLines[questLineID] -- 任务线元数据
-      if type(questLineRecord) == "table" then
-        local primaryMapID = questLineRecord.primaryMapID -- 主归属地图 ID
-        local mapEntry = expansionEntry.mapByID[primaryMapID] -- 地图模型
-        if type(mapEntry) ~= "table" then
-          mapEntry = {
-            id = primaryMapID,
-            name = getMapNameByID(primaryMapID),
-            questLines = {},
-            progress = { completed = 0, total = 0 },
-          }
-          expansionEntry.mapByID[primaryMapID] = mapEntry
-          expansionEntry.maps[#expansionEntry.maps + 1] = mapEntry
-        end
-
-        local questList = buildQuestListByQuestLineID(dataTable, questLineID) -- 任务线任务列表
-        local questLineModel = {
-          id = questLineID,
-          name = questLineRecord.name,
-          expansionID = expansionID,
-          mapID = primaryMapID,
-          quests = questList,
+  for _, questLineID in ipairs(orderedQuestLineIDList) do
+    local questLineRecord = dataTable.questLines[questLineID] -- 任务线元数据
+    if type(questLineRecord) == "table" then
+      local uiMapID = questLineRecord.UiMapID -- 归属地图 ID
+      local mapEntry = model.mapByID[uiMapID] -- 地图模型
+      if type(mapEntry) ~= "table" then
+        mapEntry = {
+          id = uiMapID,
+          name = getMapNameByID(uiMapID),
+          questLines = {},
+          progress = { completed = 0, total = 0 },
         }
-        questLineModel.progress = Toolbox.Questlines.GetChainProgress(questLineModel)
+        model.mapByID[uiMapID] = mapEntry
+        model.maps[#model.maps + 1] = mapEntry
+      end
 
-        mapEntry.questLines[#mapEntry.questLines + 1] = questLineModel
-        expansionEntry.questLineIDs[#expansionEntry.questLineIDs + 1] = questLineID
-        model.questLineByID[questLineID] = questLineModel
+      local questList = buildQuestListByQuestLineID(dataTable, questLineID) -- 任务线任务列表
+      local questLineModel = {
+        id = questLineID,
+        name = questLineRecord.Name_lang,
+        UiMapID = uiMapID,
+        quests = questList,
+      }
+      questLineModel.progress = Toolbox.Questlines.GetChainProgress(questLineModel)
 
-        for _, questEntry in ipairs(questList) do
-          model.questToQuestLineID[questEntry.id] = questLineID
-        end
+      mapEntry.questLines[#mapEntry.questLines + 1] = questLineModel
+      model.questLineByID[questLineID] = questLineModel
+
+      for _, questEntry in ipairs(questList) do
+        model.questToQuestLineID[questEntry.id] = questLineID
       end
     end
+  end
 
-    for _, mapEntry in ipairs(expansionEntry.maps) do
-      mapEntry.progress = buildMapProgress(mapEntry.questLines)
-    end
-
-    model.expansions[#model.expansions + 1] = expansionEntry
-    model.expansionByID[expansionID] = expansionEntry
+  for _, mapEntry in ipairs(model.maps) do
+    mapEntry.progress = buildMapProgress(mapEntry.questLines)
   end
 
   return model, nil
@@ -614,49 +518,40 @@ function Toolbox.Questlines.GetQuestTabModel()
     return model, nil
   end
   return {
-    expansions = {},
-    expansionByID = {},
+    maps = {},
+    mapByID = {},
     questLineByID = {},
     questToQuestLineID = {},
   }, errorObject
 end
 
 --- 按当前选中节点查询任务线列表。
----@param selectedKind string 选中类型（expansion|map|questline|quest）
----@param expansionID number|nil 资料片 ID
+---@param selectedKind string 选中类型（map|questline|quest）
 ---@param mapID number|nil 地图 ID
 ---@return table[] questLineList
 ---@return table|nil errorObject
-function Toolbox.Questlines.GetQuestLinesForSelection(selectedKind, expansionID, mapID)
+function Toolbox.Questlines.GetQuestLinesForSelection(selectedKind, mapID)
   local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 任务页签模型
   if errorObject then
     return {}, errorObject
   end
 
-  if selectedKind == "questline" then
-    return {}, nil
-  end
-  if selectedKind == "quest" then
-    return {}, nil
-  end
-
-  local expansionEntry = type(expansionID) == "number" and model.expansionByID[expansionID] or nil -- 资料片模型
-  if type(expansionEntry) ~= "table" then
+  if selectedKind == "questline" or selectedKind == "quest" then
     return {}, nil
   end
 
   if selectedKind == "map" and type(mapID) == "number" then
-    local mapEntry = expansionEntry.mapByID[mapID] -- 地图模型
+    local mapEntry = model.mapByID[mapID] -- 地图模型
     if type(mapEntry) == "table" then
       return mapEntry.questLines or {}, nil
     end
     return {}, nil
   end
 
-  local resultList = {} -- 资料片层任务线聚合列表
-  for _, questLineID in ipairs(expansionEntry.questLineIDs or {}) do
-    local questLineEntry = model.questLineByID[questLineID] -- 任务线对象
-    if type(questLineEntry) == "table" then
+  -- 默认返回全部任务线（平铺）
+  local resultList = {} -- 全部任务线列表
+  for _, mapEntry in ipairs(model.maps or {}) do
+    for _, questLineEntry in ipairs(mapEntry.questLines or {}) do
       resultList[#resultList + 1] = questLineEntry
     end
   end
@@ -706,14 +601,8 @@ function Toolbox.Questlines.GetQuestDetailByID(questID)
     questID = questID,
     name = getQuestNameByID(questID) or ("Quest #" .. tostring(questID)),
     status = getQuestStatus(questID),
-    mapID = questRecord.mapID,
+    UiMapID = questRecord.UiMapID,
     questLineID = questLineID,
     questLineName = questLineEntry and questLineEntry.name or nil,
-    expansionID = questLineEntry and questLineEntry.expansionID or nil,
-    startNpcID = questRecord.startNpcID,
-    turnInNpcID = questRecord.turnInNpcID,
-    prerequisiteQuestIDs = questRecord.prerequisiteQuestIDs,
-    nextQuestIDs = questRecord.nextQuestIDs,
-    unlockConditions = questRecord.unlockConditions,
   }, nil
 end

@@ -587,8 +587,7 @@ local QuestlineTreeView = {
   detailText = nil,
   rowHeight = 18,
   selected = false,
-  selectedKind = "expansion",
-  selectedExpansionID = nil,
+  selectedKind = "map",
   selectedMapID = nil,
   selectedQuestLineID = nil,
   selectedQuestID = nil,
@@ -759,7 +758,6 @@ end
 function QuestlineTreeView:saveSelection()
   local selectionTable = ensureSelectionTable() -- 选中状态持久化对象
   selectionTable.selectedKind = self.selectedKind
-  selectionTable.selectedExpansionID = self.selectedExpansionID
   selectionTable.selectedMapID = self.selectedMapID
   selectionTable.selectedQuestLineID = self.selectedQuestLineID
   selectionTable.selectedQuestID = self.selectedQuestID
@@ -767,48 +765,38 @@ end
 
 function QuestlineTreeView:loadSelection()
   local selectionTable = ensureSelectionTable() -- 选中状态持久化对象
-  self.selectedKind = type(selectionTable.selectedKind) == "string" and selectionTable.selectedKind or "expansion"
-  self.selectedExpansionID = type(selectionTable.selectedExpansionID) == "number" and selectionTable.selectedExpansionID or nil
+  self.selectedKind = type(selectionTable.selectedKind) == "string" and selectionTable.selectedKind or "map"
   self.selectedMapID = type(selectionTable.selectedMapID) == "number" and selectionTable.selectedMapID or nil
   self.selectedQuestLineID = type(selectionTable.selectedQuestLineID) == "number" and selectionTable.selectedQuestLineID or nil
   self.selectedQuestID = type(selectionTable.selectedQuestID) == "number" and selectionTable.selectedQuestID or nil
 end
 
 function QuestlineTreeView:resolveSelectionWithModel(questTabModel)
-  local expansionList = questTabModel and questTabModel.expansions or nil -- 资料片列表
-  if type(expansionList) ~= "table" or #expansionList == 0 then
-    self.selectedKind = "expansion"
-    self.selectedExpansionID = nil
+  local mapList = questTabModel and questTabModel.maps or nil -- 地图列表
+  if type(mapList) ~= "table" or #mapList == 0 then
+    self.selectedKind = "map"
     self.selectedMapID = nil
     self.selectedQuestLineID = nil
     self.selectedQuestID = nil
     return
   end
 
-  local expansionEntry = nil -- 当前选中的资料片对象
-  if type(self.selectedExpansionID) == "number" and questTabModel.expansionByID then
-    expansionEntry = questTabModel.expansionByID[self.selectedExpansionID]
+  local mapEntry = nil -- 当前选中的地图对象
+  if type(self.selectedMapID) == "number" and questTabModel.mapByID then
+    mapEntry = questTabModel.mapByID[self.selectedMapID]
   end
-  if type(expansionEntry) ~= "table" then
-    expansionEntry = expansionList[1]
-    self.selectedExpansionID = expansionEntry and expansionEntry.id or nil
-    self.selectedKind = "expansion"
-    self.selectedMapID = nil
+  if type(mapEntry) ~= "table" then
+    mapEntry = mapList[1]
+    self.selectedMapID = mapEntry and mapEntry.id or nil
+    self.selectedKind = "map"
     self.selectedQuestLineID = nil
     self.selectedQuestID = nil
   end
 
-  if self.selectedKind == "map" then
-    local mapEntry = expansionEntry and expansionEntry.mapByID and expansionEntry.mapByID[self.selectedMapID] or nil -- 地图对象
-    if type(mapEntry) ~= "table" then
-      self.selectedKind = "expansion"
-      self.selectedMapID = nil
-    end
-  elseif self.selectedKind == "questline" then
+  if self.selectedKind == "questline" then
     local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[self.selectedQuestLineID] or nil -- 任务线对象
-    if type(questLineEntry) ~= "table" or questLineEntry.expansionID ~= self.selectedExpansionID then
-      self.selectedKind = "expansion"
-      self.selectedMapID = nil
+    if type(questLineEntry) ~= "table" or questLineEntry.UiMapID ~= self.selectedMapID then
+      self.selectedKind = "map"
       self.selectedQuestLineID = nil
     end
   elseif self.selectedKind == "quest" then
@@ -818,16 +806,15 @@ function QuestlineTreeView:resolveSelectionWithModel(questTabModel)
       detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(self.selectedQuestID)
     end
     if detailError or type(detailObject) ~= "table" then
-      self.selectedKind = "expansion"
-      self.selectedMapID = nil
+      self.selectedKind = "map"
       self.selectedQuestLineID = nil
       self.selectedQuestID = nil
     else
       self.selectedQuestLineID = detailObject.questLineID
-      self.selectedMapID = detailObject.mapID
+      self.selectedMapID = detailObject.UiMapID
     end
   else
-    self.selectedKind = "expansion"
+    self.selectedKind = "map"
   end
 end
 
@@ -836,79 +823,55 @@ function QuestlineTreeView:buildQuestlineTreeRows(questTabModel)
   local rowList = {} -- 左侧树行列表
   local collapseState = getQuestlineCollapsedTable() -- 折叠状态表
 
-  local expansionList = questTabModel and questTabModel.expansions
-  if type(expansionList) ~= "table" or #expansionList == 0 then
+  local mapList = questTabModel and questTabModel.maps
+  if type(mapList) ~= "table" or #mapList == 0 then
     return rowList
   end
 
-  for _, expansionEntry in ipairs(expansionList) do
-    local expansionID = expansionEntry.id -- 当前资料片 ID
-    local expansionName = expansionEntry.name or ("Expansion #" .. tostring(expansionID or "?"))
-    local expansionCollapseKey = "expansion:" .. tostring(expansionID or "0")
-    local expansionCollapsed = collapseState[expansionCollapseKey] == true
-    local expansionPrefix = expansionCollapsed and "+" or "-"
-    local expansionSelected = self.selectedKind == "expansion" and self.selectedExpansionID == expansionID
-    rowList[#rowList + 1] = { -- 资料片行
+  for _, mapEntry in ipairs(mapList) do
+    local mapID = mapEntry.id -- 当前地图 ID
+    local mapCollapseKey = "map:" .. tostring(mapID or "0")
+    local mapCollapsed = collapseState[mapCollapseKey] == true
+    local mapPrefix = mapCollapsed and "+" or "-"
+    local mapProgress = mapEntry.progress or {}
+    local mapProgressText = string.format(
+      localeTable.EJ_QUESTLINE_PROGRESS_FMT or "%d/%d",
+      mapProgress.completed or 0,
+      mapProgress.total or 0
+    )
+    local mapSelected = self.selectedKind == "map" and self.selectedMapID == mapID
+    rowList[#rowList + 1] = { -- 地图行
       indent = 0,
-      text = string.format("%s %s", expansionPrefix, expansionName),
-      kind = "expansion",
-      selected = expansionSelected,
+      text = string.format("%s %s (%s)", mapPrefix, mapEntry.name or ("Map #" .. tostring(mapID or "?")), mapProgressText),
+      kind = "map",
+      selected = mapSelected,
       toggle = true,
-      collapseKey = expansionCollapseKey,
-      selectKind = "expansion",
-      expansionID = expansionID,
+      collapseKey = mapCollapseKey,
+      selectKind = "map",
+      mapID = mapID,
     }
 
-    if not expansionCollapsed then
-      local mapList = expansionEntry.maps or {} -- 当前资料片地图列表
-      for _, mapEntry in ipairs(mapList) do
-        local mapID = mapEntry.id -- 当前地图 ID
-        local mapCollapseKey = string.format("map:%s:%s", tostring(expansionID or "0"), tostring(mapID or "0"))
-        local mapCollapsed = collapseState[mapCollapseKey] == true
-        local mapPrefix = mapCollapsed and "+" or "-"
-        local mapProgress = mapEntry.progress or {}
-        local mapProgressText = string.format(
+    if not mapCollapsed then
+      local questLineList = mapEntry.questLines or {} -- 地图下任务线列表
+      for _, questLineEntry in ipairs(questLineList) do
+        local progressInfo = questLineEntry.progress or {}
+        local progressText = string.format(
           localeTable.EJ_QUESTLINE_PROGRESS_FMT or "%d/%d",
-          mapProgress.completed or 0,
-          mapProgress.total or 0
+          progressInfo.completed or 0,
+          progressInfo.total or 0
         )
-        local mapSelected = self.selectedKind == "map" and self.selectedMapID == mapID and self.selectedExpansionID == expansionID
+        local questLineID = questLineEntry.id -- 当前任务线 ID
+        local questLineSelected = self.selectedKind == "questline" and self.selectedQuestLineID == questLineID
         rowList[#rowList + 1] = {
           indent = 1,
-          text = string.format("%s %s (%s)", mapPrefix, mapEntry.name or ("Map #" .. tostring(mapID or "?")), mapProgressText),
-          kind = "map",
-          selected = mapSelected,
-          toggle = true,
-          collapseKey = mapCollapseKey,
-          selectKind = "map",
-          expansionID = expansionID,
+          text = string.format("%s (%s)", questLineEntry.name or ("QuestLine #" .. tostring(questLineID or "?")), progressText),
+          kind = "questline",
+          selected = questLineSelected,
+          toggle = false,
+          selectKind = "questline",
           mapID = mapID,
+          questLineID = questLineID,
         }
-
-        if not mapCollapsed then
-          local questLineList = mapEntry.questLines or {} -- 地图下任务线列表
-          for _, questLineEntry in ipairs(questLineList) do
-            local progressInfo = questLineEntry.progress or {}
-            local progressText = string.format(
-              localeTable.EJ_QUESTLINE_PROGRESS_FMT or "%d/%d",
-              progressInfo.completed or 0,
-              progressInfo.total or 0
-            )
-            local questLineID = questLineEntry.id -- 当前任务线 ID
-            local questLineSelected = self.selectedKind == "questline" and self.selectedQuestLineID == questLineID
-            rowList[#rowList + 1] = {
-              indent = 2,
-              text = string.format("%s (%s)", questLineEntry.name or ("QuestLine #" .. tostring(questLineID or "?")), progressText),
-              kind = "questline",
-              selected = questLineSelected,
-              toggle = false,
-              selectKind = "questline",
-              expansionID = expansionID,
-              mapID = mapID,
-              questLineID = questLineID,
-            }
-          end
-        end
       end
     end
   end
@@ -1020,7 +983,6 @@ function QuestlineTreeView:getOrCreateRowButton(rowIndex)
 
     if type(rowData.selectKind) == "string" then
       self.selectedKind = rowData.selectKind
-      self.selectedExpansionID = rowData.expansionID or self.selectedExpansionID
       self.selectedMapID = rowData.mapID
       self.selectedQuestLineID = rowData.questLineID
       if self.selectedKind ~= "quest" then
@@ -1232,7 +1194,7 @@ function QuestlineTreeView:render()
       detailLines[#detailLines + 1] = (localeTable.EJ_QUEST_DETAIL_TITLE or "任务详情")
       detailLines[#detailLines + 1] = string.format("ID: %s", tostring(detailObject.questID or ""))
       detailLines[#detailLines + 1] = string.format("%s: %s", localeTable.EJ_QUESTLINE_TREE_LABEL or "任务", tostring(detailObject.name or ""))
-      detailLines[#detailLines + 1] = string.format("Map: %s", tostring(detailObject.mapID or ""))
+      detailLines[#detailLines + 1] = string.format("Map: %s", tostring(detailObject.UiMapID or ""))
       if type(detailObject.startNpcID) == "number" then
         detailLines[#detailLines + 1] = string.format("Start NPC: %d", detailObject.startNpcID)
       end
@@ -1286,7 +1248,6 @@ function QuestlineTreeView:render()
       local queryListError = nil -- 任务线查询错误
       questLineList, queryListError = Toolbox.Questlines.GetQuestLinesForSelection(
         self.selectedKind,
-        self.selectedExpansionID,
         self.selectedMapID
       )
       if not queryListError and type(questLineList) == "table" then
@@ -1303,7 +1264,7 @@ function QuestlineTreeView:render()
             onClick = function()
               self.selectedKind = "questline"
               self.selectedQuestLineID = questLineEntry.id
-              self.selectedMapID = questLineEntry.mapID
+              self.selectedMapID = questLineEntry.UiMapID
             end,
           }
         end

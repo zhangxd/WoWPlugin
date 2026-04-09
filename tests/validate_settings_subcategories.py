@@ -337,11 +337,13 @@ def validate_encounter_journal_questline_tree_feature() -> None:
         raise AssertionError("questline api should not keep legacy GetExpansionTree compatibility")
     if "function Toolbox.Questlines.GetInstanceTree(" in questline_api_text:
         raise AssertionError("questline api should not keep legacy GetInstanceTree compatibility")
-    require_contains(data_text, "schemaVersion = 2", "questline data schema v2")
+    require_contains(data_text, "schemaVersion = 3", "questline data schema v3")
+    require_contains(data_text, 'sourceMode = "live"', "questline data source mode")
+    require_contains(data_text, "generatedAt = ", "questline data generated timestamp")
     require_contains(data_text, "quests = {", "questline data quests table")
     require_contains(data_text, "questLines = {", "questline data questlines table")
     require_contains(data_text, "questLineQuestIDs = {", "questline data questline quest map")
-    require_contains(data_text, "expansionQuestLineIDs = {", "questline data expansion questline map")
+    require_contains(questline_api_text, "function Toolbox.Questlines.SetDataOverride(", "questline mock data override api")
 
     require_contains(module_text, "QuestlineTreeView", "encounter journal questline tree view")
     require_contains(module_text, "questlineTreeEnabled", "encounter journal questline tree setting usage")
@@ -349,8 +351,13 @@ def validate_encounter_journal_questline_tree_feature() -> None:
     require_contains(module_text, "Toolbox.Questlines.GetQuestLinesForSelection", "encounter journal uses selection questline query api")
     require_contains(module_text, "Toolbox.Questlines.GetQuestListByQuestLineID", "encounter journal uses questline task list api")
     require_contains(module_text, "Toolbox.Questlines.GetQuestDetailByID", "encounter journal uses quest detail api")
+    require_contains(module_text, "detailObject.UiMapID", "encounter journal quest detail uses UiMapID field")
     if "Toolbox.Questlines.GetExpansionTree" in module_text:
         raise AssertionError("encounter journal should not fallback to legacy GetExpansionTree api")
+    if "questLineEntry.mapID" in module_text:
+        raise AssertionError("encounter journal should not read questline mapID from legacy field")
+    if "detailObject.mapID" in module_text:
+        raise AssertionError("encounter journal should not read detail mapID from legacy field")
     require_contains(module_text, "selectedKind", "encounter journal quest tab uses selection state machine")
     require_contains(module_text, "leftTree", "encounter journal quest tab has left tree container")
     require_contains(module_text, "rightContent", "encounter journal quest tab has right content container")

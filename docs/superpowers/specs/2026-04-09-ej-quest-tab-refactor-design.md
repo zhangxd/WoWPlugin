@@ -1,9 +1,19 @@
 # 冒险手册任务页签重构设计
 
 - 日期：2026-04-09
-- 状态：需求确认稿
+- 状态：已过时（schema 已升级至 v3，见 2026-04-10-questline-mock-data-separation.md）
 - 范围：`Toolbox`（Retail）
 - 关联模块：`encounter_journal`
+
+## 0. 归档说明（当前实现差异）
+
+本文档保留为 2026-04-09 历史草案，不再作为当前实现依据。当前代码以 `schema v3 + map 维度树` 为准，关键差异如下：
+
+1. 树层级已收敛为：`地图 -> 任务线 -> 任务`，不再使用“资料片节点”作为运行时模型主层级。
+2. 数据结构已切换为 `schemaVersion = 3`，核心字段为 `ID / Name_lang / UiMapID`，不再依赖 `expansionQuestLineIDs`。
+3. `QuestlineProgress` 已支持测试注入接口 `SetDataOverride(dataTable|nil)`。
+4. 任务页签运行时增加了可恢复容错：`E_BAD_REF / E_DUPLICATE_REF` 不再导致整页签不可用。
+5. 详细规范与测试约束以 `2026-04-10-questline-mock-data-separation.md` 为准。
 
 ## 1. 目标
 
