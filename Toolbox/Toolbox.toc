@@ -10,6 +10,7 @@
 # Core - Foundation（基础设施）
 # ============================================================================
 Core\Foundation\Namespace.lua
+Core\Foundation\Runtime.lua
 Core\Foundation\Locales.lua
 Core\Foundation\Config.lua
 Core\Foundation\ModuleRegistry.lua

@@ -124,6 +124,7 @@ def validate_modules() -> None:
 
 def validate_toc() -> None:
     text = read_text("Toolbox", "Toolbox.toc")
+    require_contains(text, "Core\\Foundation\\Runtime.lua", "runtime adapter toc entry")
     require_contains(text, "Modules\\EncounterJournal.lua", "encounter journal module toc entry")
     require_contains(text, "Modules\\MinimapButton.lua", "minimap button module toc entry")
     require_contains(text, "## Interface: 120000, 120001", "retail toc compatibility range")
@@ -131,8 +132,8 @@ def validate_toc() -> None:
 
 def validate_encounter_journal_regressions() -> None:
     text = read_text("Toolbox", "Modules", "EncounterJournal.lua")
-    # 调度器应使用可取消句柄，避免 C_Timer.After 防抖失效导致并发刷新。
-    require_contains(text, "C_Timer.NewTimer", "encounter journal uses cancellable timer")
+    # 调度器应通过 Runtime 统一走可取消句柄，避免 C_Timer.After 防抖失效导致并发刷新。
+    require_contains(text, "Runtime.NewTimer", "encounter journal uses runtime cancellable timer")
     # 关闭叠加后应主动清理已绘制文本，避免残留显示。
     require_contains(text, "function LockoutOverlay:clearAllFrames()", "encounter journal clear overlay helper")
     require_contains(text, "self:clearAllFrames()", "encounter journal clears overlays when disabled")
@@ -150,8 +151,8 @@ def validate_encounter_journal_regressions() -> None:
     )
     require_contains(
         text,
-        'if C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then\n    initHooks()\n    refreshAfterHookInit()',
-        "encounter journal runs deterministic refresh when ej was already loaded",
+        'if Runtime.IsAddOnLoaded("Blizzard_EncounterJournal") then\n    initHooks()\n    refreshAfterHookInit()',
+        "encounter journal runs deterministic refresh through runtime adapter when ej was already loaded",
     )
     require_contains(text, "MountFilter:createUI()\n          MountFilter:updateVisibility()", "encounter journal creates mount filter ui on EJ OnShow")
     require_contains(text, "return Toolbox.EJ.IsRaidOrDungeonInstanceListTab() == true", "encounter journal mount filter visibility delegates to ej domain api")

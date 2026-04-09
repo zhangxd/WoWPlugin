@@ -129,6 +129,59 @@ Debug 目录提供调试工具：
 
 游戏内执行对应函数（如 `/run DumpAllSavedInstances()`）。
 
+### 测试（静态校验 + 逻辑测试）
+
+统一入口：
+
+```bash
+python tests/run_all.py
+```
+
+该命令会顺序执行：
+
+- `python tests/validate_settings_subcategories.py`（静态结构校验）
+- `busted tests/logic/spec`（Lua 离线逻辑测试）
+
+可选参数：
+
+```bash
+# CI 模式
+python tests/run_all.py --ci
+
+# 允许更新逻辑测试 golden 快照
+python tests/run_all.py --update-golden
+```
+
+#### 依赖准备（Windows）
+
+推荐先使用跨平台一键脚本：
+
+```bash
+# 仅检查依赖是否齐全
+python scripts/setup_test_env.py --check
+
+# 自动安装缺失依赖（按平台选择安装方式）
+python scripts/setup_test_env.py --apply
+```
+
+逻辑测试依赖 `Lua + LuaRocks + busted`。如需手动安装，Windows 可按以下步骤执行：
+
+```powershell
+# 1) 安装 Lua（含 luarocks）
+winget install --id DEVCOM.Lua --source winget --scope user --accept-package-agreements --accept-source-agreements
+
+# 2) 安装编译工具链（用于 luarocks 编译 C 依赖）
+winget install --id BrechtSanders.WinLibs.MCF.UCRT --source winget --scope user --accept-package-agreements --accept-source-agreements
+
+# 3) 重开终端后安装 busted
+luarocks install busted
+```
+
+说明：
+
+- 安装后若当前终端仍提示找不到命令，先重开终端再执行测试命令。
+- `tests/run_all.py` 会优先从 `PATH` 查找 `busted`；若未命中，会回退尝试 `%APPDATA%\\luarocks\\bin\\busted.cmd`。
+
 ## 发布
 
 使用 Python 脚本打包（跨平台）：

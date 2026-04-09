@@ -12,6 +12,8 @@
 ]]
 
 local MODULE_ID = "encounter_journal"
+local Runtime = Toolbox.Runtime -- 运行时适配入口
+local CreateFrame = Runtime.CreateFrame -- Frame 创建函数
 
 -- ============================================================================
 -- 模块状态辅助
@@ -155,19 +157,19 @@ function MountFilter:createUI()
   checkBtn:SetScript("OnEnter", function(btn)
     local loc = Toolbox.L or {}
     GameTooltip._ToolboxSkipAnchorOverride = true
-    GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
-    GameTooltip:ClearLines()
+    Runtime.TooltipSetOwner(GameTooltip, btn, "ANCHOR_RIGHT")
+    Runtime.TooltipClear(GameTooltip)
     if not isModuleEnabled() then
-      GameTooltip:SetText(loc.EJ_MOUNT_FILTER_LABEL or "")
-      GameTooltip:AddLine(loc.EJ_MOUNT_FILTER_SETTINGS_DEPENDENCY_DISABLED or "", 1, 0.2, 0.2, true)
+      Runtime.TooltipSetText(GameTooltip, loc.EJ_MOUNT_FILTER_LABEL or "")
+      Runtime.TooltipAddLine(GameTooltip, loc.EJ_MOUNT_FILTER_SETTINGS_DEPENDENCY_DISABLED or "", 1, 0.2, 0.2, true)
     else
-      GameTooltip:SetText(loc.EJ_MOUNT_FILTER_HINT or "")
+      Runtime.TooltipSetText(GameTooltip, loc.EJ_MOUNT_FILTER_HINT or "")
     end
-    GameTooltip:Show()
+    Runtime.TooltipShow(GameTooltip)
   end)
   checkBtn:SetScript("OnLeave", function()
     GameTooltip._ToolboxSkipAnchorOverride = nil
-    GameTooltip:Hide()
+    Runtime.TooltipHide(GameTooltip)
   end)
 
   local anchorSuccess = pcall(function() checkBtn:SetPoint("RIGHT", anchorTarget, "LEFT", -8, 0) end)
@@ -420,15 +422,15 @@ function DetailEnhancer:ensureMountOnlyCheck()
   check:SetScript("OnEnter", function(btn)
     local loc = Toolbox.L or {}
     GameTooltip._ToolboxSkipAnchorOverride = true
-    GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
-    GameTooltip:ClearLines()
-    GameTooltip:SetText(loc.EJ_DETAIL_MOUNT_ONLY_LABEL or "")
-    GameTooltip:AddLine(loc.EJ_DETAIL_MOUNT_ONLY_HINT or "", 1, 1, 1, true)
-    GameTooltip:Show()
+    Runtime.TooltipSetOwner(GameTooltip, btn, "ANCHOR_RIGHT")
+    Runtime.TooltipClear(GameTooltip)
+    Runtime.TooltipSetText(GameTooltip, loc.EJ_DETAIL_MOUNT_ONLY_LABEL or "")
+    Runtime.TooltipAddLine(GameTooltip, loc.EJ_DETAIL_MOUNT_ONLY_HINT or "", 1, 1, 1, true)
+    Runtime.TooltipShow(GameTooltip)
   end)
   check:SetScript("OnLeave", function()
     GameTooltip._ToolboxSkipAnchorOverride = nil
-    GameTooltip:Hide()
+    Runtime.TooltipHide(GameTooltip)
   end)
 
   local difficultyControl = getDetailDifficultyControl()
@@ -659,20 +661,11 @@ end
 
 local function ensureEncounterJournalAddonLoaded()
   local addonName = "Blizzard_EncounterJournal" -- 冒险手册插件名
-  if C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded(addonName) then
+  if Runtime.IsAddOnLoaded(addonName) then
     return true
   end
-  if C_AddOns and C_AddOns.LoadAddOn then
-    local loadSuccess = pcall(C_AddOns.LoadAddOn, addonName) -- 新 API 加载
-    if loadSuccess then
-      return true
-    end
-  end
-  if type(LoadAddOn) == "function" then
-    local legacyLoadSuccess = pcall(LoadAddOn, addonName) -- 旧 API 兜底
-    if legacyLoadSuccess then
-      return true
-    end
+  if Runtime.LoadAddOn(addonName) then
+    return true
   end
   return _G.EncounterJournal ~= nil
 end
@@ -1936,7 +1929,7 @@ function LockoutOverlay:hookTooltips()
         if #lockouts == 0 then return end
 
         local loc = Toolbox.L or {}
-        GameTooltip:AddLine(" ")
+        Runtime.TooltipAddLine(GameTooltip, " ")
         for _, lockout in ipairs(lockouts) do
           local timeStr = formatResetTime(lockout.resetTime or 0)
           local resetLabel = string.format(loc.EJ_LOCKOUT_RESET_FMT or "%s - Resets in: %s",
@@ -1944,18 +1937,18 @@ function LockoutOverlay:hookTooltips()
           if lockout.isExtended then
             resetLabel = resetLabel .. " " .. (loc.EJ_LOCKOUT_EXTENDED or "(Extended)")
           end
-          GameTooltip:AddLine(resetLabel, 1, 0.8, 0)
+          Runtime.TooltipAddLine(GameTooltip, resetLabel, 1, 0.8, 0)
           if lockout.isRaid and (lockout.numEncounters or 0) > 0 then
             local progressLabel = string.format(loc.EJ_LOCKOUT_PROGRESS_FMT or "Progress: %d / %d bosses",
               lockout.encounterProgress or 0, lockout.numEncounters or 0)
-            GameTooltip:AddLine(progressLabel, 0.8, 0.8, 0.8)
+            Runtime.TooltipAddLine(GameTooltip, progressLabel, 0.8, 0.8, 0.8)
             local killed = Toolbox.EJ.GetKilledBosses(jid)
             for _, boss in ipairs(killed) do
-              GameTooltip:AddLine("  " .. (boss.name or ""), 0.6, 0.6, 0.6)
+              Runtime.TooltipAddLine(GameTooltip, "  " .. (boss.name or ""), 0.6, 0.6, 0.6)
             end
           end
         end
-        GameTooltip:Show()
+        Runtime.TooltipShow(GameTooltip)
       end)
     end)
   end)
@@ -2010,25 +2003,25 @@ local function appendAdventureGuideMicroButtonLockoutLines()
   local emptyText = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_EMPTY or "No saved instance lockouts." -- 空态文案
   local moreFormat = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_MORE_FMT or "+%d more..." -- 溢出计数文案
 
-  GameTooltip:AddLine(" ")
-  GameTooltip:AddLine(sectionTitle, 1, 0.82, 0.2)
+  Runtime.TooltipAddLine(GameTooltip, " ")
+  Runtime.TooltipAddLine(GameTooltip, sectionTitle, 1, 0.82, 0.2)
 
   if not Toolbox.EJ or type(Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines) ~= "function" then
-    GameTooltip:AddLine(emptyText, 0.75, 0.75, 0.75, true)
+    Runtime.TooltipAddLine(GameTooltip, emptyText, 0.75, 0.75, 0.75, true)
     return
   end
 
   local lineList, overflowCount = Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines(8) -- 锁定摘要行与溢出数量
   if type(lineList) ~= "table" or #lineList == 0 then
-    GameTooltip:AddLine(emptyText, 0.75, 0.75, 0.75, true)
+    Runtime.TooltipAddLine(GameTooltip, emptyText, 0.75, 0.75, 0.75, true)
     return
   end
 
   for _, lineText in ipairs(lineList) do
-    GameTooltip:AddLine(lineText, 0.82, 0.88, 1, true)
+    Runtime.TooltipAddLine(GameTooltip, lineText, 0.82, 0.88, 1, true)
   end
   if type(overflowCount) == "number" and overflowCount > 0 then
-    GameTooltip:AddLine(string.format(moreFormat, overflowCount), 0.6, 0.6, 0.6, true)
+    Runtime.TooltipAddLine(GameTooltip, string.format(moreFormat, overflowCount), 0.6, 0.6, 0.6, true)
   end
 end
 
@@ -2046,11 +2039,11 @@ local function refreshAdventureGuideMicroButtonTooltipIfOwned()
   if type(onEnterHandler) == "function" then
     pcall(onEnterHandler, microButton)
     appendAdventureGuideMicroButtonLockoutLines()
-    GameTooltip:Show()
+    Runtime.TooltipShow(GameTooltip)
     return
   end
   appendAdventureGuideMicroButtonLockoutLines()
-  GameTooltip:Show()
+  Runtime.TooltipShow(GameTooltip)
 end
 
 --- 在右下角微型菜单的冒险手册按钮 tooltip 末尾追加当前角色副本 CD 摘要。
@@ -2071,7 +2064,7 @@ local function hookAdventureGuideMicroButtonTooltip()
           GameTooltip._toolboxEJMicroLockoutsAdded = nil
         end
         appendAdventureGuideMicroButtonLockoutLines()
-        GameTooltip:Show()
+        Runtime.TooltipShow(GameTooltip)
       end)
     end)
     microButton:HookScript("OnLeave", function()
@@ -2103,30 +2096,32 @@ function RefreshScheduler:schedule(reason)
 
   local delay = self.delays[reason] or 0.1
   self.token = (self.token or 0) + 1
-  local currentToken = self.token
+  local currentToken = self.token -- 当前调度令牌
 
-  if C_Timer and C_Timer.NewTimer then
-    self.timer = C_Timer.NewTimer(delay, function()
-      if self.token ~= currentToken then
-        return
-      end
-      self.timer = nil
-      self:execute()
-    end)
+  local timerHandle = Runtime.NewTimer(delay, function()
+    if self.token ~= currentToken then
+      return
+    end
+    self.timer = nil
+    self:execute()
+  end)
+  if timerHandle then
+    self.timer = timerHandle
     return
   end
 
-  if C_Timer and C_Timer.After then
-    C_Timer.After(delay, function()
-      if self.token ~= currentToken then
-        return
-      end
-      self.timer = nil
-      self:execute()
-    end)
+  local afterScheduled = false -- 延时任务是否已调度
+  Runtime.After(delay, function()
+    afterScheduled = true
+    if self.token ~= currentToken then
+      return
+    end
+    self.timer = nil
+    self:execute()
+  end)
+  if afterScheduled then
     return
   end
-
   self:execute()
 end
 
@@ -2199,7 +2194,7 @@ local function initHooks()
         if QuestlineTreeView.selected then
           QuestlineTreeView.selected = false
         end
-        C_Timer.After(0, function()
+        Runtime.After(0, function()
           scrollBoxCache.ref = nil
           scrollBoxCache.lastUpdate = 0
           RefreshScheduler:schedule("tab_change")
@@ -2308,12 +2303,51 @@ local function registerIntegration()
   end)
 
   -- 如果 EJ 已加载，立即初始化
-  if C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
+  if Runtime.IsAddOnLoaded("Blizzard_EncounterJournal") then
     initHooks()
     refreshAfterHookInit()
   end
 
   RequestRaidInfo()
+end
+
+local function exposeTestHooksIfNeeded()
+  local testingEnabled = false -- 是否测试模式
+  if type(Runtime.IsTesting) == "function" and Runtime.IsTesting() == true then
+    testingEnabled = true
+  elseif Runtime.__isTesting == true then
+    testingEnabled = true
+  end
+  if not testingEnabled then
+    return
+  end
+
+  Toolbox.TestHooks = Toolbox.TestHooks or {} -- 测试 hook 容器
+  Toolbox.TestHooks.EncounterJournal = {
+    appendAdventureGuideMicroButtonLockoutLines = appendAdventureGuideMicroButtonLockoutLines,
+    refreshAdventureGuideMicroButtonTooltipIfOwned = refreshAdventureGuideMicroButtonTooltipIfOwned,
+    hookAdventureGuideMicroButtonTooltip = hookAdventureGuideMicroButtonTooltip,
+    getEventFrame = function()
+      return eventFrame
+    end,
+    getRefreshScheduler = function()
+      return RefreshScheduler
+    end,
+    resetInternalState = function()
+      if eventFrame and eventFrame.UnregisterEvent then
+        eventFrame:UnregisterEvent("ADDON_LOADED")
+        eventFrame:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        eventFrame:UnregisterEvent("UPDATE_INSTANCE_INFO")
+      end
+      eventFrame = nil
+      microButtonTooltipHooked = false
+      hooked = false
+      detailInfoOnShowHooked = false
+      RefreshScheduler:cancel()
+      RefreshScheduler.token = 0
+      RefreshScheduler.timer = nil
+    end,
+  }
 end
 
 -- ============================================================================
@@ -2327,6 +2361,7 @@ Toolbox.RegisterModule({
   settingsOrder = 50,
 
   OnModuleLoad = function()
+    exposeTestHooksIfNeeded()
     registerIntegration()
   end,
 

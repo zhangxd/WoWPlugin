@@ -24,16 +24,85 @@
 2. 一次性改造全部模块为可注入结构。
 3. 大规模目录重构。
 
+## 技术决策（Phase 1，开工基线）
+
+### 1) 测试运行器与统一入口
+
+1. 逻辑测试运行器选型：`Lua 5.1 + busted`（仅用于 `tests/logic/**`）。
+2. 现有静态校验保留：`python tests/validate_settings_subcategories.py`。
+3. 统一一键入口：新增 `python tests/run_all.py`，顺序执行：
+   - 静态校验：`python tests/validate_settings_subcategories.py`
+   - 逻辑测试：`busted tests/logic`
+4. CI 与本地使用同一命令：`python tests/run_all.py --ci`。
+
+### 2) 目录与文件约定
+
+```text
+tests/
+  validate_settings_subcategories.py
+  run_all.py
+  logic/
+    harness/
+      fake_runtime.lua
+      fake_frame.lua
+      fake_timer.lua
+      fake_tooltip.lua
+    spec/
+      encounter_journal_event_lifecycle_spec.lua
+      encounter_journal_scheduler_spec.lua
+      encounter_journal_tooltip_spec.lua
+    golden/
+      zhCN/
+        encounter_journal_tooltip_lockout_lines.golden.txt
+      enUS/
+        encounter_journal_tooltip_lockout_lines.golden.txt
+```
+
+### 3) Runtime Adapter 落点与范围
+
+1. 适配层落点：`Toolbox/Core/Foundation/Runtime.lua`，对外挂载 `Toolbox.Runtime`。
+2. Phase 1 仅改造 Encounter Journal 直接依赖点，不做全仓库迁移。
+3. Phase 1 最小接口（必须）：
+   - `Runtime.CreateFrame(frameType, frameName, parentFrame, templateName)`
+   - `Runtime.NewTimer(delaySeconds, callback)`（返回含 `Cancel()` 的句柄）
+   - `Runtime.After(delaySeconds, callback)`（用于下一帧/延迟调度路径）
+   - `Runtime.IsAddOnLoaded(addonName)`
+   - `Runtime.LoadAddOn(addonName)`（与现有加载分支保持一致）
+   - `Runtime.TooltipSetOwner(tooltipObject, ownerFrame, anchorType)`
+   - `Runtime.TooltipClear(tooltipObject)`
+   - `Runtime.TooltipSetText(tooltipObject, text)`
+   - `Runtime.TooltipAddLine(tooltipObject, text, red, green, blue, wrapText)`
+   - `Runtime.TooltipShow(tooltipObject)`
+   - `Runtime.TooltipHide(tooltipObject)`
+
+### 4) Golden 快照与稳定性策略
+
+1. 快照文件按 locale 分目录（`zhCN` / `enUS`），防止语言切换导致误报。
+2. 逻辑测试默认“只读比对”；更新快照需显式开启：
+   - `UPDATE_GOLDEN=1 busted tests/logic`（Windows 可由 `run_all.py` 负责兼容环境变量写法）。
+3. Golden 用例输入必须固定：
+   - 固定锁定数据顺序
+   - 固定 `GetLocale()` 返回
+   - 固定时间相关文本源（若涉及）
+
+### 5) 缺陷注入验收机制（可重复）
+
+1. 新增一条“验收演示”脚本（仅测试阶段使用，不进入生产 TOC）：
+   - 对 `appendAdventureGuideMicroButtonLockoutLines` 的“overflow 行”分支做临时破坏（例如注释掉 `moreFormat` 行追加）。
+2. 预期：`encounter_journal_tooltip_spec.lua` 至少 1 条用例稳定失败并给出行级差异。
+3. 回滚后再次运行，测试恢复通过。
+
 ## 需求明细
 
 ### 1) 运行时接口抽象（Runtime Adapter）
 
 1. 业务层不再散落直调 `_G` / `C_*`，统一经运行时适配层调用。
 2. 生产环境绑定真实 WoW API；测试环境允许注入 fake 实现。
-3. Phase 1 至少抽象以下能力：
+3. Phase 1 至少抽象以下能力（按最小可测接口实现）：
    - `CreateFrame`
    - `C_Timer.NewTimer`（及取消句柄）
-   - `C_AddOns.IsAddOnLoaded`
+   - `C_Timer.After`
+   - `C_AddOns.IsAddOnLoaded` / `LoadAddOn`
    - tooltip 追加/刷新所需调用点
 
 ### 2) 离线测试 Harness
@@ -47,6 +116,41 @@
    - 执行：模块逻辑调用
    - 断言：状态、输出、副作用调用序列
 
+### 2.1) Harness API 契约（Phase 1 最小集）
+
+1. `Harness.new(options)`：
+   - 输入：`locale`、`moduleDbSeed`、`addonLoadedSeed`、`lockoutRowsSeed`。
+   - 输出：`harness` 对象（包含 fake runtime、trace 与断言辅助）。
+2. `harness:loadEncounterJournalModule()`：
+   - 加载目标模块并触发 `OnModuleLoad` 初始化路径。
+3. `harness:emit(eventName, ...)`：
+   - 向 fake event frame 投递事件（如 `ADDON_LOADED`、`UPDATE_INSTANCE_INFO`）。
+4. `harness:advance(seconds)`：
+   - 推进 fake timer 时钟，触发到期回调。
+5. `harness:runAllTimers()`：
+   - 直接冲刷所有已创建且未取消 timer。
+6. `harness:getTrace()`：
+   - 返回副作用调用序列（事件注册/反注册、RequestRaidInfo、tooltip 行追加、timer 创建/取消）。
+7. `harness:getTooltipLines()`：
+   - 返回当前 tooltip 文本行数组（供 golden 比对）。
+8. `harness:resetState()`：
+   - 清空 trace、tooltip、timer 队列，便于同文件多用例隔离。
+
+### 2.2) Fake 对象行为约定（用于稳定断言）
+
+1. fake frame：
+   - 必须记录 `RegisterEvent` / `UnregisterEvent` 调用历史。
+   - `SetScript("OnEvent", cb)` 后支持 `emit` 触发。
+   - `HookScript(scriptName, cb)` 需支持同脚本多回调链式执行。
+2. fake timer：
+   - `NewTimer` 返回句柄带 `Cancel()`。
+   - 被取消 timer 不得执行回调，且 trace 可见 `cancel` 行为。
+   - 支持同一时间戳多个 timer 的稳定执行顺序（按创建顺序）。
+3. fake tooltip：
+   - 记录 `SetText` 与每次 `AddLine` 的文本内容。
+   - `Show()` 不改变内容，仅记录展示调用次数。
+   - 支持 `_toolboxEJMicroLockoutsAdded` 这类状态位读写。
+
 ### 3) 用例建设
 
 1. 为 Encounter Journal 增加不少于 8 条逻辑测试。
@@ -56,11 +160,57 @@
    - tooltip 文本行增补逻辑
 3. 引入快照断言（golden）用于文本结果回归。
 
+### 3.1) 首批 8 条用例清单（输入 / 触发 / 断言）
+
+1. `load_registers_expected_events`
+   - 输入：模块启用，`Blizzard_EncounterJournal` 未加载。
+   - 触发：`OnModuleLoad`。
+   - 断言：注册 `ADDON_LOADED`、`PLAYER_ENTERING_WORLD`，并按启用态决定 `UPDATE_INSTANCE_INFO`。
+2. `disable_unregisters_lockout_event_and_cancels_scheduler`
+   - 输入：模块先启用并已有待执行刷新 timer。
+   - 触发：`OnEnabledSettingChanged(false)`。
+   - 断言：`UnregisterEvent("UPDATE_INSTANCE_INFO")`、timer 被取消、清理选择态与 overlay。
+3. `addon_loaded_blizzard_encounterjournal_init_once`
+   - 输入：已注册事件，`name = "Blizzard_EncounterJournal"`。
+   - 触发：`emit("ADDON_LOADED", "Blizzard_EncounterJournal")` 两次。
+   - 断言：初始化 hook 仅执行一次，且 `ADDON_LOADED` 在首次后被反注册。
+4. `player_entering_world_requests_raidinfo_once`
+   - 输入：模块已加载，世界进入事件可触发。
+   - 触发：`emit("PLAYER_ENTERING_WORLD")` 两次。
+   - 断言：首次调用 `RequestRaidInfo` 且随后反注册该事件，第二次不重复执行。
+5. `refresh_scheduler_debounce_keeps_latest_token`
+   - 输入：连续两次 `schedule`（不同 reason，第二次更晚触发）。
+   - 触发：`advance()` 到两个 timer 都到期。
+   - 断言：仅最新 token 对应刷新真正执行一次，旧 token 回调被丢弃。
+6. `micro_button_tooltip_empty_state_lines`
+   - 输入：锁定摘要为空，tooltip 已 owned。
+   - 触发：调用微型菜单 tooltip 增补路径。
+   - 断言：出现“标题 + 空状态文案”，且不出现具体副本行。
+7. `micro_button_tooltip_overflow_appends_more_line`
+   - 输入：锁定摘要数量超上限，`moreFormat` 可用。
+   - 触发：调用 tooltip 增补路径。
+   - 断言：除可见行外，末尾追加“还有 N 条未显示”提示。
+8. `tooltip_lines_match_golden_for_known_dataset`
+   - 输入：固定锁定数据样本（含普通本/团队本/首领进度）。
+   - 触发：执行一次完整 tooltip 构建。
+   - 断言：输出行与 `golden/<locale>/encounter_journal_tooltip_lockout_lines.golden.txt` 完全一致。
+
 ### 4) 执行与集成
 
 1. 本地可一键运行逻辑测试。
 2. CI 可执行同一命令并产出失败信息。
 3. 与现有 `validate_settings_subcategories.py` 并行保留。
+
+### 4.1) 命令与失败输出约定
+
+1. 本地：
+   - `python tests/run_all.py`
+2. CI：
+   - `python tests/run_all.py --ci`
+3. 失败输出必须包含：
+   - 用例名（spec + case）
+   - 断言类型（事件生命周期 / 副作用序列 / golden diff）
+   - 关键信息（期望值 vs 实际值）
 
 ## 验收标准
 
