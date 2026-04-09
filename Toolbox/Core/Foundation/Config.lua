@@ -73,6 +73,8 @@ local defaults = {
       questlineTreeEnabled = true,
       -- 折叠状态：key=true 表示该节点折叠（由任务树视图使用）
       questlineTreeCollapsed = {},
+      -- 任务页签选中状态（左树 + 右内容区）
+      questlineTreeSelection = {},
       -- 根页签顺序（按页签 ID，自定义任务页签固定 ID=203）
       rootTabOrderIds = {},
       -- 根页签隐藏开关（按页签 ID）：[id]=true 表示隐藏对应页签
@@ -228,6 +230,9 @@ function Toolbox.Config.Init()
       end
     end
     encounterJournalDb.questlineTreeExpanded = nil
+    if type(encounterJournalDb.questlineTreeSelection) ~= "table" then
+      encounterJournalDb.questlineTreeSelection = {}
+    end
   end
 end
 
