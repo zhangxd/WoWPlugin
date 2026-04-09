@@ -327,14 +327,15 @@ def validate_encounter_journal_questline_tree_feature() -> None:
     require_contains(locale_text, "EJ_QUESTLINE_PROGRESS_FMT", "questline tree progress locale")
 
     require_contains(questline_api_text, "Toolbox.Questlines", "questline namespace")
-    require_contains(questline_api_text, "function Toolbox.Questlines.RegisterType(", "questline register type api")
-    require_contains(questline_api_text, "function Toolbox.Questlines.GetExpansionTree(", "questline expansion tree api")
-    require_contains(questline_api_text, "function Toolbox.Questlines.GetInstanceTree(", "questline instance tree api")
     require_contains(questline_api_text, "function Toolbox.Questlines.GetChainProgress(", "questline chain progress api")
     require_contains(questline_api_text, "function Toolbox.Questlines.ValidateInstanceQuestlinesData(", "questline strict validation api")
     require_contains(questline_api_text, "function Toolbox.Questlines.GetQuestTabModel(", "questline quest tab model api")
     require_contains(questline_api_text, "function Toolbox.Questlines.GetQuestListByQuestLineID(", "questline list api")
     require_contains(questline_api_text, "function Toolbox.Questlines.GetQuestDetailByID(", "quest detail api")
+    if "function Toolbox.Questlines.GetExpansionTree(" in questline_api_text:
+        raise AssertionError("questline api should not keep legacy GetExpansionTree compatibility")
+    if "function Toolbox.Questlines.GetInstanceTree(" in questline_api_text:
+        raise AssertionError("questline api should not keep legacy GetInstanceTree compatibility")
     require_contains(data_text, "schemaVersion = 2", "questline data schema v2")
     require_contains(data_text, "quests = {", "questline data quests table")
     require_contains(data_text, "questLines = {", "questline data questlines table")
@@ -343,10 +344,12 @@ def validate_encounter_journal_questline_tree_feature() -> None:
 
     require_contains(module_text, "QuestlineTreeView", "encounter journal questline tree view")
     require_contains(module_text, "questlineTreeEnabled", "encounter journal questline tree setting usage")
-    require_contains(module_text, "Toolbox.Questlines.GetExpansionTree", "encounter journal uses decoupled questline api")
+    require_contains(module_text, "Toolbox.Questlines.GetQuestTabModel", "encounter journal uses quest tab model api")
     require_contains(module_text, "Toolbox.Questlines.GetQuestLinesForSelection", "encounter journal uses selection questline query api")
     require_contains(module_text, "Toolbox.Questlines.GetQuestListByQuestLineID", "encounter journal uses questline task list api")
     require_contains(module_text, "Toolbox.Questlines.GetQuestDetailByID", "encounter journal uses quest detail api")
+    if "Toolbox.Questlines.GetExpansionTree" in module_text:
+        raise AssertionError("encounter journal should not fallback to legacy GetExpansionTree api")
     require_contains(module_text, "selectedKind", "encounter journal quest tab uses selection state machine")
     require_contains(module_text, "leftTree", "encounter journal quest tab has left tree container")
     require_contains(module_text, "rightContent", "encounter journal quest tab has right content container")

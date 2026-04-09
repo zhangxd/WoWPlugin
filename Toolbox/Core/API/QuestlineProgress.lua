@@ -3,12 +3,10 @@
   设计目标：
     1. 以 schema v2（quests/questLines/questLineQuestIDs/expansionQuestLineIDs）作为唯一数据源。
     2. 提供 strict 校验、任务页签查询模型与任务详情查询接口。
-    3. 保留旧入口 GetExpansionTree/GetInstanceTree，供旧 UI 过渡期兼容。
 ]]
 
 Toolbox.Questlines = Toolbox.Questlines or {}
 
-local typeRegistry = {} -- 类型注册表（兼容旧树输出）
 local runtimeCache = { -- 运行时模型缓存
   dataRef = nil,
   generatedAt = nil,
@@ -719,108 +717,3 @@ function Toolbox.Questlines.GetQuestDetailByID(questID)
     unlockConditions = questRecord.unlockConditions,
   }, nil
 end
-
---- 获取类型定义（含默认策略）。
----@param typeID string
----@return table
-local function getTypeDefinition(typeID)
-  return typeRegistry[typeID] or {
-    id = typeID,
-    order = 1000,
-    localeKey = nil,
-  }
-end
-
---- 注册任务线类型解析器（兼容旧接口签名）。
----@param typeID string
----@param definition table|nil
-function Toolbox.Questlines.RegisterType(typeID, definition)
-  if type(typeID) ~= "string" or typeID == "" then
-    return
-  end
-  if type(definition) ~= "table" then
-    definition = {}
-  end
-
-  typeRegistry[typeID] = {
-    id = typeID,
-    order = tonumber(definition.order) or 1000,
-    localeKey = definition.localeKey,
-  }
-end
-
---- 将 v2 任务页签模型转换为旧树形结构（兼容旧 UI）。
----@param model table 任务页签模型
----@param targetExpansionID number|nil 指定资料片过滤
----@return table
-local function buildLegacyTreeFromModel(model, targetExpansionID)
-  local localeTable = Toolbox.L or {} -- 本地化文案表
-  local mapTypeDef = getTypeDefinition("map") -- map 类型定义
-  local mapTypeLabel = (mapTypeDef.localeKey and localeTable[mapTypeDef.localeKey]) or "map" -- map 类型标签
-  local resultTree = { expansions = {} } -- 兼容树返回值
-
-  for _, expansionEntry in ipairs(model.expansions or {}) do
-    if type(targetExpansionID) ~= "number" or expansionEntry.id == targetExpansionID then
-      local legacyExpansion = {
-        id = expansionEntry.id,
-        name = expansionEntry.name,
-        types = {
-          {
-            id = "map",
-            label = mapTypeLabel,
-            nodes = {},
-          },
-        },
-      }
-
-      local mapTypeEntry = legacyExpansion.types[1] -- map 类型节点
-      for _, mapEntry in ipairs(expansionEntry.maps or {}) do
-        local legacyNode = {
-          id = mapEntry.id,
-          name = mapEntry.name,
-          chains = {},
-          progress = mapEntry.progress,
-        }
-        for _, questLineEntry in ipairs(mapEntry.questLines or {}) do
-          legacyNode.chains[#legacyNode.chains + 1] = {
-            id = questLineEntry.id,
-            name = questLineEntry.name,
-            quests = questLineEntry.quests,
-            progress = questLineEntry.progress,
-          }
-        end
-        mapTypeEntry.nodes[#mapTypeEntry.nodes + 1] = legacyNode
-      end
-
-      resultTree.expansions[#resultTree.expansions + 1] = legacyExpansion
-    end
-  end
-
-  return resultTree
-end
-
---- 返回任务线扩展包树（旧兼容接口）。
----@param expansionID number|nil 可选资料片 ID
----@return table
-function Toolbox.Questlines.GetExpansionTree(expansionID)
-  local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- v2 模型
-  if errorObject then
-    return { expansions = {}, error = errorObject }
-  end
-  return buildLegacyTreeFromModel(model, expansionID)
-end
-
---- 兼容旧接口：保持函数名，返回当前全部扩展包树。
----@param journalInstanceID number|nil
----@return table
-function Toolbox.Questlines.GetInstanceTree(journalInstanceID)
-  local expansionTree = Toolbox.Questlines.GetExpansionTree() -- 兼容扩展包树
-  expansionTree.journalInstanceID = type(journalInstanceID) == "number" and journalInstanceID or nil
-  return expansionTree
-end
-
--- 默认类型：map（地图分组）
-Toolbox.Questlines.RegisterType("map", {
-  order = 10,
-  localeKey = "EJ_QUESTLINE_TREE_TYPE_MAP",
-})

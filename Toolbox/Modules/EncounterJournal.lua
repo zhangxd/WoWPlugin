@@ -7,7 +7,7 @@
   数据来源：
     - 坐骑掉落：Toolbox.Data.MountDrops（Data/InstanceDrops_Mount.lua）
     - 锁定查询：Toolbox.EJ.GetAllLockoutsForInstance / GetKilledBosses（Core/EncounterJournal.lua）
-    - 任务树：Toolbox.Questlines.GetExpansionTree（Core/API/QuestlineProgress.lua）
+    - 任务树：Toolbox.Questlines.GetQuestTabModel（Core/API/QuestlineProgress.lua）
   存档键：ToolboxDB.modules.encounter_journal
 ]]
 
@@ -1135,10 +1135,6 @@ function QuestlineTreeView:render()
   local queryError = nil -- 查询错误对象
   if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestTabModel) == "function" then
     questTabModel, queryError = Toolbox.Questlines.GetQuestTabModel()
-  elseif Toolbox.Questlines and type(Toolbox.Questlines.GetExpansionTree) == "function" then
-    -- 兼容兜底：保留旧 API 检测路径，确保无新 API 时仍可提示空态。
-    local legacyTree = Toolbox.Questlines.GetExpansionTree()
-    questTabModel = { expansions = legacyTree and legacyTree.expansions or {} }
   end
 
   if queryError then
