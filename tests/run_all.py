@@ -42,6 +42,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    contract_ret = run_step(
+        "validate_data_contracts",
+        [sys.executable, "tests/validate_data_contracts.py"],
+    )
+    if contract_ret != 0:
+        return contract_ret
+
     static_ret = run_step(
         "validate_settings_subcategories",
         [sys.executable, "tests/validate_settings_subcategories.py"],
