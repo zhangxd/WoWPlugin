@@ -40,7 +40,7 @@
 
 ```lua
 Toolbox.Data.InstanceQuestlines = {
-  schemaVersion = 4,
+  schemaVersion = 3,
   sourceMode = "live",
   generatedAt = "2026-..",
 
@@ -76,8 +76,8 @@ Toolbox.Data.InstanceQuestlines = {
 
 - `Type` 直接使用 WoWDB 原始枚举值（number）。
 - `MapPos/NpcPos` 的 `UiMapID` 可省略，默认等于 `quests[questID].UiMapID`。
-- 若需保持 `schemaVersion = 3`，新增字段必须视为可选；本设计推荐升至 `v4` 以保证 strict 校验一致。
-- 当前仓库约定中 `InstanceQuestlines` 尚未纳入 wow.db 自动导出；如要切换为自动导出，需同时补齐脚本规则、文件头模板与导出实跑（见 AGENTS.md）。
+- 本次实现阶段确认保持 `schemaVersion = 3`，新增字段必须视为可选。
+- 当前仓库约定中 `InstanceQuestlines` 尚未纳入 wow.db 自动导出；本次实现阶段确认保持该约定，不切换自动导出。
 - 当前阶段仅为字段定义，不要求运行导出脚本；正式发布前再补齐导出流程与实跑验证。
 
 ### 3.0 必要字段基线（已确认）
@@ -282,8 +282,8 @@ SelectionState = {
 
 ---
 
-## 14. 待确认项（实现前）
+## 14. 实现前确认结果（2026-04-10）
 
-1. `schemaVersion` 是否升级到 4。
-2. `InstanceQuestlines` 是否切换为 wow.db 自动导出。
-3. （已确认）状态口径不做进一步细化，维持三态。
+1. `schemaVersion`：保持 `3`（不升级到 `4`）。
+2. `InstanceQuestlines`：本次不切换为 wow.db 自动导出，维持当前手工维护/开发中约定。
+3. 状态口径：不做进一步细化，维持三态。
