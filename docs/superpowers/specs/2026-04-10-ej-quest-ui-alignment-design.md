@@ -76,6 +76,18 @@ Toolbox.Data.InstanceQuestlines = {
 - `Type` 直接使用 WoWDB 原始枚举值。
 - `MapPos/NpcPos` 的 `UiMapID` 可省略，默认等于 `quests[questID].UiMapID`。
 - 若需保持 `schemaVersion = 3`，新增字段必须视为可选；本设计推荐升至 `v4` 以保证 strict 校验一致。
+- 当前仓库约定中 `InstanceQuestlines` 尚未纳入 wow.db 自动导出；如要切换为自动导出，需同时补齐脚本规则、文件头模板与导出实跑（见 AGENTS.md）。
+
+### 3.1 UI 字段来源与兜底（实现前需按 AGENTS 查证 API）
+
+| UI 字段 | 主要来源 | 兜底 |
+|---|---|---|
+| 任务名 | `C_QuestLog.GetTitleForQuestID` | `QuestUtils_GetQuestName` |
+| 地图名 | `C_Map.GetMapInfo(UiMapID).name` | `Map #<id>` |
+| 任务状态 | `IsQuestFlaggedCompleted` + `GetLogIndexForQuestID` | 无 |
+| 可交付 | `C_QuestLog.ReadyForTurnIn` | 无 |
+
+> 注：以上 API 需在实现前按权威资料查证并核对参数/返回值。
 
 ---
 
@@ -93,7 +105,7 @@ QuestTabModel = {
 
   typeList = { "RAW_DB_TYPE_A", "RAW_DB_TYPE_B", ... },
   typeToQuestIDs = { [typeKey] = { questID1, questID2, ... } },
-  typeToQuestLineIDs = { [typeKey] = { questLineID1, questLineID2, ... } },
+ typeToQuestLineIDs = { [typeKey] = { questLineID1, questLineID2, ... } },
   typeToMapIDs = { [typeKey] = { mapID1, mapID2, ... } },
 }
 ```
@@ -103,6 +115,7 @@ QuestTabModel = {
 - `typeList` 为去重后的类型列表（即类型桶）。
 - 同一任务线可出现在多个类型桶。
 - 若任务/任务线缺少地图，则类型视图跳过地图层。
+- 运行时索引的落点需与分层一致：若视为通用领域能力，放在 `Toolbox.Questlines`；若仅 UI 所用，则由模块侧缓存生成（待确认）。
 
 ---
 
@@ -120,6 +133,13 @@ SelectionState = {
   selectedQuestID = 789,
 }
 ```
+
+不变量与降级规则：
+
+- `selectedKind = "type"` 时仅要求 `selectedTypeKey` 有效，其它选中字段可空。
+- `selectedKind = "map"` 时要求 `selectedMapID` 有效。
+- 切换视图时，若当前 `selectedKind` 在目标视图不可落点，则降级到目标视图默认节点。
+- 目标视图无法解析 `selectedMapID` 时，回退到“默认地图”。
 
 ### 5.2 视图协议
 
@@ -148,6 +168,10 @@ SelectionState = {
 
 - 有地图：`类型→地图→任务线→任务`
 - 无地图：`类型→任务线→任务`
+
+无地图分组规则：
+
+- 任务与任务线无法解析地图时，归入“无地图”分组（名称待确认）。
 
 ### 6.3 地图视图
 
@@ -178,9 +202,25 @@ SelectionState = {
 
 若后续需调整口径，可在实现前最终确认。
 
+> 说明：`pending` 不区分“前置未达成/等级不足/剧情未解锁”等细分原因，属于粗口径；若需精确分类需补充数据源。
+
 ---
 
-## 9. 内存与体量评估（基于当前导出规模）
+## 9. 持久化与存档
+
+新增视图与选择记忆需在 `ToolboxDB.modules.encounter_journal` 中持久化，建议键：
+
+- `questViewMode`（`status` / `type` / `map`）
+- `questViewSelectedMapID`
+- `questViewSelectedTypeKey`
+- `questViewSelectedQuestLineID`
+- `questViewSelectedQuestID`
+
+落库前需在 `Core/Config.lua` defaults 中声明，并提供迁移逻辑。
+
+---
+
+## 10. 内存与体量评估（基于当前导出规模）
 
 当前导出规模：约 16,984 任务 / 1,563 任务线。
 
@@ -192,7 +232,14 @@ SelectionState = {
 
 ---
 
-## 10. 非目标
+## 11. 新入口门禁与 UI 挂接约束
+
+1. 视图切换属于新玩家可见入口，实现阶段触发 AGENTS 关 3，需先完成方案评估并获得“开动”确认。
+2. UI 挂接必须遵循 `OnShow`/`hooksecurefunc` 等正式路径，禁止以固定延迟作为唯一时机（见 AGENTS.md「暴雪 UI 挂接时机」）。
+
+---
+
+## 12. 非目标
 
 1. 不在本次设计中落实实际 UI 代码。
 2. 不在本次设计中实现导航/高亮能力。
@@ -200,18 +247,25 @@ SelectionState = {
 
 ---
 
-## 11. 验收要点
+## 13. 验收要点
 
 1. 进入任务页签默认进入**状态视图**，并默认选中当前地图。
 2. 三视图切换保持同一选择状态，无法落点时降级到默认节点。
 3. 类型桶自动列出 WoWDB 出现过的所有类型。
 4. 类型视图在“无地图”时正确跳过地图层级。
 5. 详情区在三视图中行为一致。
+6. 类型展示名与排序符合本地化规则（待确认）。
+7. 左侧地图树过滤能正确限制状态视图泳道内容。
+8. 视图切换不引入固定延迟等待布局。
 
 ---
 
-## 12. 待确认项（实现前）
+## 14. 待确认项（实现前）
 
 1. `schemaVersion` 是否升级到 4。
-2. 类型视图是否需要“列表模式”或“纯任务列表”。
-3. 状态口径是否需要进一步细化（例如活动/世界任务的特殊状态）。
+2. `InstanceQuestlines` 是否切换为 wow.db 自动导出。
+3. 类型展示名来源与排序规则（是否要求本地化映射）。
+4. “无地图”分组显示名称。
+5. 运行时索引的落点（领域 API vs 模块缓存）。
+6. 类型视图是否需要“列表模式”或“纯任务列表”。
+7. 状态口径是否需要进一步细化（例如活动/世界任务的特殊状态）。
