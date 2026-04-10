@@ -73,79 +73,69 @@
 
 适用范围：`Toolbox/Data/*.lua` 中由数据库生成的静态数据文件。
 
+### 权威源与目录
+
+- 生成型静态数据的唯一权威源位于：`DataContracts/<contract_id>.json`
+- `contract_id` 必须使用小写字母、数字、下划线，并与 JSON 文件名同名。
+- 每个数据库生成文件必须独立契约、独立 `contract_id`、独立 `schema_version`。
+- `Toolbox/Data/*.lua` 的文件头只负责引用契约，不再负责定义契约。
+
 ### 脚本位置与入口
 
-- 导出脚本位于上级目录：`../WoWDB/scripts/`。
-- 一键导出：`export_toolbox_all.py`。
-- 单项导出：`export_toolbox_one.py`。
-- `all` 默认 **strict**（严格模式）开启；可显式传 `--no-strict` 关闭。
+- 导出脚本位于上级目录：`../WoWTools/scripts/export/`
+- 一键导出：`export_toolbox_all.py`
+- 单项导出：`export_toolbox_one.py`
+- `one` 的主选择器是 `contract_id`（示例：`instance_map_ids`）；可兼容输出文件名选择器（示例：`InstanceMapIDs.lua`）。
+- 导出时必须显式或隐式指向：
+  - `--contract-dir ../WoWPlugin/DataContracts`
+  - `--data-dir ../WoWPlugin/Toolbox/Data`
 
-### 文件头驱动约定
+### 契约驱动约定
 
-- `all` 脚本必须先扫描 `Toolbox/Data/*.lua` 文件头，再决定导出范围。
-- 仅当文件头同时满足以下条件时，才纳入导出计划：
-  - 含“`数据来源`”
-  - 且来源声明含“`wow.db`”
-- 文件头未声明 `wow.db` 的数据文件，视为非数据库自动导出文件，默认跳过。
+- `WoWTools` 必须先读取 `DataContracts/<contract_id>.json`，再执行查询与导出。
+- `all` 脚本必须从契约目录加载全部 `active` 契约，不再扫描 `Toolbox/Data/*.lua` 文件头决定导出范围。
+- 契约必须同时定义：
+  - `contract`：身份、版本、状态
+  - `output`：目标 Lua 文件与根表
+  - `source`：`sql` 与结构化 `query`
+  - `structure`：Lua 根结构
+  - `validation`：最小校验规则
+  - `versioning`：版本记录
 
-### 标准文件头模板（必须使用）
+### Lua 文件头约定
 
-**模板 A：数据库自动导出文件（纳入 `wow.db` 导出）**
+数据库生成文件必须带统一 tagged header，至少包含：
 
-```lua
---[[
-  <一句话描述数据职责>。
-  数据来源：wow.db（<主表/视图>）。
-  查询链：<表A> -> <表B> -> <表C>（按实际填写）。
-  格式：<Lua 数据结构说明>。
-  生成方式：WoWDB/scripts/export_toolbox_all.py 或 export_toolbox_one.py。
-  注意：此文件由脚本生成，手改会被覆盖。
-]]
-```
+- `@contract_id`
+- `@schema_version`
+- `@contract_file`
+- `@contract_snapshot`
+- `@generated_at`
+- `@generated_by`
+- `@data_source`
+- `@summary`
+- `@overwrite_notice`
 
-**模板 B：手工维护/开发中数据文件（不纳入 `wow.db` 导出）**
+要求：
 
-```lua
---[[
-  <一句话描述数据职责>。
-  数据来源：manual（手工维护/开发中）。
-  用途：<被谁读取、用于什么功能>。
-  备注：暂不接入 wow.db 自动导出；如需接入，先补查询链与导出规则。
-]]
-```
+- `@contract_id` 必须与契约文件名一致。
+- `@schema_version` 必须与 JSON 契约一致。
+- `@contract_file` 必须指向 `WoWPlugin/DataContracts/<contract_id>.json`。
+- 头注释不再承担“是否纳入导出”的判定职责。
 
-**模板使用要求**
+### 快照与追溯
 
-- `Toolbox/Data/*.lua` 必须使用上述模板之一，禁止缺省“数据来源”字段。
-- 若从模板 B 切换到模板 A，必须同次提交补齐脚本导出规则与实跑验证。
-- 若文件声明为模板 A 但缺少规则，strict 模式必须失败（见下文）。
-
-### strict 默认行为（必须遵守）
-
-strict 模式下，遇到以下任一情况必须直接失败，不得静默跳过：
-
-- 文件已存在导出规则，但文件缺少头注释。
-- 文件已存在导出规则，但文件头未声明 `数据来源：wow.db`。
-- 文件头声明 `数据来源：wow.db`，但脚本未配置对应导出规则。
-
-### 单项导出约定
-
-- `one` 脚本参数支持两种选择器：
-  - `target_id`（示例：`instance_map_ids`）
-  - 输出文件名（示例：`InstanceMapIDs.lua`）
-
-### 当前项目特殊约定（2026-04-09）
-
-- `InstanceQuestlines.lua` 处于开发阶段，当前不纳入 `wow.db` 自动导出。
-- 在其文件头未声明 `数据来源：wow.db` 前，`all` 必须保持跳过该文件。
+- 每次导出必须在 `../WoWTools/outputs/toolbox/contract_snapshots/<contract_id>/` 下保存一份契约快照。
+- 快照只用于回溯，不得反向覆盖 `DataContracts/` 中的权威契约。
 
 ### AI 执行约束
 
-- 用户要求“导出 Data”时，AI 必须优先调用上述脚本，而非手写覆盖数据库生成文件。
+- 用户要求“导出 Data”时，AI 必须优先调用契约驱动导出脚本，而非手写覆盖数据库生成文件。
 - 若新增数据库导出文件，AI 必须同时完成三件事：
-  - 在 `Toolbox/Data/<file>.lua` 文件头声明 `数据来源：wow.db` 与用途
-  - 在 `../WoWDB/scripts/toolbox_db_export.py` 增加对应规则
-  - 用 `export_toolbox_all.py` 实跑验证导出结果
+  - 在 `DataContracts/<contract_id>.json` 定义契约
+  - 通过 `export_toolbox_one.py <contract_id>` 或 `export_toolbox_all.py` 实跑生成 `Toolbox/Data/<file>.lua`
+  - 增加或更新插件侧契约/文件头校验
+- 若修改导出结构，必须提升同一 `contract_id` 下的 `schema_version`，不得新造临时标识规避版本治理。
 
 ---
 

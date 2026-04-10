@@ -2,9 +2,9 @@
 @contract_id instance_questlines
 @schema_version 1
 @contract_file WoWPlugin/DataContracts/instance_questlines.json
-@contract_snapshot WoWTools/outputs/toolbox/contract_snapshots/instance_questlines/instance_questlines__schema_v1__20260410T172257Z.json
-@generated_at 2026-04-10T17:22:57Z
-@generated_by WoWTools/scripts/export/export_toolbox_one.py
+@contract_snapshot WoWTools/outputs/toolbox/contract_snapshots/instance_questlines/instance_questlines__schema_v1__20260410T172825Z.json
+@generated_at 2026-04-10T17:28:25Z
+@generated_by WoWTools/scripts/export/export_toolbox_all.py
 @data_source wow.db
 @summary 冒险手册任务页签静态任务线文档
 @overwrite_notice 此文件由工具生成，手改会被覆盖
@@ -15,7 +15,7 @@ Toolbox.Data = Toolbox.Data or {}
 Toolbox.Data.InstanceQuestlines = {
   schemaVersion = 3,
   sourceMode = "live",
-  generatedAt = "2026-04-10T17:22:57Z",
+  generatedAt = "2026-04-10T17:28:25Z",
 
   quests = {
     [11] = { ID = 11, UiMapID = 37 },

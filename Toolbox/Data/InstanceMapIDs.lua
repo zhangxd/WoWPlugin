@@ -2,9 +2,9 @@
 @contract_id instance_map_ids
 @schema_version 1
 @contract_file WoWPlugin/DataContracts/instance_map_ids.json
-@contract_snapshot WoWTools/outputs/toolbox/contract_snapshots/instance_map_ids/instance_map_ids__schema_v1__20260410T171814Z.json
-@generated_at 2026-04-10T17:18:14Z
-@generated_by WoWTools/scripts/export/export_toolbox_one.py
+@contract_snapshot WoWTools/outputs/toolbox/contract_snapshots/instance_map_ids/instance_map_ids__schema_v1__20260410T172755Z.json
+@generated_at 2026-04-10T17:27:55Z
+@generated_by WoWTools/scripts/export/export_toolbox_all.py
 @data_source wow.db
 @summary 副本 journalInstanceID 到 MapID 的静态映射
 @overwrite_notice 此文件由工具生成，手改会被覆盖

@@ -58,6 +58,7 @@
 ## 架构
 
 ```
+DataContracts/          # 生成型静态数据契约（WoWPlugin 侧权威源）
 Toolbox/
 ├── Core/
 │   ├── Foundation/     # 基础设施（命名空间、本地化、存档、模块注册、启动）
@@ -76,6 +77,13 @@ Toolbox.toc            # 插件清单
 - **API**：稳定的领域接口，封装暴雪 API，供模块调用
 - **Modules**：独立功能单元，通过 `Toolbox.RegisterModule` 注册
 - **ToolboxDB**：统一存档结构，支持版本迁移
+- **DataContracts**：数据库生成型静态数据的 JSON 契约源，由 `WoWTools` 读取并导出到 `Toolbox/Data/`
+
+### 静态数据契约
+
+- `DataContracts/<contract_id>.json` 是生成型 `Toolbox/Data/*.lua` 的唯一权威定义。
+- `Toolbox/Data/*.lua` 中由数据库生成的文件带有 tagged header，记录 `contract_id`、`schema_version`、契约路径与快照路径。
+- `WoWTools` 通过读取这些契约来生成静态 Lua 数据；插件运行时仍只消费 `Toolbox/Data/*.lua`，不会直接读取 JSON 契约。
 
 ## 开发
 
@@ -139,6 +147,7 @@ python tests/run_all.py
 
 该命令会顺序执行：
 
+- `python tests/validate_data_contracts.py`（契约与 Lua 头注释校验）
 - `python tests/validate_settings_subcategories.py`（静态结构校验）
 - `busted tests/logic/spec`（Lua 离线逻辑测试）
 
