@@ -1,7 +1,7 @@
 # 冒险手册任务页签多视图 UI 设计稿（状态 / 类型 / 地图）
 
 - 日期：2026-04-10
-- 状态：已对齐（未开动实现）
+- 状态：已按当前仓库数据链路复核（待实现）
 - 关联模块：`encounter_journal`
 - 范围：`Toolbox`（Retail）
 
@@ -34,9 +34,28 @@
 
 ---
 
-## 3. 静态数据结构（WoWDB 导出，Live）
+## 3. 静态数据结构（契约导出 + 运行时载荷）
 
-> 先定义结构，数据稍后导出填充。
+> 当前仓库已存在 `instance_questlines` 契约导出链路；本节先对齐“真实数据来源”和“后续扩展字段边界”。
+
+### 3.0 数据来源与版本语义（已对齐）
+
+当前权威链路为：
+
+`wow.db` -> `DataContracts/instance_questlines.json` -> `Toolbox/Data/InstanceQuestlines.lua` -> `Toolbox.Questlines`
+
+这里存在两个版本号，语义必须分开：
+
+- `DataContracts/instance_questlines.json` 中的 `contract.schema_version`：表示导出契约版本；只要导出字段或文件结构变化，就应升级。
+- `Toolbox.Data.InstanceQuestlines.schemaVersion`：表示 Lua 运行时载荷版本；当前继续保持 `3`，只要 `quests/questLines/questLineQuestIDs` 基线不破坏即可不升级。
+
+因此，本次对齐的原则是：
+
+- 保持运行时 `schemaVersion = 3`。
+- 在 `schemaVersion = 3` 下允许增加**可选扩展字段**。
+- 若导出契约新增字段，升级 **contract schema**，但不以此强制升级运行时 `schemaVersion`。
+
+### 3.1 Lua 载荷结构（目标形态）
 
 ```lua
 Toolbox.Data.InstanceQuestlines = {
@@ -74,25 +93,55 @@ Toolbox.Data.InstanceQuestlines = {
 
 说明：
 
-- `Type` 直接使用 WoWDB 原始枚举值（number）。
-- `MapPos/NpcPos` 的 `UiMapID` 可省略，默认等于 `quests[questID].UiMapID`。
-- 本次实现阶段确认保持 `schemaVersion = 3`，新增字段必须视为可选。
-- 当前仓库约定中 `InstanceQuestlines` 尚未纳入 wow.db 自动导出；本次实现阶段确认保持该约定，不切换自动导出。
-- 当前阶段仅为字段定义，不要求运行导出脚本；正式发布前再补齐导出流程与实跑验证。
+- `UiMapID` 表示任务在任务页签中的**归属地图**；它是分组字段，不等于精确导航点。
+- `Type` 直接使用 WoWDB 原始枚举值（number），不做归一化。
+- `MapPos/NpcPos` 的 `UiMapID` 可省略；省略时默认继承 `quests[questID].UiMapID`。
+- `NpcPos` 允许只给部分 NPC 坐标；不要求和 `NpcIDs` 一一完整对应。
 
-### 3.0 必要字段基线（已确认）
+### 3.2 必要字段基线（v3 兼容基线）
 
-仅定义“最小必填”，数据稍后导出填充：
+当前运行时 strict 校验和 live 数据已依赖的**最小必填**仍是：
 
-- `quests[questID]`：`ID`、`UiMapID`、`Type`（number）
+- `quests[questID]`：`ID`、`UiMapID`
 - `questLines[questLineID]`：`ID`、`Name_lang`、`UiMapID`
 - `questLineQuestIDs`
 
+在这条基线下：
+
+- 现有 `QuestlineProgress.ValidateInstanceQuestlinesData()` 无需因新增 UI 需求而升级到 `schemaVersion = 4`。
+- 新增视图相关字段一律按**可选扩展字段**处理。
+- live 数据未补齐扩展字段前，现有地图树视图仍可继续工作。
+
+### 3.3 可选扩展字段（多视图实现所需）
+
+多视图实现阶段新增但保持可选的字段如下：
+
+- `quests[questID].Type`
+  作用：类型视图的唯一权威来源；缺失时该任务不进入任何类型桶。
+- `quests[questID].MapPos`
+  作用：地图导航/位置高亮的任务点位；缺失时仅保留地图分组，不显示精确位置。
+- `quests[questID].NpcIDs`
+  作用：NPC 导航候选集合；允许为空或缺失。
+- `quests[questID].NpcPos`
+  作用：按 `NpcID` 提供 NPC 点位；允许稀疏。
+
+补充约束：
+
+- 类型视图的上线门槛是导出至少补齐 `Type`。
+- `questLines` 继续保持最小元数据，不额外复制 `Type`、`NpcIDs` 等任务级字段，避免双重权威源。
+- “其他”分组属于 UI 运行时合成节点，不写回静态数据。
+
 类型名称通过**本地映射表**展示，不直接显示数字。
-映射表位置：`Toolbox/Data/QuestTypeNames.lua`（手工维护；须使用 Data 文件头模板 B）。
+映射表位置：`Toolbox/Data/QuestTypeNames.lua`（手工维护，独立于数据库生成文件）。
 映射表建议存 `TypeID -> LocaleKey`，实际显示通过 `Toolbox.L[LocaleKey]` 获取；缺失映射时使用 `Toolbox.L.EJ_QUEST_TYPE_UNKNOWN_FMT` 兜底并显示原始数值。
 
-### 3.1 UI 字段来源与兜底（实现前需按 AGENTS 查证 API）
+### 3.4 导出实现约束
+
+- `Toolbox/Data/InstanceQuestlines.lua` 是**生成产物**，不作为手工长期维护文件。
+- 对齐字段时，应修改 `DataContracts/instance_questlines.json` 并通过导出脚本重新生成数据文件，而不是直接手改生成文件。
+- 若仅新增 `Type/MapPos/NpcIDs/NpcPos` 这类可选字段，运行时 `schemaVersion` 继续保持 `3`；但 `contract.schema_version` 应按契约治理递增。
+
+### 3.5 UI 字段来源与兜底（实现前需按 AGENTS 查证 API）
 
 | UI 字段 | 主要来源 | 兜底 |
 |---|---|---|
@@ -107,9 +156,30 @@ Toolbox.Data.InstanceQuestlines = {
 
 ## 4. 运行时模型（Questlines Model）
 
-在 `Toolbox.Questlines.GetQuestTabModel()` 现有结构上，补齐类型索引：
+在 `Toolbox.Questlines.GetQuestTabModel()` 现有结构上，运行时统一归一到以下对象层级：
 
 ```lua
+QuestEntry = {
+  id = questID,
+  name = "Quest Name",
+  status = "completed" | "active" | "pending",
+  UiMapID = 123,
+  typeID = 12,
+  mapPos = { x = 0.52, y = 0.31, UiMapID = 123 },
+  npcIDs = { 1001, 2002 },
+  npcPos = { [1001] = { x = 0.41, y = 0.63, UiMapID = 123 } },
+  quest = questRecord,
+}
+
+QuestLineEntry = {
+  id = questLineID,
+  name = "Questline Name",
+  UiMapID = 123,
+  quests = { questEntry1, questEntry2, ... },
+  progress = { completed, total, hasActive, nextQuestID, nextQuestName, isCompleted },
+  typeIDs = { 12, 34, ... },
+}
+
 QuestTabModel = {
   maps = { { id, name, questLines, progress }, ... },
   mapByID = { [mapID] = mapEntry },
@@ -126,10 +196,11 @@ QuestTabModel = {
 
 规则：
 
-- `typeList` 为去重后的类型列表（即类型桶）。
-- 同一任务线可出现在多个类型桶。
-- 若任务/任务线缺少地图，则类型视图跳过地图层。
-- 运行时索引由领域 API 统一构建与缓存（`Toolbox.Questlines`）。
+- `QuestEntry.quest` 保留原始静态记录，新增运行时便利字段走扁平属性（`typeID/mapPos/npcIDs/npcPos`）。
+- `typeList` 仅从 `Type` 为 number 的任务中去重生成，并按数值升序。
+- 同一任务线可因子任务分布而出现在多个类型桶，`QuestLineEntry.typeIDs` 由子任务聚合得到。
+- `typeToMapIDs` 取自任务或任务线最终可解析出的地图集合；解析失败时由 UI 放入“其他”分组，不在静态数据中造假地图。
+- 运行时索引统一由领域 API 构建与缓存（`Toolbox.Questlines`），UI 只消费模型，不直接拼索引。
 
 ---
 
@@ -282,8 +353,9 @@ SelectionState = {
 
 ---
 
-## 14. 实现前确认结果（2026-04-10）
+## 14. 实现前确认结果（2026-04-11，按当前仓库复核）
 
 1. `schemaVersion`：保持 `3`（不升级到 `4`）。
-2. `InstanceQuestlines`：本次不切换为 wow.db 自动导出，维持当前手工维护/开发中约定。
-3. 状态口径：不做进一步细化，维持三态。
+2. `InstanceQuestlines`：当前已纳入 `DataContracts/instance_questlines.json` 契约驱动导出；后续字段扩展以现有导出链路为准，不再以“手工维护/未自动导出”为前提。
+3. `Type/MapPos/NpcIDs/NpcPos`：作为 `schemaVersion = 3` 下的可选扩展字段接入；导出契约变更时升级 `contract.schema_version`，但不强制升级运行时 `schemaVersion`。
+4. 状态口径：不做进一步细化，维持三态。

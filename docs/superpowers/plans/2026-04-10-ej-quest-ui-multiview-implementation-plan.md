@@ -10,7 +10,7 @@
 
 1. 需求方已明确回复「开动」。
 2. `InstanceQuestlines` 保持 `schemaVersion = 3`（不升级到 4）。
-3. `InstanceQuestlines` 本次不切换为 `wow.db` 自动导出，维持当前约定。
+3. `InstanceQuestlines` 当前已是 `DataContracts/instance_questlines.json -> Toolbox/Data/InstanceQuestlines.lua` 的契约导出链路；本次在该链路内扩字段，不再以“未自动导出”为前提。
 4. 对应确认结果已写入需求文档：  
    `docs/superpowers/specs/2026-04-10-ej-quest-ui-alignment-design.md`
 
@@ -24,7 +24,7 @@
 4. 持久化只写 `ToolboxDB.modules.encounter_journal`，并在 `Core/Config.lua` 声明默认值与迁移。
 5. UI 挂接仅使用 `OnShow` / `hooksecurefunc` / 正式事件路径，不以固定延迟作为主路径。
 6. 未实际用过或不确定的 WoW API，先查证再实现（暴雪文档 / FrameXML / Warcraft Wiki）。
-7. 本次不改 `../WoWDB/scripts/**`，不执行自动导出切换动作。
+7. 本次不改变导出入口形态；若扩展 `InstanceQuestlines` 字段，必须改契约并重新导出，禁止手改生成文件。
 
 ---
 
@@ -48,7 +48,7 @@
 ### 2.2 非目标
 
 1. 不在本次实现地图导航 / NPC 导航 / 高亮能力（仅占位）。
-2. 不切换 `InstanceQuestlines` 到自动导出流程。
+2. 不改变 `InstanceQuestlines` 当前“契约驱动 + wow.db 导出”的链路形态，只在该链路内补字段。
 3. 不新增外部插件联动。
 
 ---
@@ -61,16 +61,18 @@
 
 ### 3.2 修改
 
-1. `Toolbox/Toolbox.toc`
-2. `Toolbox/Core/API/QuestlineProgress.lua`
-3. `Toolbox/Core/Foundation/Locales.lua`
-4. `Toolbox/Core/Foundation/Config.lua`
-5. `Toolbox/Modules/EncounterJournal.lua`
-6. `tests/logic/fixtures/InstanceQuestlines_Mock.lua`
-7. `tests/logic/spec/questline_progress_spec.lua`
-8. `tests/logic/spec/questline_progress_live_data_spec.lua`
-9. `tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
-10. `docs/Toolbox-addon-design.md`
+1. `DataContracts/instance_questlines.json`
+2. `Toolbox/Data/InstanceQuestlines.lua`（通过导出脚本生成）
+3. `Toolbox/Toolbox.toc`
+4. `Toolbox/Core/API/QuestlineProgress.lua`
+5. `Toolbox/Core/Foundation/Locales.lua`
+6. `Toolbox/Core/Foundation/Config.lua`
+7. `Toolbox/Modules/EncounterJournal.lua`
+8. `tests/logic/fixtures/InstanceQuestlines_Mock.lua`
+9. `tests/logic/spec/questline_progress_spec.lua`
+10. `tests/logic/spec/questline_progress_live_data_spec.lua`
+11. `tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
+12. `docs/Toolbox-addon-design.md`
 
 ---
 
@@ -78,18 +80,32 @@
 
 ## 阶段 A：数据契约与领域 API（Questlines）
 
-### 任务 A1：先补失败测试（类型标签 + 类型索引）
+### 任务 A1：先补失败测试（扩展字段 + 类型索引）
 
 - [ ] 在 `questline_progress_spec.lua` 增加以下断言并先跑失败：
-1. `GetQuestTypeLabel(typeId)`：有映射返回本地化文案；无映射返回 `EJ_QUEST_TYPE_UNKNOWN_FMT`。
-2. `GetQuestTabModel()`：包含 `typeList`、`typeToQuestIDs`、`typeToQuestLineIDs`、`typeToMapIDs`。
-3. `typeList` 按数值升序。
+1. `ValidateInstanceQuestlinesData()` 允许 `schemaVersion = 3` 下出现 `Type/MapPos/NpcIDs/NpcPos` 可选字段。
+2. `GetQuestTypeLabel(typeId)`：有映射返回本地化文案；无映射返回 `EJ_QUEST_TYPE_UNKNOWN_FMT`。
+3. `GetQuestTabModel()`：包含 `typeList`、`typeToQuestIDs`、`typeToQuestLineIDs`、`typeToMapIDs`。
+4. `typeList` 按数值升序。
 
 - [ ] 运行：  
 `busted tests/logic/spec/questline_progress_spec.lua`  
 期望：先失败（红灯）。
 
-### 任务 A2：落地类型映射表与本地化键
+### 任务 A2：对齐 `instance_questlines` 契约与导出产物
+
+- [ ] 修改 `DataContracts/instance_questlines.json`：
+1. 保持 Lua 运行时 `schemaVersion = 3`。
+2. 为 `quests` block 增加 `Type/MapPos/NpcIDs/NpcPos` 的结构定义。
+3. 明确导出字段变化对应 `contract.schema_version` 递增，而不是升级运行时 `schemaVersion`。
+
+- [ ] 使用现有导出入口重新生成 `Toolbox/Data/InstanceQuestlines.lua`，不手改生成文件。
+
+- [ ] 运行：  
+`python ..\\WoWTools\\scripts\\export\\export_toolbox_one.py instance_questlines --db ..\\WoWTools\\data\\sqlite\\wow.db --contract-dir .\\DataContracts --data-dir .\\Toolbox\\Data`  
+期望：成功生成更新后的 `Toolbox/Data/InstanceQuestlines.lua`。
+
+### 任务 A3：落地类型映射表与本地化键
 
 - [ ] 新增 `Toolbox/Data/QuestTypeNames.lua`（使用 Data 模板 B 头注释，`manual` 来源）。
 - [ ] 在 `Locales.lua` 增加：
@@ -97,12 +113,13 @@
 2. 类型映射相关键（`enUS`/`zhCN` 同步）
 - [ ] 在 `Toolbox.toc` 注册 `Data/QuestTypeNames.lua`（保证加载顺序正确）。
 
-### 任务 A3：实现 QuestlineProgress 类型能力（保持 v3 兼容）
+### 任务 A4：实现 QuestlineProgress 类型能力（保持 v3 兼容）
 
 - [ ] 在 `QuestlineProgress.lua` 实现：
 1. `GetQuestTypeLabel(typeId)`（映射 -> `Toolbox.L` -> 兜底格式化）。
 2. 构建 `typeList/typeToQuestIDs/typeToQuestLineIDs/typeToMapIDs`。
-3. `schemaVersion = 3` 下 `Type` 作为可选字段处理：有则入索引，无则跳过，不造伪类型桶。
+3. `schemaVersion = 3` 下将 `Type/MapPos/NpcIDs/NpcPos` 作为可选字段透传到运行时 `QuestEntry`。
+4. `Type` 缺失时跳过类型桶，不造伪类型；地图解析失败时交给 UI 落到“其他”分组。
 
 - [ ] 为新增对外函数补 `---`/`@param`/`@return` 注释。
 
@@ -205,12 +222,13 @@
 
 建议按“测试先行 -> 实现 -> 收口文档”提交：
 
-1. `测试:` 类型标签与类型索引失败用例
-2. `数据:` QuestTypeNames 与 Locales/TOC 接入
-3. `功能:` QuestlineProgress 类型索引与标签解析
-4. `配置:` encounter_journal 新持久化键与迁移
-5. `功能:` EncounterJournal 三视图与统一选择状态
-6. `文档:` 总设计映射与说明更新
+1. `测试:` 扩展字段与类型索引失败用例
+2. `数据:` InstanceQuestlines 契约与导出产物对齐
+3. `数据:` QuestTypeNames 与 Locales/TOC 接入
+4. `功能:` QuestlineProgress 类型索引与扩展字段透传
+5. `配置:` encounter_journal 新持久化键与迁移
+6. `功能:` EncounterJournal 三视图与统一选择状态
+7. `文档:` 总设计映射与说明更新
 
 ---
 
