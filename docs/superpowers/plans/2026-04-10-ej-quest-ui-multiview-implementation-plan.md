@@ -1,417 +1,221 @@
-﻿# EJ Quest UI Multi-View Implementation Plan
+# 2026-04-10 冒险手册任务页签多视图实现计划（合规版）
 
-> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+- 日期：2026-04-10
+- 关联模块：`encounter_journal`
+- 状态：可执行
 
-**Goal:** Implement the Encounter Journal quest tab multi-view UI (status/type/map) with type indexing, locale-mapped type labels, and selection persistence.
+## 0. 前置确认（已完成）
 
-**Architecture:** Extend `Toolbox.Questlines` to build type indexes and resolve type labels from a manual mapping table, while `Modules/EncounterJournal.lua` renders three views from the shared model and persists selection state. All UI hooks must use `OnShow`/`hooksecurefunc` binding paths and avoid fixed delays.
+本计划基于以下已确认结论执行，不再二次分叉：
 
-**Tech Stack:** Lua (WoW addon), WoW API (C_QuestLog/C_Map), logic tests via `busted` harness, Python test runner.
-
----
-
-**File Map**
-- Create: `Toolbox/Data/QuestTypeNames.lua`
-- Modify: `Toolbox/Toolbox.toc`
-- Modify: `Toolbox/Core/API/QuestlineProgress.lua`
-- Modify: `Toolbox/Core/Foundation/Locales.lua`
-- Modify: `Toolbox/Core/Foundation/Config.lua`
-- Modify: `Toolbox/Modules/EncounterJournal.lua`
-- Modify: `tests/logic/fixtures/InstanceQuestlines_Mock.lua`
-- Modify: `tests/logic/spec/questline_progress_spec.lua`
-- Modify: `tests/logic/spec/questline_progress_live_data_spec.lua`
-- Modify: `docs/Toolbox-addon-design.md`
+1. 需求方已明确回复「开动」。
+2. `InstanceQuestlines` 保持 `schemaVersion = 3`（不升级到 4）。
+3. `InstanceQuestlines` 本次不切换为 `wow.db` 自动导出，维持当前约定。
+4. 对应确认结果已写入需求文档：  
+   `docs/superpowers/specs/2026-04-10-ej-quest-ui-alignment-design.md`
 
 ---
 
-## Chunk 0: Preflight Decisions (Blocking)
+## 1. 合规边界（执行时强制）
 
-### Task 0: Confirm gate and schema decision
-
-- [ ] **Step 1: Gate 3 confirmation ("开动")**
-
-Confirm explicit "开动" before any changes to `Toolbox/Modules/**`, `Toolbox/Core/**`, `Toolbox/UI/**`, or `Toolbox/Toolbox.toc`.
-
-- [ ] **Step 2: Schema version decision**
-
-Decide whether `InstanceQuestlines` moves to `schemaVersion = 4` now, or stays at `v3` with `Type` optional.
-
-- If `v4`: plan must include regeneration of live data file via WoWDB export before release.
-- If `v3`: keep production validation tolerant for missing `Type`.
+1. 仅在已有模块 `encounter_journal` 范围内实现，不新增 `RegisterModule`。
+2. 业务代码改动前，先确保需求文档确认结果已落地（本计划已满足）。
+3. 玩家可见字符串统一走 `Toolbox/Core/Foundation/Locales.lua`，业务逻辑不硬编码文案。
+4. 持久化只写 `ToolboxDB.modules.encounter_journal`，并在 `Core/Config.lua` 声明默认值与迁移。
+5. UI 挂接仅使用 `OnShow` / `hooksecurefunc` / 正式事件路径，不以固定延迟作为主路径。
+6. 未实际用过或不确定的 WoW API，先查证再实现（暴雪文档 / FrameXML / Warcraft Wiki）。
+7. 本次不改 `../WoWDB/scripts/**`，不执行自动导出切换动作。
 
 ---
 
-## Chunk 1: Type Data Contracts and QuestlineProgress API
+## 2. 目标与范围
 
-### Task 1: Add type mapping table and locale fallback
+### 2.1 目标
 
-**Files:**
-- Create: `Toolbox/Data/QuestTypeNames.lua`
-- Modify: `Toolbox/Core/Foundation/Locales.lua`
+在冒险手册任务页签实现三视图：
 
-- [ ] **Step 1: Write the failing tests**
+1. 状态视图（默认）
+2. 类型视图（树形/列表）
+3. 地图视图
 
-Add specs in `tests/logic/spec/questline_progress_spec.lua` that call the new `Toolbox.Questlines.GetQuestTypeLabel(typeId)`:
-- initialize `Toolbox.L` and `EJ_QUEST_TYPE_UNKNOWN_FMT` within the test setup (ensure no nil access)
-- expect fallback output when no mapping exists
-- expect a localized label when mapping exists
+并实现：
 
-```lua
-it("returns unknown type label when mapping missing", function()
-  Toolbox.Data = Toolbox.Data or {}
-  Toolbox.L = Toolbox.L or {}
-  Toolbox.L.EJ_QUEST_TYPE_UNKNOWN_FMT = "Unknown Type (%s)"
-  local label = Toolbox.Questlines.GetQuestTypeLabel(9999)
-  assert.is_truthy(label and label:match("9999"))
-end)
+1. 统一选择状态（跨视图保持、无法落点时降级）
+2. 类型索引与类型展示名映射
+3. 视图/选择状态持久化
+4. 三视图共享详情区行为一致
 
-it("returns mapped type label when mapping exists", function()
-  Toolbox.Data = Toolbox.Data or {}
-  local originalNames = Toolbox.Data.QuestTypeNames
-  Toolbox.L = Toolbox.L or {}
-  local originalLabel = Toolbox.L.EJ_QUEST_TYPE_TEST
-  Toolbox.Data.QuestTypeNames = { [12] = "EJ_QUEST_TYPE_TEST" }
-  Toolbox.L.EJ_QUEST_TYPE_TEST = "Test Type"
-  local label = Toolbox.Questlines.GetQuestTypeLabel(12)
-  assert.are.equal("Test Type", label)
-  Toolbox.Data.QuestTypeNames = originalNames
-  Toolbox.L.EJ_QUEST_TYPE_TEST = originalLabel
-end)
-```
+### 2.2 非目标
 
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `busted tests/logic/spec/questline_progress_spec.lua`
-Expected: FAIL with `GetQuestTypeLabel` missing.
-
-- [ ] **Step 3: Create mapping file, locale keys, and TOC entry**
-
-Create `Toolbox/Data/QuestTypeNames.lua` with Template B header and a minimal mapping entry used by tests. Add locale keys `EJ_QUEST_TYPE_UNKNOWN_FMT` and `EJ_QUEST_TYPE_TEST` to `Toolbox/Core/Foundation/Locales.lua` for `zhCN` and `enUS`. Add `Data/QuestTypeNames.lua` to `Toolbox/Toolbox.toc` after `Data/InstanceQuestlines.lua` to ensure it loads before `Modules/EncounterJournal.lua`. (TOC change is also gated by "开动".)
-
-```lua
--- in QuestTypeNames.lua
-Toolbox.Data.QuestTypeNames = {
-  [12] = "EJ_QUEST_TYPE_TEST",
-}
-```
-
-```lua
--- in Locales.lua
-EJ_QUEST_TYPE_UNKNOWN_FMT = "未知类型(%s)", -- zhCN
-EJ_QUEST_TYPE_UNKNOWN_FMT = "Unknown Type (%s)", -- enUS
-```
-
-- [ ] **Step 4: Run test to verify it still fails**
-
-Run: `busted tests/logic/spec/questline_progress_spec.lua`
-Expected: still FAIL (implementation missing).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add Toolbox/Data/QuestTypeNames.lua Toolbox/Core/Foundation/Locales.lua Toolbox/Toolbox.toc tests/logic/spec/questline_progress_spec.lua
-git commit -m "数据: 添加任务类型映射表与兜底文案" -m "- [功能] 新增 QuestTypeNames 数据表并补充未知类型兜底" -m "- 影响: 任务类型展示依赖本地映射"
-```
-
-### Task 2: Update mock fixture to include Type and (optionally) schema v4
-
-**Files:**
-- Modify: `tests/logic/fixtures/InstanceQuestlines_Mock.lua`
-- Modify: `tests/logic/spec/questline_progress_spec.lua`
-
-- [ ] **Step 1: Write the failing test**
-
-Extend `questline_progress_spec.lua` to assert type indexes exist, include known type IDs from the mock fixture, and are sorted by numeric type ID. Also verify `typeToQuestLineIDs` and `typeToMapIDs` are present. If `typeList` is empty, skip the ordering assertion. Add explicit checks for at least one expected `typeId` and its `typeToQuestIDs` entry.
-
-```lua
-it("builds type indexes from quest data", function()
-  local model = Toolbox.Questlines.GetQuestTabModel()
-  assert.is_truthy(model.typeList)
-  assert.is_truthy(model.typeToQuestIDs)
-  assert.is_truthy(model.typeToQuestLineIDs)
-  assert.is_truthy(model.typeToMapIDs)
-  assert.is_true(model.typeToQuestIDs[12] ~= nil)
-  if #model.typeList > 1 then
-    for index = 1, #model.typeList - 1 do
-      assert.is_true(model.typeList[index] <= model.typeList[index + 1])
-    end
-  end
-end)
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `busted tests/logic/spec/questline_progress_spec.lua`
-Expected: FAIL (indexes not built yet).
-
-- [ ] **Step 3: Update mock fixture**
-
-If schemaVersion is confirmed as v4, bump `schemaVersion` to 4 and add numeric `Type` on each mock quest. If staying v3, keep schemaVersion 3 but include `Type` and adjust validation expectations accordingly.
-
-- [ ] **Step 4: Run test to verify it still fails**
-
-Run: `busted tests/logic/spec/questline_progress_spec.lua`
-Expected: still FAIL (indexes not built yet).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tests/logic/fixtures/InstanceQuestlines_Mock.lua tests/logic/spec/questline_progress_spec.lua
-git commit -m "测试: 更新任务类型 mock 数据" -m "- [测试] mock 任务加入 Type 字段以覆盖类型索引" -m "- 影响: 仅测试数据与断言更新"
-```
-
-### Task 3: Implement type validation, indexes, and label resolver in QuestlineProgress
-
-**Files:**
-- Modify: `Toolbox/Core/API/QuestlineProgress.lua`
-- Modify: `tests/logic/spec/questline_progress_spec.lua`
-- Modify: `tests/logic/spec/questline_progress_live_data_spec.lua`
-
-- [ ] **Step 1: Run tests to see failures**
-
-Run: `busted tests/logic/spec/questline_progress_spec.lua`
-Expected: FAIL (type indexes + label resolver missing).
-
-- [ ] **Step 2: Implement minimal logic**
-
-Add to `QuestlineProgress.lua`:
-- Validation for `Type` (number) when `schemaVersion >= 4`; if staying v3, treat `Type` as optional and **build indexes from entries that do have `Type`** (skip quests without `Type`; do not create synthetic `0` bucket).
-- Build `typeList`, `typeToQuestIDs`, `typeToQuestLineIDs`, `typeToMapIDs` in `buildQuestTabModel` and **sort `typeList` ascending numeric**.
-- Add `Toolbox.Questlines.GetQuestTypeLabel(typeId)` that uses `Toolbox.Data.QuestTypeNames[typeId]` -> `Toolbox.L[localeKey]`, falling back to `EJ_QUEST_TYPE_UNKNOWN_FMT` with typeId.
-- Add `---` doc comment with `@param`/`@return` for `GetQuestTypeLabel` per AGENTS.
-- If schemaVersion is bumped to 4, add a **release checklist step** in this plan to regenerate `Toolbox/Data/InstanceQuestlines.lua` via WoWDB export and verify file header/strict mode; otherwise keep production validation tolerant.
-
-- [ ] **Step 3: Update live-data spec if needed**
-
-Adjust `questline_progress_live_data_spec.lua` to allow missing Type when schemaVersion is 3 (or to expect strict failure if schemaVersion is 4 without Type).
-
-- [ ] **Step 4: Run tests to verify pass**
-
-Run: `busted tests/logic/spec/questline_progress_spec.lua`
-Expected: PASS
-
-Run: `busted tests/logic/spec/questline_progress_live_data_spec.lua`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add Toolbox/Core/API/QuestlineProgress.lua tests/logic/spec/questline_progress_spec.lua tests/logic/spec/questline_progress_live_data_spec.lua
-git commit -m "功能: 任务类型索引与展示名解析" -m "- [功能] Questlines 构建类型索引并提供类型名解析" -m "- [测试] 更新任务线逻辑测试" -m "- 影响: 仅任务页签数据模型"
-```
+1. 不在本次实现地图导航 / NPC 导航 / 高亮能力（仅占位）。
+2. 不切换 `InstanceQuestlines` 到自动导出流程。
+3. 不新增外部插件联动。
 
 ---
 
-## Chunk 2: Selection State and Persistence
+## 3. 文件改动清单
 
-### Task 4: Add selection persistence keys
+### 3.1 新增
 
-**Files:**
-- Modify: `Toolbox/Core/Foundation/Config.lua`
+1. `Toolbox/Data/QuestTypeNames.lua`
 
-- [ ] **Step 1: Write the failing test**
+### 3.2 修改
 
-Add or extend a logic test to assert `Toolbox.Config.GetModule("encounter_journal")` includes new default keys when initialized.
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
-Expected: FAIL due to missing keys (adjust if this spec lacks coverage).
-
-- [ ] **Step 3: Implement defaults and migration**
-
-Add defaults for:
-- `questViewMode`
-- `questViewSelectedMapID`
-- `questViewSelectedTypeID`
-- `questViewSelectedQuestLineID`
-- `questViewSelectedQuestID`
-
-Ensure migration is idempotent per AGENTS.
-
-- [ ] **Step 4: Run test to verify pass**
-
-Run: `busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add Toolbox/Core/Foundation/Config.lua tests/logic/spec/encounter_journal_event_lifecycle_spec.lua
-git commit -m "配置: 任务页签视图状态持久化" -m "- [功能] 增加任务页签视图与选择状态默认值" -m "- 影响: 仅存档默认值与迁移"
-```
+1. `Toolbox/Toolbox.toc`
+2. `Toolbox/Core/API/QuestlineProgress.lua`
+3. `Toolbox/Core/Foundation/Locales.lua`
+4. `Toolbox/Core/Foundation/Config.lua`
+5. `Toolbox/Modules/EncounterJournal.lua`
+6. `tests/logic/fixtures/InstanceQuestlines_Mock.lua`
+7. `tests/logic/spec/questline_progress_spec.lua`
+8. `tests/logic/spec/questline_progress_live_data_spec.lua`
+9. `tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
+10. `docs/Toolbox-addon-design.md`
 
 ---
 
-## Chunk 3: Encounter Journal Multi-View UI
+## 4. 分阶段执行（TDD）
 
-### Task 5: Add view switcher and shared selection state
+## 阶段 A：数据契约与领域 API（Questlines）
 
-**Files:**
-- Modify: `Toolbox/Modules/EncounterJournal.lua`
+### 任务 A1：先补失败测试（类型标签 + 类型索引）
 
-- [ ] **Step 1: Write a failing test or harness assertion**
+- [ ] 在 `questline_progress_spec.lua` 增加以下断言并先跑失败：
+1. `GetQuestTypeLabel(typeId)`：有映射返回本地化文案；无映射返回 `EJ_QUEST_TYPE_UNKNOWN_FMT`。
+2. `GetQuestTabModel()`：包含 `typeList`、`typeToQuestIDs`、`typeToQuestLineIDs`、`typeToMapIDs`。
+3. `typeList` 按数值升序。
 
-Add a minimal harness test in `tests/logic/spec/encounter_journal_event_lifecycle_spec.lua` to verify the quest tab registers a view switcher frame and that selection state is stored in module DB.
+- [ ] 运行：  
+`busted tests/logic/spec/questline_progress_spec.lua`  
+期望：先失败（红灯）。
 
-- [ ] **Step 2: Run test to verify it fails**
+### 任务 A2：落地类型映射表与本地化键
 
-Run: `busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
-Expected: FAIL (switcher not created).
+- [ ] 新增 `Toolbox/Data/QuestTypeNames.lua`（使用 Data 模板 B 头注释，`manual` 来源）。
+- [ ] 在 `Locales.lua` 增加：
+1. `EJ_QUEST_TYPE_UNKNOWN_FMT`
+2. 类型映射相关键（`enUS`/`zhCN` 同步）
+- [ ] 在 `Toolbox.toc` 注册 `Data/QuestTypeNames.lua`（保证加载顺序正确）。
 
-- [ ] **Step 3: Implement view switcher**
+### 任务 A3：实现 QuestlineProgress 类型能力（保持 v3 兼容）
 
-In `EncounterJournal.lua`:
-- Add a small switcher UI (buttons or tabs) on the quest tab header.
-- Wire to `SelectionState.selectedView` and save to `questViewMode`.
-- Respect AGENTS: bind creation to `OnShow`/`hooksecurefunc` (no fixed delay).
+- [ ] 在 `QuestlineProgress.lua` 实现：
+1. `GetQuestTypeLabel(typeId)`（映射 -> `Toolbox.L` -> 兜底格式化）。
+2. 构建 `typeList/typeToQuestIDs/typeToQuestLineIDs/typeToMapIDs`。
+3. `schemaVersion = 3` 下 `Type` 作为可选字段处理：有则入索引，无则跳过，不造伪类型桶。
 
-- [ ] **Step 4: Run test to verify pass**
+- [ ] 为新增对外函数补 `---`/`@param`/`@return` 注释。
 
-Run: `busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
-Expected: PASS
+- [ ] 运行：
+1. `busted tests/logic/spec/questline_progress_spec.lua`
+2. `busted tests/logic/spec/questline_progress_live_data_spec.lua`
+期望：通过（绿灯）。
 
-- [ ] **Step 5: Commit**
+## 阶段 B：存档键与迁移
 
-```bash
-git add Toolbox/Modules/EncounterJournal.lua tests/logic/spec/encounter_journal_event_lifecycle_spec.lua
-git commit -m "功能: 增加任务页签视图切换" -m "- [功能] 任务页签支持状态/类型/地图视图切换" -m "- 影响: 新增玩家可见入口"
-```
+### 任务 B1：配置默认值与迁移
 
-### Task 6: Implement status view with map tree filter
+- [ ] 在 `Core/Config.lua` 的 `encounter_journal` defaults 增加：
+1. `questViewMode`
+2. `questViewSelectedMapID`
+3. `questViewSelectedTypeID`
+4. `questViewSelectedQuestLineID`
+5. `questViewSelectedQuestID`
 
-**Files:**
-- Modify: `Toolbox/Modules/EncounterJournal.lua`
+- [ ] 补幂等迁移逻辑（重复执行不改变结果）。
 
-- [ ] **Step 1: Write harness assertions**
+- [ ] 运行：  
+`busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`  
+期望：通过。
 
-Add harness checks for:
-- default map selection = current map
-- status view renders three columns
+## 阶段 C：任务页签多视图 UI
 
-- [ ] **Step 2: Run test to verify it fails**
+### 任务 C1：统一选择状态与视图切换器
 
-Run: `busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
-Expected: FAIL
+- [ ] 在 `Modules/EncounterJournal.lua` 增加统一 `SelectionState`：
+1. `selectedView`
+2. `selectedKind`
+3. `selectedTypeID/selectedMapID/selectedQuestLineID/selectedQuestID`
 
-- [ ] **Step 3: Implement status view rendering**
+- [ ] 视图切换写回 `questViewMode`，并在进入任务页签时恢复状态。
+- [ ] 不可落点时执行降级：回退目标视图默认节点。
 
-Use shared model; apply map tree filter; group tasks into Ready/Active/Pending.
+### 任务 C2：状态视图
 
-- [ ] **Step 4: Run test to verify pass**
+- [ ] 默认进入状态视图。
+- [ ] 左侧保留地图树过滤（地图 -> 任务线 -> 任务）。
+- [ ] 主区渲染三列泳道：`可交付 / 进行中 / 待解锁`。
+- [ ] 默认选中当前地图；点击卡片同步详情区。
 
-Run: `busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
-Expected: PASS
+### 任务 C3：类型视图（树形/列表）
 
-- [ ] **Step 5: Commit**
+- [ ] 顶层按 `typeList` 构建类型桶，按原始数值排序。
+- [ ] 树形层级：
+1. 有地图：`类型 -> 地图 -> 任务线 -> 任务`
+2. 无地图：`类型 -> 任务线 -> 任务`（归入“其他”分组）
+- [ ] 列表模式复用当前地图过滤；若为“其他”分组，仅展示该分组任务。
 
-```bash
-git add Toolbox/Modules/EncounterJournal.lua tests/logic/spec/encounter_journal_event_lifecycle_spec.lua
-git commit -m "功能: 状态视图渲染" -m "- [功能] 状态视图三列泳道与地图树过滤" -m "- 影响: 任务页签展示逻辑"
-```
+### 任务 C4：地图视图
 
-### Task 7: Implement type view tree + list mode
+- [ ] 左侧地图树与主区联动。
+- [ ] 默认选中上次记忆地图；无则首个可用地图。
 
-**Files:**
-- Modify: `Toolbox/Modules/EncounterJournal.lua`
+### 任务 C5：共享详情区
 
-- [ ] **Step 1: Write harness assertions**
+- [ ] 三视图统一详情区行为：
+1. 任务详情
+2. 任务线详情
+3. 地图详情
 
-Add harness checks for:
-- type view uses typeList order
-- list mode filters by current map selection
+- [ ] 操作区保留导航/高亮占位，不实现真实跳转。
 
-- [ ] **Step 2: Run test to verify it fails**
+### 任务 C6：UI 生命周期与安全约束
 
-Run: `busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
-Expected: FAIL
-
-- [ ] **Step 3: Implement type view**
-
-- Tree mode: type -> map -> questline -> quest (mapless goes to “其他”).
-- List mode: only tasks under current selected map; if mapless, list only “其他”.
-
-- [ ] **Step 4: Run test to verify pass**
-
-Run: `busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add Toolbox/Modules/EncounterJournal.lua tests/logic/spec/encounter_journal_event_lifecycle_spec.lua
-git commit -m "功能: 类型视图树形与列表模式" -m "- [功能] 类型视图支持树形/列表切换" -m "- 影响: 任务页签类型展示"
-```
-
-### Task 8: Implement map view renderer
-
-**Files:**
-- Modify: `Toolbox/Modules/EncounterJournal.lua`
-
-- [ ] **Step 1: Add harness assertions**
-
-Verify map view defaults to last selected map and renders questline list.
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
-Expected: FAIL
-
-- [ ] **Step 3: Implement map view**
-
-Render questline list / quest list based on map tree selection.
-
-- [ ] **Step 4: Run test to verify pass**
-
-Run: `busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add Toolbox/Modules/EncounterJournal.lua tests/logic/spec/encounter_journal_event_lifecycle_spec.lua
-git commit -m "功能: 地图视图渲染" -m "- [功能] 地图视图与选择状态联动" -m "- 影响: 任务页签地图展示"
-```
+- [ ] 创建与刷新时机绑定 `OnShow` / `hooksecurefunc`，避免固定秒延迟。
+- [ ] 与受保护框体交互路径遵守战斗锁定约束（必要时排队到 `PLAYER_REGEN_ENABLED`）。
 
 ---
 
-## Chunk 4: Documentation and Final Verification
+## 5. 验收映射（与需求稿对齐）
 
-### Task 9: Update overall design doc
-
-**Files:**
-- Modify: `docs/Toolbox-addon-design.md`
-
-- [ ] **Step 1: Add/Update mapping entries**
-
-Update module map, data examples, and notes for new view switcher, type mapping file, and persistence keys.
-
-- [ ] **Step 2: Run static tests**
-
-Run: `python tests/validate_settings_subcategories.py`
-Expected: PASS
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add docs/Toolbox-addon-design.md
-git commit -m "文档: 更新任务页签多视图说明" -m "- [文档] 增加视图切换与类型映射说明" -m "- 影响: 仅文档"
-```
-
-### Task 10: Full test run
-
-**Files:**
-- Test: `tests/run_all.py`
-
-- [ ] **Step 1: Run full tests**
-
-Run: `python tests/run_all.py`
-Expected: PASS (requires `busted` installed)
-
-- [ ] **Step 2: Commit final fixes (if any)**
-
-If tests required fixes, commit them with descriptive messages.
+- [ ] 默认进入状态视图，默认当前地图。
+- [ ] 三视图切换保持同一选择状态，无法落点时正确降级。
+- [ ] 类型桶覆盖数据中全部类型，排序正确。
+- [ ] 类型视图无地图分组跳层正确。
+- [ ] 详情区在三视图行为一致。
+- [ ] 状态视图左树过滤能正确限制泳道内容。
+- [ ] 不引入固定延迟等待布局。
+- [ ] 类型列表模式按“当前地图/其他分组”过滤正确。
 
 ---
 
-**Plan complete and saved to `docs/superpowers/plans/2026-04-10-ej-quest-ui-multiview-implementation-plan.md`. Ready to execute?**
+## 6. 验证命令（完成前必须实跑）
+
+1. `busted tests/logic/spec/questline_progress_spec.lua`
+2. `busted tests/logic/spec/questline_progress_live_data_spec.lua`
+3. `busted tests/logic/spec/encounter_journal_event_lifecycle_spec.lua`
+4. `python tests/validate_settings_subcategories.py`
+5. `python tests/run_all.py`
+
+若某命令在本地环境不可执行，需在交付说明中明确未执行项与原因。
+
+---
+
+## 7. 提交策略（中文）
+
+建议按“测试先行 -> 实现 -> 收口文档”提交：
+
+1. `测试:` 类型标签与类型索引失败用例
+2. `数据:` QuestTypeNames 与 Locales/TOC 接入
+3. `功能:` QuestlineProgress 类型索引与标签解析
+4. `配置:` encounter_journal 新持久化键与迁移
+5. `功能:` EncounterJournal 三视图与统一选择状态
+6. `文档:` 总设计映射与说明更新
+
+---
+
+## 8. 完成定义（DoD）
+
+1. 第 6 节验证命令通过（或明确未执行原因）。
+2. 与 `2026-04-10-ej-quest-ui-alignment-design.md` 的确认项一致，无“待确认项”残留。
+3. 代码改动遵守 AGENTS 三关、UI 挂接时机、存档边界与本地化规则。
