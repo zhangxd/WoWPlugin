@@ -1,7 +1,7 @@
 {
   "contract": {
     "contract_id": "instance_questlines",
-    "schema_version": 1,
+    "schema_version": 2,
     "summary": "冒险手册任务页签静态任务线文档",
     "source_of_truth": "WoWPlugin",
     "status": "active"
@@ -16,84 +16,117 @@
     "tables": [
       "questline",
       "questlinexquest",
-      "questpoiblob"
+      "questpoiblob",
+      "questpoipoint"
     ],
-    "sql": "WITH raw_links AS (\n  SELECT DISTINCT\n    CAST(ql.ID AS INTEGER) AS quest_line_id,\n    ql.Name_lang AS quest_line_name,\n    CAST(qlxq.QuestID AS INTEGER) AS quest_id,\n    CAST(qlxq.OrderIndex AS INTEGER) AS order_index\n  FROM questline ql\n  JOIN questlinexquest qlxq ON qlxq.QuestLineID = ql.ID\n  WHERE TRIM(ql.ID) <> ''\n    AND CAST(ql.ID AS INTEGER) > 0\n    AND CAST(qlxq.QuestID AS INTEGER) > 0\n),\nquest_map_votes AS (\n  SELECT\n    CAST(QuestID AS INTEGER) AS quest_id,\n    CAST(UiMapID AS INTEGER) AS quest_ui_map_id,\n    COUNT(*) AS vote_count\n  FROM questpoiblob\n  WHERE CAST(QuestID AS INTEGER) > 0\n    AND CAST(UiMapID AS INTEGER) > 0\n  GROUP BY CAST(QuestID AS INTEGER), CAST(UiMapID AS INTEGER)\n),\nquest_best_map AS (\n  SELECT quest_id, quest_ui_map_id\n  FROM (\n    SELECT\n      quest_id,\n      quest_ui_map_id,\n      vote_count,\n      ROW_NUMBER() OVER (PARTITION BY quest_id ORDER BY vote_count DESC, quest_ui_map_id ASC) AS rank_index\n    FROM quest_map_votes\n  ) ranked\n  WHERE rank_index = 1\n),\nquestline_map_votes AS (\n  SELECT\n    raw_links.quest_line_id,\n    CAST(qpb.UiMapID AS INTEGER) AS quest_line_ui_map_id,\n    COUNT(*) AS vote_count\n  FROM raw_links\n  JOIN questpoiblob qpb ON qpb.QuestID = raw_links.quest_id\n  WHERE CAST(qpb.UiMapID AS INTEGER) > 0\n  GROUP BY raw_links.quest_line_id, CAST(qpb.UiMapID AS INTEGER)\n),\nquestline_best_map AS (\n  SELECT quest_line_id, quest_line_ui_map_id\n  FROM (\n    SELECT\n      quest_line_id,\n      quest_line_ui_map_id,\n      vote_count,\n      ROW_NUMBER() OVER (PARTITION BY quest_line_id ORDER BY vote_count DESC, quest_line_ui_map_id ASC) AS rank_index\n    FROM questline_map_votes\n  ) ranked\n  WHERE rank_index = 1\n)\nSELECT\n  raw_links.quest_line_id,\n  raw_links.quest_line_name,\n  raw_links.quest_id,\n  raw_links.order_index,\n  quest_best_map.quest_ui_map_id,\n  questline_best_map.quest_line_ui_map_id\nFROM raw_links\nLEFT JOIN quest_best_map ON quest_best_map.quest_id = raw_links.quest_id\nLEFT JOIN questline_best_map ON questline_best_map.quest_line_id = raw_links.quest_line_id\nORDER BY raw_links.quest_line_id, raw_links.order_index, raw_links.quest_id",
+    "sql": "SELECT 1 AS placeholder",
     "query": {
-      "from": "questline ql",
-      "joins": [
-        "questlinexquest qlxq ON qlxq.QuestLineID = ql.ID",
-        "questpoiblob 投票汇总 quest_ui_map_id",
-        "questpoiblob 投票汇总 quest_line_ui_map_id"
-      ],
+      "from": "placeholder",
+      "joins": [],
       "select": [
-        "quest_line_id",
-        "quest_line_name",
-        "quest_id",
-        "order_index",
-        "quest_ui_map_id",
-        "quest_line_ui_map_id"
+        "placeholder"
       ],
-      "where": [
-        "quest_line_id 非空",
-        "quest_line_id > 0",
-        "quest_id > 0"
-      ],
+      "where": [],
       "group_by": [],
-      "order_by": [
-        "quest_line_id ASC",
-        "order_index ASC",
-        "quest_id ASC"
-      ],
-      "row_granularity": "一行代表一个任务线与任务的关联记录"
+      "order_by": [],
+      "row_granularity": "占位查询"
+    },
+    "datasets": {
+      "core_links": {
+        "sql": "WITH raw_links AS (\n  SELECT DISTINCT\n    CAST(ql.ID AS INTEGER) AS quest_line_id,\n    ql.Name_lang AS quest_line_name,\n    CAST(qlxq.QuestID AS INTEGER) AS quest_id,\n    CAST(qlxq.OrderIndex AS INTEGER) AS order_index\n  FROM questline ql\n  JOIN questlinexquest qlxq ON qlxq.QuestLineID = ql.ID\n  WHERE TRIM(ql.ID) <> ''\n    AND CAST(ql.ID AS INTEGER) > 0\n    AND CAST(qlxq.QuestID AS INTEGER) > 0\n),\nquest_map_votes AS (\n  SELECT\n    CAST(QuestID AS INTEGER) AS quest_id,\n    CAST(UiMapID AS INTEGER) AS quest_ui_map_id,\n    COUNT(*) AS vote_count\n  FROM questpoiblob\n  WHERE CAST(QuestID AS INTEGER) > 0\n    AND CAST(UiMapID AS INTEGER) > 0\n  GROUP BY CAST(QuestID AS INTEGER), CAST(UiMapID AS INTEGER)\n),\nquest_best_map AS (\n  SELECT quest_id, quest_ui_map_id\n  FROM (\n    SELECT\n      quest_id,\n      quest_ui_map_id,\n      vote_count,\n      ROW_NUMBER() OVER (PARTITION BY quest_id ORDER BY vote_count DESC, quest_ui_map_id ASC) AS rank_index\n    FROM quest_map_votes\n  ) ranked\n  WHERE rank_index = 1\n),\nquestline_map_votes AS (\n  SELECT\n    raw_links.quest_line_id,\n    CAST(qpb.UiMapID AS INTEGER) AS quest_line_ui_map_id,\n    COUNT(*) AS vote_count\n  FROM raw_links\n  JOIN questpoiblob qpb ON CAST(qpb.QuestID AS INTEGER) = raw_links.quest_id\n  WHERE CAST(qpb.UiMapID AS INTEGER) > 0\n  GROUP BY raw_links.quest_line_id, CAST(qpb.UiMapID AS INTEGER)\n),\nquestline_best_map AS (\n  SELECT quest_line_id, quest_line_ui_map_id\n  FROM (\n    SELECT\n      quest_line_id,\n      quest_line_ui_map_id,\n      vote_count,\n      ROW_NUMBER() OVER (PARTITION BY quest_line_id ORDER BY vote_count DESC, quest_line_ui_map_id ASC) AS rank_index\n    FROM questline_map_votes\n  ) ranked\n  WHERE rank_index = 1\n)\nSELECT\n  raw_links.quest_line_id,\n  raw_links.quest_line_name,\n  raw_links.quest_id,\n  raw_links.order_index,\n  quest_best_map.quest_ui_map_id,\n  questline_best_map.quest_line_ui_map_id\nFROM raw_links\nLEFT JOIN quest_best_map ON quest_best_map.quest_id = raw_links.quest_id\nLEFT JOIN questline_best_map ON questline_best_map.quest_line_id = raw_links.quest_line_id\nORDER BY raw_links.quest_line_id, raw_links.order_index, raw_links.quest_id",
+        "query": {
+          "from": "questline ql",
+          "joins": [
+            "questlinexquest qlxq ON qlxq.QuestLineID = ql.ID",
+            "questpoiblob quest_best_map / quest_line_best_map 聚合"
+          ],
+          "select": [
+            "quest_line_id",
+            "quest_line_name",
+            "quest_id",
+            "order_index",
+            "quest_ui_map_id",
+            "quest_line_ui_map_id"
+          ],
+          "where": [
+            "quest_line_id > 0",
+            "quest_id > 0"
+          ],
+          "group_by": [],
+          "order_by": [
+            "quest_line_id ASC",
+            "order_index ASC",
+            "quest_id ASC"
+          ],
+          "row_granularity": "一行代表一个任务线与任务关联"
+        }
+      },
+      "quest_poi_blobs": {
+        "sql": "SELECT DISTINCT\n  CAST(QuestID AS INTEGER) AS quest_id,\n  CAST(ID AS INTEGER) AS blob_id,\n  CAST(UiMapID AS INTEGER) AS blob_ui_map_id,\n  CAST(ObjectiveID AS INTEGER) AS objective_id\nFROM questpoiblob\nWHERE CAST(ID AS INTEGER) > 0\n  AND CAST(QuestID AS INTEGER) > 0\n  AND CAST(UiMapID AS INTEGER) > 0\nORDER BY CAST(QuestID AS INTEGER), CAST(ID AS INTEGER)",
+        "query": {
+          "from": "questpoiblob",
+          "joins": [],
+          "select": [
+            "quest_id",
+            "blob_id",
+            "blob_ui_map_id",
+            "objective_id"
+          ],
+          "where": [
+            "blob_id > 0",
+            "quest_id > 0",
+            "blob_ui_map_id > 0"
+          ],
+          "group_by": [],
+          "order_by": [
+            "quest_id ASC",
+            "blob_id ASC"
+          ],
+          "row_granularity": "一行代表一个任务 POI blob"
+        }
+      },
+      "quest_poi_points": {
+        "sql": "SELECT\n  CAST(QuestPOIBlobID AS INTEGER) AS blob_id,\n  CAST(X AS INTEGER) AS point_x,\n  CAST(Y AS INTEGER) AS point_y,\n  CAST(Z AS INTEGER) AS point_z\nFROM questpoipoint\nWHERE CAST(QuestPOIBlobID AS INTEGER) > 0\nORDER BY CAST(QuestPOIBlobID AS INTEGER), CAST(X AS INTEGER), CAST(Y AS INTEGER), CAST(Z AS INTEGER)",
+        "query": {
+          "from": "questpoipoint",
+          "joins": [],
+          "select": [
+            "blob_id",
+            "point_x",
+            "point_y",
+            "point_z"
+          ],
+          "where": [
+            "blob_id > 0"
+          ],
+          "group_by": [],
+          "order_by": [
+            "blob_id ASC",
+            "point_x ASC",
+            "point_y ASC",
+            "point_z ASC"
+          ],
+          "row_granularity": "一行代表一个 POI 点位"
+        }
+      }
     }
   },
   "structure": {
     "root_type": "document",
-    "lua_shape": "Toolbox.Data.InstanceQuestlines = { schemaVersion, sourceMode, generatedAt, quests, questLines, questLineQuestIDs }",
-    "fields": [
-      {
-        "name": "quest_line_id",
-        "type": "integer",
-        "required": true
-      },
-      {
-        "name": "quest_line_name",
-        "type": "string",
-        "required": false
-      },
-      {
-        "name": "quest_id",
-        "type": "integer",
-        "required": true
-      },
-      {
-        "name": "order_index",
-        "type": "integer",
-        "required": true
-      },
-      {
-        "name": "quest_ui_map_id",
-        "type": "integer",
-        "required": false
-      },
-      {
-        "name": "quest_line_ui_map_id",
-        "type": "integer",
-        "required": false
-      }
-    ],
+    "lua_shape": "Toolbox.Data.InstanceQuestlines = { schemaVersion, sourceMode, generatedAt, quests, questLines, questLineXQuest, questPOIBlobs, questPOIPoints }",
+    "fields": [],
     "document_blocks": [
       {
         "name": "metadata",
         "metadata": {
-          "schemaVersion": 3,
+          "schemaVersion": 4,
           "sourceMode": "live",
           "generatedAt": "@generated_at"
         }
       },
       {
         "name": "quests",
+        "dataset": "core_links",
         "block_type": "map_object",
         "key_field": "quest_id",
         "dedupe_by": [
@@ -113,6 +146,7 @@
       },
       {
         "name": "questLines",
+        "dataset": "core_links",
         "block_type": "map_object",
         "key_field": "quest_line_id",
         "dedupe_by": [
@@ -133,23 +167,81 @@
         }
       },
       {
-        "name": "questLineQuestIDs",
-        "block_type": "map_array_grouped",
+        "name": "questLineXQuest",
+        "dataset": "core_links",
+        "block_type": "map_array_objects_grouped",
         "key_field": "quest_line_id",
-        "value_field": "quest_id",
         "required_fields": [
           "quest_line_id",
-          "quest_id"
+          "quest_id",
+          "order_index"
         ],
         "dedupe_by": [
           "quest_line_id",
-          "quest_id"
+          "quest_id",
+          "order_index"
         ],
         "sort_by": [
           "quest_line_id",
           "order_index",
           "quest_id"
-        ]
+        ],
+        "value_template": {
+          "QuestID": "quest_id",
+          "OrderIndex": "order_index"
+        }
+      },
+      {
+        "name": "questPOIBlobs",
+        "dataset": "quest_poi_blobs",
+        "block_type": "map_array_objects_grouped",
+        "key_field": "quest_id",
+        "required_fields": [
+          "quest_id",
+          "blob_id",
+          "blob_ui_map_id"
+        ],
+        "dedupe_by": [
+          "quest_id",
+          "blob_id"
+        ],
+        "sort_by": [
+          "quest_id",
+          "blob_id"
+        ],
+        "value_template": {
+          "BlobID": "blob_id",
+          "UiMapID": "blob_ui_map_id",
+          "ObjectiveID": "objective_id"
+        }
+      },
+      {
+        "name": "questPOIPoints",
+        "dataset": "quest_poi_points",
+        "block_type": "map_array_objects_grouped",
+        "key_field": "blob_id",
+        "required_fields": [
+          "blob_id",
+          "point_x",
+          "point_y"
+        ],
+        "dedupe_by": [
+          "blob_id",
+          "point_x",
+          "point_y",
+          "point_z"
+        ],
+        "sort_by": [
+          "blob_id",
+          "point_x",
+          "point_y",
+          "point_z"
+        ],
+        "value_template": {
+          "x": "point_x",
+          "y": "point_y",
+          "z": "point_z"
+        }
       }
     ]
   },
@@ -164,8 +256,10 @@
         "quest_line_id",
         "quest_id",
         "order_index",
-        "quest_ui_map_id",
-        "quest_line_ui_map_id"
+        "blob_id",
+        "point_x",
+        "point_y",
+        "point_z"
       ]
     ],
     "non_null_fields": [
@@ -189,11 +283,15 @@
     ]
   },
   "versioning": {
-    "current_schema_version": 1,
+    "current_schema_version": 2,
     "change_log": [
       {
         "schema_version": 1,
         "summary": "初始契约版本"
+      },
+      {
+        "schema_version": 2,
+        "summary": "切换为 DB-shape 文档结构，导出任务线关系与 POI 关系块"
       }
     ]
   }

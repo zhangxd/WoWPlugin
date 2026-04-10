@@ -11,9 +11,20 @@ local mockData = {
   generatedAt = "2026-01-01T00:00:00Z",
 
   quests = {
-    [81001] = { ID = 81001, UiMapID = 2371 },
-    [81002] = { ID = 81002, UiMapID = 2371 },
-    [81003] = { ID = 81003, UiMapID = 2371 },
+    [81001] = {
+      ID = 81001,
+      UiMapID = 2371,
+      MapPos = { x = 0.11, y = 0.22 },
+    },
+    [81002] = {
+      ID = 81002,
+      UiMapID = 2371,
+      MapPos = { x = 0.33, y = 0.44, UiMapID = 2371 },
+    },
+    [81003] = {
+      ID = 81003,
+      UiMapID = 2371,
+    },
   },
 
   questLines = {

@@ -32,19 +32,43 @@ describe("QuestlineProgress mock data injection", function()
     rawset(_G, "Toolbox", {
       Data = {
         InstanceQuestlines = nil,
+        QuestTypeNames = {
+          [12] = "EJ_QUEST_TYPE_CAMPAIGN",
+          [34] = "EJ_QUEST_TYPE_SIDE_STORY",
+        },
       },
       Questlines = {},
+      L = {
+        EJ_QUEST_TYPE_CAMPAIGN = "Campaign",
+        EJ_QUEST_TYPE_SIDE_STORY = "Side Story",
+        EJ_QUEST_TYPE_UNKNOWN_FMT = "Unknown Type (%s)",
+      },
     })
 
     rawset(_G, "C_QuestLog", {
       GetTitleForQuestID = function(questID)
         return "Quest #" .. tostring(questID)
       end,
-      GetLogIndexForQuestID = function()
+      GetLogIndexForQuestID = function(questID)
+        if questID == 81002 or questID == 81003 then
+          return 1
+        end
         return 0
       end,
       IsQuestFlaggedCompleted = function(questID)
         return questID == 81001
+      end,
+      ReadyForTurnIn = function(questID)
+        return questID == 81003
+      end,
+      GetQuestType = function(questID)
+        if questID == 81001 then
+          return 34
+        end
+        if questID == 81002 then
+          return 12
+        end
+        return nil
       end,
     })
     rawset(_G, "C_Map", {
@@ -89,6 +113,37 @@ describe("QuestlineProgress mock data injection", function()
     assert.is_nil(errorObject)
   end)
 
+  it("quest_runtime_state_uses_runtime_apis", function()
+    assert.is_function(Toolbox.Questlines.GetQuestRuntimeState)
+
+    local runtimeState = Toolbox.Questlines.GetQuestRuntimeState(81003)
+    assert.equals("Quest #81003", runtimeState.name)
+    assert.equals("active", runtimeState.status)
+    assert.equals(true, runtimeState.readyForTurnIn)
+    assert.is_nil(runtimeState.typeID)
+
+    local typedState = Toolbox.Questlines.GetQuestRuntimeState(81002)
+    assert.equals(12, typedState.typeID)
+  end)
+
+  it("quest_type_label_uses_mapping_and_fallback", function()
+    assert.is_function(Toolbox.Questlines.GetQuestTypeLabel)
+    assert.equals("Campaign", Toolbox.Questlines.GetQuestTypeLabel(12))
+    assert.equals("Unknown Type (999)", Toolbox.Questlines.GetQuestTypeLabel(999))
+  end)
+
+  it("quest_tab_model_builds_type_indexes_from_runtime_fields", function()
+    local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 查询模型
+    assert.is_nil(errorObject)
+    assert.same({ 12, 34 }, model.typeList)
+    assert.same({ 81002 }, model.typeToQuestIDs[12])
+    assert.same({ 81001 }, model.typeToQuestIDs[34])
+    assert.same({ 9901 }, model.typeToQuestLineIDs[12])
+    assert.same({ 9901 }, model.typeToQuestLineIDs[34])
+    assert.same({ 2371 }, model.typeToMapIDs[12])
+    assert.same({ 2371 }, model.typeToMapIDs[34])
+  end)
+
   it("quest_tab_model_uses_injected_mock_data", function()
     local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 查询模型
     assert.is_nil(errorObject)
@@ -116,5 +171,46 @@ describe("QuestlineProgress mock data injection", function()
     local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 清除覆盖后的模型
     assert.is_nil(errorObject)
     assert.is_truthy(model.questLineByID[9910])
+  end)
+
+  it("supports_db_shape_static_data_v4", function()
+    local v4Data = {
+      schemaVersion = 4,
+      sourceMode = "mock",
+      generatedAt = "2026-01-03T00:00:00Z",
+      quests = {
+        [81001] = { ID = 81001, UiMapID = 2371 },
+        [81002] = { ID = 81002, UiMapID = 2371 },
+      },
+      questLines = {
+        [9901] = { ID = 9901, Name_lang = "Mock QuestLine Alpha", UiMapID = 2371 },
+      },
+      questLineXQuest = {
+        [9901] = {
+          { QuestID = 81001, OrderIndex = 1 },
+          { QuestID = 81002, OrderIndex = 2 },
+        },
+      },
+      questPOIBlobs = {
+        [81001] = {
+          { BlobID = 7001, UiMapID = 2371, ObjectiveID = 17 },
+        },
+      },
+      questPOIPoints = {
+        [7001] = {
+          { x = 0.11, y = 0.22, z = 0 },
+        },
+      },
+    }
+
+    Toolbox.Questlines.SetDataOverride(v4Data)
+    local valid, errorObject = Toolbox.Questlines.ValidateInstanceQuestlinesData(v4Data, true)
+    assert.is_true(valid)
+    assert.is_nil(errorObject)
+
+    local model, modelError = Toolbox.Questlines.GetQuestTabModel()
+    assert.is_nil(modelError)
+    assert.equals(2, #model.questLineByID[9901].quests)
+    assert.same({ x = 0.11, y = 0.22, z = 0 }, model.questLineByID[9901].quests[1].mapPos)
   end)
 end)

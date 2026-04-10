@@ -42,6 +42,7 @@ Modules\MinimapButton.lua
 # ============================================================================
 Data\InstanceMapIDs.lua
 Data\InstanceDrops_Mount.lua
+Data\QuestTypeNames.lua
 Data\InstanceQuestlines.lua
 
 # ============================================================================

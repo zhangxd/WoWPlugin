@@ -1,5 +1,6 @@
 ﻿from pathlib import Path
 import sys
+import json
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -353,12 +354,14 @@ def validate_encounter_journal_questline_tree_feature() -> None:
         raise AssertionError("questline api should not keep legacy GetExpansionTree compatibility")
     if "function Toolbox.Questlines.GetInstanceTree(" in questline_api_text:
         raise AssertionError("questline api should not keep legacy GetInstanceTree compatibility")
-    require_contains(data_text, "schemaVersion = 3", "questline data schema v3")
+    if "schemaVersion = 3" not in data_text and "schemaVersion = 4" not in data_text:
+        raise AssertionError("missing questline data schema version: expected schemaVersion = 3 or schemaVersion = 4")
     require_contains(data_text, 'sourceMode = "live"', "questline data source mode")
     require_contains(data_text, "generatedAt = ", "questline data generated timestamp")
     require_contains(data_text, "quests = {", "questline data quests table")
     require_contains(data_text, "questLines = {", "questline data questlines table")
-    require_contains(data_text, "questLineQuestIDs = {", "questline data questline quest map")
+    if "questLineQuestIDs = {" not in data_text and "questLineXQuest = {" not in data_text:
+        raise AssertionError("missing questline data questline relation block")
     require_contains(questline_api_text, "function Toolbox.Questlines.SetDataOverride(", "questline mock data override api")
 
     require_contains(module_text, "QuestlineTreeView", "encounter journal questline tree view")
@@ -446,11 +449,14 @@ def validate_generated_data_contract_headers() -> None:
         require_contains(text, "@contract_snapshot", f"{file_name} contract_snapshot tag")
         if metadata.get("contract_id") != contract_id:
             raise AssertionError(f"{file_name} contract_id mismatch: expected {contract_id}")
-        if metadata.get("schema_version") != "1":
-            raise AssertionError(f"{file_name} schema_version mismatch")
         expected_contract_file = f"WoWPlugin/DataContracts/{contract_id}.json"
         if metadata.get("contract_file") != expected_contract_file:
             raise AssertionError(f"{file_name} contract_file mismatch: expected {expected_contract_file}")
+        contract_path = ROOT / "DataContracts" / f"{contract_id}.json"
+        contract_data = json.loads(contract_path.read_text(encoding="utf-8"))
+        expected_schema_version = str(contract_data["contract"]["schema_version"])
+        if metadata.get("schema_version") != expected_schema_version:
+            raise AssertionError(f"{file_name} schema_version mismatch")
         if metadata.get("data_source") != "wow.db":
             raise AssertionError(f"{file_name} data_source mismatch")
 

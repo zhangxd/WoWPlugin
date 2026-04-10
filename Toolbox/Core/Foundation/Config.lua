@@ -75,6 +75,13 @@ local defaults = {
       questlineTreeCollapsed = {},
       -- 任务页签选中状态（左树 + 右内容区）
       questlineTreeSelection = {},
+      -- 任务页签视图模式：status | type | map
+      questViewMode = "status",
+      -- 任务页签选择记忆（0 表示未选中）
+      questViewSelectedMapID = 0,
+      questViewSelectedTypeID = 0,
+      questViewSelectedQuestLineID = 0,
+      questViewSelectedQuestID = 0,
       -- 根页签顺序（按页签 ID，自定义任务页签固定 ID=203）
       rootTabOrderIds = {},
       -- 根页签隐藏开关（按页签 ID）：[id]=true 表示隐藏对应页签
@@ -232,6 +239,26 @@ function Toolbox.Config.Init()
     encounterJournalDb.questlineTreeExpanded = nil
     if type(encounterJournalDb.questlineTreeSelection) ~= "table" then
       encounterJournalDb.questlineTreeSelection = {}
+    end
+
+    if type(encounterJournalDb.questViewMode) ~= "string" or encounterJournalDb.questViewMode == "" then
+      encounterJournalDb.questViewMode = "status"
+    end
+
+    if type(encounterJournalDb.questViewSelectedMapID) ~= "number" then
+      local legacyMapID = encounterJournalDb.questlineTreeSelection.selectedMapID -- 旧版地图选中 ID
+      encounterJournalDb.questViewSelectedMapID = type(legacyMapID) == "number" and legacyMapID or 0
+    end
+    if type(encounterJournalDb.questViewSelectedQuestLineID) ~= "number" then
+      local legacyQuestLineID = encounterJournalDb.questlineTreeSelection.selectedQuestLineID -- 旧版任务线选中 ID
+      encounterJournalDb.questViewSelectedQuestLineID = type(legacyQuestLineID) == "number" and legacyQuestLineID or 0
+    end
+    if type(encounterJournalDb.questViewSelectedQuestID) ~= "number" then
+      local legacyQuestID = encounterJournalDb.questlineTreeSelection.selectedQuestID -- 旧版任务选中 ID
+      encounterJournalDb.questViewSelectedQuestID = type(legacyQuestID) == "number" and legacyQuestID or 0
+    end
+    if type(encounterJournalDb.questViewSelectedTypeID) ~= "number" then
+      encounterJournalDb.questViewSelectedTypeID = 0
     end
   end
 end
