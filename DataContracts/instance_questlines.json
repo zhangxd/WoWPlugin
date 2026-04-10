@@ -18,19 +18,21 @@
       "questlinexquest",
       "questpoiblob"
     ],
-    "sql": "SELECT\n  CAST(ql.ID AS INTEGER) AS quest_line_id,\n  ql.Name_lang AS quest_line_name,\n  CAST(qlxq.QuestID AS INTEGER) AS quest_id,\n  CAST(qlxq.OrderIndex AS INTEGER) AS order_index,\n  CAST(qpb.UiMapID AS INTEGER) AS ui_map_id\nFROM questline ql\nJOIN questlinexquest qlxq ON qlxq.QuestLineID = ql.ID\nLEFT JOIN questpoiblob qpb ON qpb.QuestID = qlxq.QuestID\n  AND CAST(qpb.UiMapID AS INTEGER) > 0\nWHERE TRIM(ql.ID) <> ''\n  AND CAST(ql.ID AS INTEGER) > 0\n  AND CAST(qlxq.QuestID AS INTEGER) > 0\nORDER BY CAST(ql.ID AS INTEGER), CAST(qlxq.OrderIndex AS INTEGER), CAST(qlxq.QuestID AS INTEGER)",
+    "sql": "WITH raw_links AS (\n  SELECT DISTINCT\n    CAST(ql.ID AS INTEGER) AS quest_line_id,\n    ql.Name_lang AS quest_line_name,\n    CAST(qlxq.QuestID AS INTEGER) AS quest_id,\n    CAST(qlxq.OrderIndex AS INTEGER) AS order_index\n  FROM questline ql\n  JOIN questlinexquest qlxq ON qlxq.QuestLineID = ql.ID\n  WHERE TRIM(ql.ID) <> ''\n    AND CAST(ql.ID AS INTEGER) > 0\n    AND CAST(qlxq.QuestID AS INTEGER) > 0\n),\nquest_map_votes AS (\n  SELECT\n    CAST(QuestID AS INTEGER) AS quest_id,\n    CAST(UiMapID AS INTEGER) AS quest_ui_map_id,\n    COUNT(*) AS vote_count\n  FROM questpoiblob\n  WHERE CAST(QuestID AS INTEGER) > 0\n    AND CAST(UiMapID AS INTEGER) > 0\n  GROUP BY CAST(QuestID AS INTEGER), CAST(UiMapID AS INTEGER)\n),\nquest_best_map AS (\n  SELECT quest_id, quest_ui_map_id\n  FROM (\n    SELECT\n      quest_id,\n      quest_ui_map_id,\n      vote_count,\n      ROW_NUMBER() OVER (PARTITION BY quest_id ORDER BY vote_count DESC, quest_ui_map_id ASC) AS rank_index\n    FROM quest_map_votes\n  ) ranked\n  WHERE rank_index = 1\n),\nquestline_map_votes AS (\n  SELECT\n    raw_links.quest_line_id,\n    CAST(qpb.UiMapID AS INTEGER) AS quest_line_ui_map_id,\n    COUNT(*) AS vote_count\n  FROM raw_links\n  JOIN questpoiblob qpb ON qpb.QuestID = raw_links.quest_id\n  WHERE CAST(qpb.UiMapID AS INTEGER) > 0\n  GROUP BY raw_links.quest_line_id, CAST(qpb.UiMapID AS INTEGER)\n),\nquestline_best_map AS (\n  SELECT quest_line_id, quest_line_ui_map_id\n  FROM (\n    SELECT\n      quest_line_id,\n      quest_line_ui_map_id,\n      vote_count,\n      ROW_NUMBER() OVER (PARTITION BY quest_line_id ORDER BY vote_count DESC, quest_line_ui_map_id ASC) AS rank_index\n    FROM questline_map_votes\n  ) ranked\n  WHERE rank_index = 1\n)\nSELECT\n  raw_links.quest_line_id,\n  raw_links.quest_line_name,\n  raw_links.quest_id,\n  raw_links.order_index,\n  quest_best_map.quest_ui_map_id,\n  questline_best_map.quest_line_ui_map_id\nFROM raw_links\nLEFT JOIN quest_best_map ON quest_best_map.quest_id = raw_links.quest_id\nLEFT JOIN questline_best_map ON questline_best_map.quest_line_id = raw_links.quest_line_id\nORDER BY raw_links.quest_line_id, raw_links.order_index, raw_links.quest_id",
     "query": {
       "from": "questline ql",
       "joins": [
         "questlinexquest qlxq ON qlxq.QuestLineID = ql.ID",
-        "LEFT questpoiblob qpb ON qpb.QuestID = qlxq.QuestID AND qpb.UiMapID > 0"
+        "questpoiblob 投票汇总 quest_ui_map_id",
+        "questpoiblob 投票汇总 quest_line_ui_map_id"
       ],
       "select": [
         "quest_line_id",
         "quest_line_name",
         "quest_id",
         "order_index",
-        "ui_map_id"
+        "quest_ui_map_id",
+        "quest_line_ui_map_id"
       ],
       "where": [
         "quest_line_id 非空",
@@ -71,7 +73,12 @@
         "required": true
       },
       {
-        "name": "ui_map_id",
+        "name": "quest_ui_map_id",
+        "type": "integer",
+        "required": false
+      },
+      {
+        "name": "quest_line_ui_map_id",
         "type": "integer",
         "required": false
       }
@@ -94,14 +101,14 @@
         ],
         "required_fields": [
           "quest_id",
-          "ui_map_id"
+          "quest_ui_map_id"
         ],
         "sort_by": [
           "quest_id"
         ],
         "value_template": {
           "ID": "quest_id",
-          "UiMapID": "ui_map_id"
+          "UiMapID": "quest_ui_map_id"
         }
       },
       {
@@ -114,7 +121,7 @@
         "required_fields": [
           "quest_line_id",
           "quest_line_name",
-          "ui_map_id"
+          "quest_line_ui_map_id"
         ],
         "sort_by": [
           "quest_line_id"
@@ -122,7 +129,7 @@
         "value_template": {
           "ID": "quest_line_id",
           "Name_lang": "quest_line_name",
-          "UiMapID": "ui_map_id"
+          "UiMapID": "quest_line_ui_map_id"
         }
       },
       {
@@ -156,7 +163,9 @@
       [
         "quest_line_id",
         "quest_id",
-        "order_index"
+        "order_index",
+        "quest_ui_map_id",
+        "quest_line_ui_map_id"
       ]
     ],
     "non_null_fields": [

@@ -35,6 +35,25 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+def read_text(*parts: str) -> str:
+    return ROOT.joinpath(*parts).read_text(encoding="utf-8")
+
+
+def parse_tagged_header(text: str) -> dict[str, str]:
+    header_start = text.find("--[[")
+    header_end = text.find("]]", header_start + 4)
+    require(header_start == 0 and header_end > header_start, "missing tagged header block at file start")
+    header_text = text[header_start : header_end + 2]
+    metadata: dict[str, str] = {}
+    for raw_line in header_text.splitlines():
+        line_text = raw_line.strip()
+        if not line_text.startswith("@"):
+            continue
+        key_text, _, value_text = line_text.partition(" ")
+        metadata[key_text[1:]] = value_text.strip()
+    return metadata
+
+
 def load_contract(contract_id: str) -> dict:
     contract_path = CONTRACTS_DIR / f"{contract_id}.json"
     require(contract_path.exists(), f"missing contract file: {contract_path}")
@@ -91,6 +110,22 @@ def validate_contract(contract_id: str, expected_meta: dict[str, str]) -> None:
         structure_block.get("root_type") == expected_meta["root_type"],
         f"{contract_id}: structure.root_type mismatch",
     )
+
+    lua_text = read_text(*expected_meta["lua_file"].split("/"))
+    header_metadata = parse_tagged_header(lua_text)
+    require(header_metadata.get("contract_id") == contract_id, f"{contract_id}: lua header contract_id mismatch")
+    require(
+        header_metadata.get("schema_version") == str(schema_version),
+        f"{contract_id}: lua header schema_version mismatch",
+    )
+    require(
+        header_metadata.get("contract_file") == f"WoWPlugin/DataContracts/{contract_id}.json",
+        f"{contract_id}: lua header contract_file mismatch",
+    )
+    require(header_metadata.get("contract_snapshot"), f"{contract_id}: lua header contract_snapshot missing")
+    require(header_metadata.get("generated_at"), f"{contract_id}: lua header generated_at missing")
+    require(header_metadata.get("generated_by"), f"{contract_id}: lua header generated_by missing")
+    require(header_metadata.get("data_source") == "wow.db", f"{contract_id}: lua header data_source mismatch")
 
 
 def main() -> int:

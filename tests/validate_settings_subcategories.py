@@ -20,6 +20,22 @@ def require_file(*parts: str) -> None:
         raise AssertionError(f"missing file: {path}")
 
 
+def extract_tagged_header_metadata(text: str) -> dict[str, str]:
+    header_start = text.find("--[[")
+    header_end = text.find("]]", header_start + 4)
+    if header_start != 0 or header_end <= header_start:
+        raise AssertionError("missing tagged header block at file start")
+    header_text = text[header_start : header_end + 2]
+    metadata: dict[str, str] = {}
+    for raw_line in header_text.splitlines():
+        line_text = raw_line.strip()
+        if not line_text.startswith("@"):
+            continue
+        key_text, _, value_text = line_text.partition(" ")
+        metadata[key_text[1:]] = value_text.strip()
+    return metadata
+
+
 def validate_settings_host() -> None:
     text = read_text("Toolbox", "UI", "SettingsHost.lua")
     for needle, label in [
@@ -416,6 +432,29 @@ def validate_encounter_journal_questline_tree_feature() -> None:
         raise AssertionError("questline entry should be a tab template, not a plain panel button template")
 
 
+def validate_generated_data_contract_headers() -> None:
+    expected_headers = {
+        "InstanceMapIDs.lua": "instance_map_ids",
+        "InstanceDrops_Mount.lua": "instance_drops_mount",
+        "InstanceQuestlines.lua": "instance_questlines",
+    }
+    for file_name, contract_id in expected_headers.items():
+        text = read_text("Toolbox", "Data", file_name)
+        metadata = extract_tagged_header_metadata(text)
+        require_contains(text, "@generated_at", f"{file_name} generated_at tag")
+        require_contains(text, "@generated_by", f"{file_name} generated_by tag")
+        require_contains(text, "@contract_snapshot", f"{file_name} contract_snapshot tag")
+        if metadata.get("contract_id") != contract_id:
+            raise AssertionError(f"{file_name} contract_id mismatch: expected {contract_id}")
+        if metadata.get("schema_version") != "1":
+            raise AssertionError(f"{file_name} schema_version mismatch")
+        expected_contract_file = f"WoWPlugin/DataContracts/{contract_id}.json"
+        if metadata.get("contract_file") != expected_contract_file:
+            raise AssertionError(f"{file_name} contract_file mismatch: expected {expected_contract_file}")
+        if metadata.get("data_source") != "wow.db":
+            raise AssertionError(f"{file_name} data_source mismatch")
+
+
 def main() -> int:
     validate_settings_host()
     validate_config()
@@ -433,6 +472,7 @@ def main() -> int:
     validate_encounter_journal_detail_page_feature()
     validate_encounter_journal_micro_button_tooltip_lockouts_feature()
     validate_encounter_journal_questline_tree_feature()
+    validate_generated_data_contract_headers()
     print("OK: settings subcategories structure validated")
     return 0
 
