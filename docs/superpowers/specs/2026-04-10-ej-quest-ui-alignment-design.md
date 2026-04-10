@@ -78,6 +78,16 @@ Toolbox.Data.InstanceQuestlines = {
 - 若需保持 `schemaVersion = 3`，新增字段必须视为可选；本设计推荐升至 `v4` 以保证 strict 校验一致。
 - 当前仓库约定中 `InstanceQuestlines` 尚未纳入 wow.db 自动导出；如要切换为自动导出，需同时补齐脚本规则、文件头模板与导出实跑（见 AGENTS.md）。
 
+### 3.0 必要字段基线（已确认）
+
+仅定义“最小必填”，数据稍后导出填充：
+
+- `quests[questID]`：`ID`、`UiMapID`、`Type`（number）
+- `questLines[questLineID]`：`ID`、`Name_lang`、`UiMapID`
+- `questLineQuestIDs`
+
+类型名称通过**本地映射表**展示，不直接显示数字。
+
 ### 3.1 UI 字段来源与兜底（实现前需按 AGENTS 查证 API）
 
 | UI 字段 | 主要来源 | 兜底 |
