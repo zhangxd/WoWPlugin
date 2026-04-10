@@ -48,7 +48,7 @@ Toolbox.Data.InstanceQuestlines = {
     [questID] = {
       ID = questID,
       UiMapID = 123,
-      Type = "RAW_DB_TYPE",
+      Type = 12,
       MapPos = { x = 0.52, y = 0.31, UiMapID = 123 },
       NpcIDs = { 1001, 2002 },
       NpcPos = {
@@ -74,10 +74,11 @@ Toolbox.Data.InstanceQuestlines = {
 
 说明：
 
-- `Type` 直接使用 WoWDB 原始枚举值。
+- `Type` 直接使用 WoWDB 原始枚举值（number）。
 - `MapPos/NpcPos` 的 `UiMapID` 可省略，默认等于 `quests[questID].UiMapID`。
 - 若需保持 `schemaVersion = 3`，新增字段必须视为可选；本设计推荐升至 `v4` 以保证 strict 校验一致。
 - 当前仓库约定中 `InstanceQuestlines` 尚未纳入 wow.db 自动导出；如要切换为自动导出，需同时补齐脚本规则、文件头模板与导出实跑（见 AGENTS.md）。
+- 当前阶段仅为字段定义，不要求运行导出脚本；正式发布前再补齐导出流程与实跑验证。
 
 ### 3.0 必要字段基线（已确认）
 
@@ -89,6 +90,7 @@ Toolbox.Data.InstanceQuestlines = {
 
 类型名称通过**本地映射表**展示，不直接显示数字。
 映射表位置：`Toolbox/Data/QuestTypeNames.lua`（手工维护；须使用 Data 文件头模板 B）。
+映射表建议存 `TypeID -> LocaleKey`，实际显示通过 `Toolbox.L[LocaleKey]` 获取；缺失映射时使用 `Toolbox.L.EJ_QUEST_TYPE_UNKNOWN_FMT` 兜底并显示原始数值。
 
 ### 3.1 UI 字段来源与兜底（实现前需按 AGENTS 查证 API）
 
@@ -115,10 +117,10 @@ QuestTabModel = {
   questLineByID = { [questLineID] = questLineEntry },
   questToQuestLineID = { [questID] = questLineID },
 
-  typeList = { "RAW_DB_TYPE_A", "RAW_DB_TYPE_B", ... },
-  typeToQuestIDs = { [typeKey] = { questID1, questID2, ... } },
- typeToQuestLineIDs = { [typeKey] = { questLineID1, questLineID2, ... } },
-  typeToMapIDs = { [typeKey] = { mapID1, mapID2, ... } },
+  typeList = { 12, 34, ... },
+  typeToQuestIDs = { [typeId] = { questID1, questID2, ... } },
+ typeToQuestLineIDs = { [typeId] = { questLineID1, questLineID2, ... } },
+  typeToMapIDs = { [typeId] = { mapID1, mapID2, ... } },
 }
 ```
 
@@ -139,7 +141,7 @@ QuestTabModel = {
 SelectionState = {
   selectedView = "status" | "type" | "map",
   selectedKind = "type" | "map" | "questline" | "quest",
-  selectedTypeKey = "RAW_DB_TYPE",
+  selectedTypeID = 12,
   selectedMapID = 123,
   selectedQuestLineID = 456,
   selectedQuestID = 789,
@@ -148,7 +150,7 @@ SelectionState = {
 
 不变量与降级规则：
 
-- `selectedKind = "type"` 时仅要求 `selectedTypeKey` 有效，其它选中字段可空。
+- `selectedKind = "type"` 时仅要求 `selectedTypeID` 有效，其它选中字段可空。
 - `selectedKind = "map"` 时要求 `selectedMapID` 有效。
 - 切换视图时，若当前 `selectedKind` 在目标视图不可落点，则降级到目标视图默认节点。
 - 目标视图无法解析 `selectedMapID` 时，回退到“默认地图”。
@@ -189,6 +191,7 @@ SelectionState = {
 
 - 类型视图提供“树形 / 列表”切换。
 - 列表模式**保留地图层级过滤**：仅列出当前选中地图下的任务。
+- 列表模式复用树形模式的“当前选中地图”作为过滤来源。
 - 若当前类型不存在地图层级（或选中“其他”分组），列表仅展示该分组下任务。
 
 ### 6.3 地图视图
@@ -230,7 +233,7 @@ SelectionState = {
 
 - `questViewMode`（`status` / `type` / `map`）
 - `questViewSelectedMapID`
-- `questViewSelectedTypeKey`
+- `questViewSelectedTypeID`
 - `questViewSelectedQuestLineID`
 - `questViewSelectedQuestID`
 
