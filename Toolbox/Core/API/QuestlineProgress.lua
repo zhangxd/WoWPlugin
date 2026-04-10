@@ -507,6 +507,24 @@ end
 ---@param dataTable table 根数据
 ---@param questLineID number 任务线 ID
 ---@return table[]
+local function resolveQuestMapPos(dataTable, questID, questRecord)
+  local mapPos = type(questRecord) == "table" and questRecord.MapPos or nil -- 任务主点位
+  if type(mapPos) ~= "table" and type(dataTable.questPOIBlobs) == "table" and type(dataTable.questPOIPoints) == "table" then
+    local blobList = dataTable.questPOIBlobs[questID] -- 当前任务 blob 列表
+    if type(blobList) == "table" and type(blobList[1]) == "table" and type(blobList[1].BlobID) == "number" then
+      local pointList = dataTable.questPOIPoints[blobList[1].BlobID] -- 当前 blob 点位列表
+      if type(pointList) == "table" and type(pointList[1]) == "table" then
+        mapPos = pointList[1]
+      end
+    end
+  end
+  return mapPos
+end
+
+--- 基于数据表构建任务列表。
+---@param dataTable table 根数据
+---@param questLineID number 任务线 ID
+---@return table[]
 local function buildQuestListByQuestLineID(dataTable, questLineID)
   local questList = {} -- 任务展示列表
   local questLinkList = dataTable.questLineXQuest and dataTable.questLineXQuest[questLineID] or dataTable.questLineQuestIDs and dataTable.questLineQuestIDs[questLineID] or nil -- 任务线关联任务链接列表
@@ -519,16 +537,7 @@ local function buildQuestListByQuestLineID(dataTable, questLineID)
     local questRecord = dataTable.quests and dataTable.quests[questID] or nil -- 任务静态记录
     if type(questRecord) == "table" then
       local runtimeState = getQuestRuntimeState(questID) -- 任务运行时字段
-      local mapPos = questRecord.MapPos -- 任务主点位
-      if type(mapPos) ~= "table" and type(dataTable.questPOIBlobs) == "table" and type(dataTable.questPOIPoints) == "table" then
-        local blobList = dataTable.questPOIBlobs[questID] -- 当前任务 blob 列表
-        if type(blobList) == "table" and type(blobList[1]) == "table" and type(blobList[1].BlobID) == "number" then
-          local pointList = dataTable.questPOIPoints[blobList[1].BlobID] -- 当前 blob 点位列表
-          if type(pointList) == "table" and type(pointList[1]) == "table" then
-            mapPos = pointList[1]
-          end
-        end
-      end
+      local mapPos = resolveQuestMapPos(dataTable, questID, questRecord) -- 任务主点位
       questList[#questList + 1] = {
         id = questID,
         name = runtimeState.name,
@@ -831,7 +840,7 @@ function Toolbox.Questlines.GetQuestDetailByID(questID)
     readyForTurnIn = runtimeState.readyForTurnIn,
     UiMapID = questRecord.UiMapID,
     typeID = runtimeState.typeID,
-    mapPos = questRecord.MapPos,
+    mapPos = resolveQuestMapPos(dataTable, questID, questRecord),
     npcIDs = runtimeState.npcIDs,
     npcPos = runtimeState.npcPos,
     questLineID = questLineID,

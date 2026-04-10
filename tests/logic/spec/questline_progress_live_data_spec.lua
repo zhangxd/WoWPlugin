@@ -75,4 +75,27 @@ describe("QuestlineProgress live data validation", function()
     assert.is_truthy(type(model) == "table")
     assert.is_truthy(type(model.maps) == "table")
   end)
+
+  it("db_shape_live_data_keeps_poi_blocks_within_exported_quest_range", function()
+    local dataTable = Toolbox.Data and Toolbox.Data.InstanceQuestlines -- live 根数据
+    assert.is_truthy(type(dataTable) == "table")
+
+    local questExistsByID = {} -- live quest 集合
+    for questID in pairs(dataTable.quests or {}) do
+      questExistsByID[questID] = true
+    end
+
+    for questID, blobList in pairs(dataTable.questPOIBlobs or {}) do
+      assert.is_true(questExistsByID[questID] == true)
+      assert.is_truthy(type(blobList) == "table")
+      for _, blobObject in ipairs(blobList) do
+        assert.is_truthy(type(blobObject) == "table")
+        assert.is_truthy(type(blobObject.BlobID) == "number")
+        local pointList = dataTable.questPOIPoints and dataTable.questPOIPoints[blobObject.BlobID] or nil -- 对应点位列表
+        if pointList ~= nil then
+          assert.is_truthy(type(pointList) == "table")
+        end
+      end
+    end
+  end)
 end)

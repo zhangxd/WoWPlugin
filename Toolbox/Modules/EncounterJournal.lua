@@ -2095,8 +2095,10 @@ function QuestlineTreeView:ensureWidgets()
     and self.rightScrollChild
     and self.emptyText
   then
+    self:loadSelection()
     self:layoutRootTabs()
     self:syncTabLabel()
+    self:applyContentLayout()
     self:hookVanillaTabsOnce()
     return
   end
@@ -2814,6 +2816,9 @@ local function exposeTestHooksIfNeeded()
     end,
     getRefreshScheduler = function()
       return RefreshScheduler
+    end,
+    getQuestlineTreeView = function()
+      return QuestlineTreeView
     end,
     resetInternalState = function()
       if eventFrame and eventFrame.UnregisterEvent then

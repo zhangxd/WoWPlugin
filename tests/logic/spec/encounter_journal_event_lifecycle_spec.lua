@@ -59,4 +59,52 @@ describe("EncounterJournal event lifecycle", function()
     assert.equals(afterFirstCount, afterSecondCount)
     assert.is_false(harness:isEventRegistered("PLAYER_ENTERING_WORLD"))
   end)
+
+  it("refresh_reloads_saved_view_state_after_widgets_exist", function()
+    local journalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal") -- 冒险手册根框体
+    journalFrame:Show()
+    journalFrame.instanceSelect = harness.runtime.CreateFrame("Frame", nil, journalFrame)
+    journalFrame.Tabs = {}
+    journalFrame.selectedTab = 4
+    rawset(_G, "EncounterJournal", journalFrame)
+
+    Toolbox.Questlines.GetQuestTabModel = function()
+      return {
+        maps = {
+          {
+            id = 1,
+            name = "Map #1",
+            questLines = {},
+            progress = { completed = 0, total = 0 },
+          },
+        },
+        mapByID = {
+          [1] = {
+            id = 1,
+            name = "Map #1",
+            questLines = {},
+            progress = { completed = 0, total = 0 },
+          },
+        },
+        questLineByID = {},
+        questToQuestLineID = {},
+        typeList = {},
+        typeToQuestIDs = {},
+        typeToQuestLineIDs = {},
+        typeToMapIDs = {},
+      }, nil
+    end
+
+    local hooks = Toolbox.TestHooks.EncounterJournal -- 模块测试 hook
+    assert.is_function(hooks.getQuestlineTreeView)
+    local treeView = hooks.getQuestlineTreeView()
+    treeView:refresh()
+    assert.equals("status", treeView.selectedView)
+
+    harness.moduleDb.questViewMode = "map"
+    harness.moduleDb.questViewSelectedMapID = 1
+    treeView:refresh()
+    assert.equals("map", treeView.selectedView)
+    assert.equals(1, treeView.selectedMapID)
+  end)
 end)

@@ -94,8 +94,9 @@ function Harness:_installGlobals()
     },
     Config = {
       Init = function() end,
-      GetModule = function(_, moduleId)
-        if moduleId ~= "encounter_journal" then
+      GetModule = function(moduleId, maybeModuleId)
+        local resolvedModuleId = maybeModuleId or moduleId -- 兼容点调用与冒号调用
+        if resolvedModuleId ~= "encounter_journal" then
           return {}
         end
         return self.moduleDb

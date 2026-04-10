@@ -20,6 +20,11 @@ function FakeFrame.new(options)
   self.ownedBy = nil -- Tooltip 所有者等场景标记
   self._isShown = false -- 是否显示
   self._text = "" -- 文本缓存
+  self._width = 0 -- 宽度缓存
+  self._height = 0 -- 高度缓存
+  self._id = nil -- ID 缓存
+  self._scrollChild = nil -- 滚动子容器
+  self._highlightTexture = nil -- 高亮贴图替身
   return self
 end
 
@@ -129,11 +134,32 @@ function FakeFrame:IsMouseOver()
 end
 
 function FakeFrame:SetPoint() end
-function FakeFrame:SetSize() end
-function FakeFrame:SetWidth() end
-function FakeFrame:SetHeight() end
+function FakeFrame:SetSize(widthValue, heightValue)
+  self._width = tonumber(widthValue) or self._width
+  self._height = tonumber(heightValue) or self._height
+end
+function FakeFrame:SetWidth(widthValue)
+  self._width = tonumber(widthValue) or self._width
+end
+function FakeFrame:SetHeight(heightValue)
+  self._height = tonumber(heightValue) or self._height
+end
+function FakeFrame:GetWidth()
+  return self._width
+end
+function FakeFrame:GetHeight()
+  return self._height
+end
 function FakeFrame:SetJustifyH() end
+function FakeFrame:SetJustifyV() end
 function FakeFrame:SetWordWrap() end
+function FakeFrame:SetTextColor() end
+function FakeFrame:GetStringWidth()
+  return #(self._text or "") * 8
+end
+function FakeFrame:GetStringHeight()
+  return 16
+end
 function FakeFrame:SetAlpha() end
 function FakeFrame:SetBackdrop() end
 function FakeFrame:SetBackdropColor() end
@@ -148,7 +174,12 @@ function FakeFrame:GetEffectiveScale() return 1 end
 function FakeFrame:GetTop() return 0 end
 function FakeFrame:GetVerticalScroll() return 0 end
 function FakeFrame:SetVerticalScroll() end
-function FakeFrame:SetScrollChild() end
+function FakeFrame:SetScrollChild(childFrame)
+  self._scrollChild = childFrame
+end
+function FakeFrame:GetScrollChild()
+  return self._scrollChild
+end
 function FakeFrame:SetMinMaxValues() end
 function FakeFrame:SetValueStep() end
 function FakeFrame:SetObeyStepOnDrag() end
@@ -157,6 +188,27 @@ function FakeFrame:GetValue() return 0 end
 function FakeFrame:SetEnabled() end
 function FakeFrame:Disable() end
 function FakeFrame:Enable() end
+function FakeFrame:SetID(idValue)
+  self._id = idValue
+end
+function FakeFrame:GetID()
+  return self._id
+end
+function FakeFrame:SetParent(parentFrame)
+  self.parentFrame = parentFrame
+end
+function FakeFrame:SetHighlightTexture()
+  self._highlightTexture = FakeFrame.new({
+    frameType = "Texture",
+    frameName = nil,
+    parentFrame = self,
+    traceList = self.traceList,
+  })
+  return self._highlightTexture
+end
+function FakeFrame:GetHighlightTexture()
+  return self._highlightTexture
+end
 
 function FakeFrame:CreateFontString()
   local fontString = FakeFrame.new({

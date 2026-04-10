@@ -62,7 +62,7 @@
         }
       },
       "quest_poi_blobs": {
-        "sql": "SELECT DISTINCT\n  CAST(QuestID AS INTEGER) AS quest_id,\n  CAST(ID AS INTEGER) AS blob_id,\n  CAST(UiMapID AS INTEGER) AS blob_ui_map_id,\n  CAST(ObjectiveID AS INTEGER) AS objective_id\nFROM questpoiblob\nWHERE CAST(ID AS INTEGER) > 0\n  AND CAST(QuestID AS INTEGER) > 0\n  AND CAST(UiMapID AS INTEGER) > 0\nORDER BY CAST(QuestID AS INTEGER), CAST(ID AS INTEGER)",
+        "sql": "WITH base_quests AS (\n  SELECT DISTINCT CAST(qlxq.QuestID AS INTEGER) AS quest_id\n  FROM questlinexquest qlxq\n  JOIN questline ql ON CAST(ql.ID AS INTEGER) = CAST(qlxq.QuestLineID AS INTEGER)\n  WHERE CAST(qlxq.QuestID AS INTEGER) > 0\n    AND CAST(ql.ID AS INTEGER) > 0\n)\nSELECT DISTINCT\n  CAST(qpb.QuestID AS INTEGER) AS quest_id,\n  CAST(qpb.ID AS INTEGER) AS blob_id,\n  CAST(qpb.UiMapID AS INTEGER) AS blob_ui_map_id,\n  CAST(qpb.ObjectiveID AS INTEGER) AS objective_id\nFROM questpoiblob qpb\nJOIN base_quests bq ON bq.quest_id = CAST(qpb.QuestID AS INTEGER)\nWHERE CAST(qpb.ID AS INTEGER) > 0\n  AND CAST(qpb.QuestID AS INTEGER) > 0\n  AND CAST(qpb.UiMapID AS INTEGER) > 0\nORDER BY CAST(qpb.QuestID AS INTEGER), CAST(qpb.ID AS INTEGER)",
         "query": {
           "from": "questpoiblob",
           "joins": [],
@@ -86,7 +86,7 @@
         }
       },
       "quest_poi_points": {
-        "sql": "SELECT\n  CAST(QuestPOIBlobID AS INTEGER) AS blob_id,\n  CAST(X AS INTEGER) AS point_x,\n  CAST(Y AS INTEGER) AS point_y,\n  CAST(Z AS INTEGER) AS point_z\nFROM questpoipoint\nWHERE CAST(QuestPOIBlobID AS INTEGER) > 0\nORDER BY CAST(QuestPOIBlobID AS INTEGER), CAST(X AS INTEGER), CAST(Y AS INTEGER), CAST(Z AS INTEGER)",
+        "sql": "WITH base_quests AS (\n  SELECT DISTINCT CAST(qlxq.QuestID AS INTEGER) AS quest_id\n  FROM questlinexquest qlxq\n  JOIN questline ql ON CAST(ql.ID AS INTEGER) = CAST(qlxq.QuestLineID AS INTEGER)\n  WHERE CAST(qlxq.QuestID AS INTEGER) > 0\n    AND CAST(ql.ID AS INTEGER) > 0\n),\nbase_blobs AS (\n  SELECT DISTINCT CAST(qpb.ID AS INTEGER) AS blob_id\n  FROM questpoiblob qpb\n  JOIN base_quests bq ON bq.quest_id = CAST(qpb.QuestID AS INTEGER)\n  WHERE CAST(qpb.ID AS INTEGER) > 0\n)\nSELECT\n  CAST(qpp.QuestPOIBlobID AS INTEGER) AS blob_id,\n  CAST(qpp.X AS INTEGER) AS point_x,\n  CAST(qpp.Y AS INTEGER) AS point_y,\n  CAST(qpp.Z AS INTEGER) AS point_z\nFROM questpoipoint qpp\nJOIN base_blobs bb ON bb.blob_id = CAST(qpp.QuestPOIBlobID AS INTEGER)\nWHERE CAST(qpp.QuestPOIBlobID AS INTEGER) > 0\nORDER BY CAST(qpp.QuestPOIBlobID AS INTEGER), CAST(qpp.X AS INTEGER), CAST(qpp.Y AS INTEGER), CAST(qpp.Z AS INTEGER)",
         "query": {
           "from": "questpoipoint",
           "joins": [],
