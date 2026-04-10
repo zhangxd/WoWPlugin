@@ -1,0 +1,191 @@
+{
+  "contract": {
+    "contract_id": "instance_questlines",
+    "schema_version": 1,
+    "summary": "冒险手册任务页签静态任务线文档",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/InstanceQuestlines.lua",
+    "lua_table": "Toolbox.Data.InstanceQuestlines",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "questline",
+      "questlinexquest",
+      "questpoiblob"
+    ],
+    "sql": "SELECT\n  CAST(ql.ID AS INTEGER) AS quest_line_id,\n  ql.Name_lang AS quest_line_name,\n  CAST(qlxq.QuestID AS INTEGER) AS quest_id,\n  CAST(qlxq.OrderIndex AS INTEGER) AS order_index,\n  CAST(qpb.UiMapID AS INTEGER) AS ui_map_id\nFROM questline ql\nJOIN questlinexquest qlxq ON qlxq.QuestLineID = ql.ID\nLEFT JOIN questpoiblob qpb ON qpb.QuestID = qlxq.QuestID\n  AND CAST(qpb.UiMapID AS INTEGER) > 0\nWHERE TRIM(ql.ID) <> ''\n  AND CAST(ql.ID AS INTEGER) > 0\n  AND CAST(qlxq.QuestID AS INTEGER) > 0\nORDER BY CAST(ql.ID AS INTEGER), CAST(qlxq.OrderIndex AS INTEGER), CAST(qlxq.QuestID AS INTEGER)",
+    "query": {
+      "from": "questline ql",
+      "joins": [
+        "questlinexquest qlxq ON qlxq.QuestLineID = ql.ID",
+        "LEFT questpoiblob qpb ON qpb.QuestID = qlxq.QuestID AND qpb.UiMapID > 0"
+      ],
+      "select": [
+        "quest_line_id",
+        "quest_line_name",
+        "quest_id",
+        "order_index",
+        "ui_map_id"
+      ],
+      "where": [
+        "quest_line_id 非空",
+        "quest_line_id > 0",
+        "quest_id > 0"
+      ],
+      "group_by": [],
+      "order_by": [
+        "quest_line_id ASC",
+        "order_index ASC",
+        "quest_id ASC"
+      ],
+      "row_granularity": "一行代表一个任务线与任务的关联记录"
+    }
+  },
+  "structure": {
+    "root_type": "document",
+    "lua_shape": "Toolbox.Data.InstanceQuestlines = { schemaVersion, sourceMode, generatedAt, quests, questLines, questLineQuestIDs }",
+    "fields": [
+      {
+        "name": "quest_line_id",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "quest_line_name",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "quest_id",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "order_index",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "ui_map_id",
+        "type": "integer",
+        "required": false
+      }
+    ],
+    "document_blocks": [
+      {
+        "name": "metadata",
+        "metadata": {
+          "schemaVersion": 3,
+          "sourceMode": "live",
+          "generatedAt": "@generated_at"
+        }
+      },
+      {
+        "name": "quests",
+        "block_type": "map_object",
+        "key_field": "quest_id",
+        "dedupe_by": [
+          "quest_id"
+        ],
+        "required_fields": [
+          "quest_id",
+          "ui_map_id"
+        ],
+        "sort_by": [
+          "quest_id"
+        ],
+        "value_template": {
+          "ID": "quest_id",
+          "UiMapID": "ui_map_id"
+        }
+      },
+      {
+        "name": "questLines",
+        "block_type": "map_object",
+        "key_field": "quest_line_id",
+        "dedupe_by": [
+          "quest_line_id"
+        ],
+        "required_fields": [
+          "quest_line_id",
+          "quest_line_name",
+          "ui_map_id"
+        ],
+        "sort_by": [
+          "quest_line_id"
+        ],
+        "value_template": {
+          "ID": "quest_line_id",
+          "Name_lang": "quest_line_name",
+          "UiMapID": "ui_map_id"
+        }
+      },
+      {
+        "name": "questLineQuestIDs",
+        "block_type": "map_array_grouped",
+        "key_field": "quest_line_id",
+        "value_field": "quest_id",
+        "required_fields": [
+          "quest_line_id",
+          "quest_id"
+        ],
+        "dedupe_by": [
+          "quest_line_id",
+          "quest_id"
+        ],
+        "sort_by": [
+          "quest_line_id",
+          "order_index",
+          "quest_id"
+        ]
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [
+      "quest_line_id",
+      "quest_id",
+      "order_index"
+    ],
+    "unique_keys": [
+      [
+        "quest_line_id",
+        "quest_id",
+        "order_index"
+      ]
+    ],
+    "non_null_fields": [
+      "quest_line_id",
+      "quest_id",
+      "order_index"
+    ],
+    "sort_rules": [
+      {
+        "field": "quest_line_id",
+        "direction": "asc"
+      },
+      {
+        "field": "order_index",
+        "direction": "asc"
+      },
+      {
+        "field": "quest_id",
+        "direction": "asc"
+      }
+    ]
+  },
+  "versioning": {
+    "current_schema_version": 1,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约版本"
+      }
+    ]
+  }
+}

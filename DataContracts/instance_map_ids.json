@@ -1,0 +1,96 @@
+{
+  "contract": {
+    "contract_id": "instance_map_ids",
+    "schema_version": 1,
+    "summary": "副本 journalInstanceID 到 MapID 的静态映射",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/InstanceMapIDs.lua",
+    "lua_table": "Toolbox.Data.InstanceMapIDs",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "journalinstance"
+    ],
+    "sql": "SELECT\n  CAST(ID AS INTEGER) AS journal_instance_id,\n  CAST(MapID AS INTEGER) AS map_id,\n  Name_lang AS comment_name\nFROM journalinstance\nWHERE TRIM(ID) <> ''\n  AND TRIM(MapID) <> ''\n  AND CAST(ID AS INTEGER) > 0\n  AND CAST(MapID AS INTEGER) > 0\nORDER BY CAST(ID AS INTEGER), ID",
+    "query": {
+      "from": "journalinstance",
+      "joins": [],
+      "select": [
+        "journal_instance_id",
+        "map_id",
+        "comment_name"
+      ],
+      "where": [
+        "ID 非空",
+        "MapID 非空",
+        "journal_instance_id > 0",
+        "map_id > 0"
+      ],
+      "group_by": [],
+      "order_by": [
+        "journal_instance_id ASC"
+      ],
+      "row_granularity": "一行代表一个副本映射"
+    }
+  },
+  "structure": {
+    "root_type": "map_scalar",
+    "lua_shape": "[journal_instance_id] = map_id",
+    "key_field": "journal_instance_id",
+    "value_field": "map_id",
+    "comment_field": "comment_name",
+    "fields": [
+      {
+        "name": "journal_instance_id",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "map_id",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "comment_name",
+        "type": "string",
+        "required": false,
+        "usage": "comment"
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [
+      "journal_instance_id",
+      "map_id"
+    ],
+    "unique_keys": [
+      [
+        "journal_instance_id"
+      ]
+    ],
+    "non_null_fields": [
+      "journal_instance_id",
+      "map_id"
+    ],
+    "sort_rules": [
+      {
+        "field": "journal_instance_id",
+        "direction": "asc"
+      }
+    ]
+  },
+  "versioning": {
+    "current_schema_version": 1,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约版本"
+      }
+    ]
+  }
+}

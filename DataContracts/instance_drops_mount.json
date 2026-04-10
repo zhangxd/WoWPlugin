@@ -1,0 +1,113 @@
+{
+  "contract": {
+    "contract_id": "instance_drops_mount",
+    "schema_version": 1,
+    "summary": "副本坐骑掉落 itemID 集合",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/InstanceDrops_Mount.lua",
+    "lua_table": "Toolbox.Data.MountDrops",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "journalencounteritem",
+      "journalencounter",
+      "journalinstance",
+      "itemxitemeffect",
+      "itemeffect",
+      "mount"
+    ],
+    "sql": "SELECT DISTINCT\n  CAST(je.JournalInstanceID AS INTEGER) AS journal_instance_id,\n  CAST(jei.ItemID AS INTEGER) AS item_id,\n  ji.Name_lang AS instance_name\nFROM journalencounteritem jei\nJOIN journalencounter je ON je.ID = jei.JournalEncounterID\nJOIN journalinstance ji ON ji.ID = je.JournalInstanceID\nJOIN itemxitemeffect ixe ON ixe.ItemID = jei.ItemID\nJOIN itemeffect ie ON ie.ID = ixe.ItemEffectID\nJOIN mount m ON m.SourceSpellID = ie.SpellID\nWHERE TRIM(je.JournalInstanceID) <> ''\n  AND TRIM(jei.ItemID) <> ''\n  AND CAST(je.JournalInstanceID AS INTEGER) > 0\n  AND CAST(jei.ItemID AS INTEGER) > 0\nORDER BY CAST(je.JournalInstanceID AS INTEGER), CAST(jei.ItemID AS INTEGER), jei.ItemID",
+    "query": {
+      "from": "journalencounteritem jei",
+      "joins": [
+        "journalencounter je ON je.ID = jei.JournalEncounterID",
+        "journalinstance ji ON ji.ID = je.JournalInstanceID",
+        "itemxitemeffect ixe ON ixe.ItemID = jei.ItemID",
+        "itemeffect ie ON ie.ID = ixe.ItemEffectID",
+        "mount m ON m.SourceSpellID = ie.SpellID"
+      ],
+      "select": [
+        "journal_instance_id",
+        "item_id",
+        "instance_name"
+      ],
+      "where": [
+        "journal_instance_id 非空",
+        "item_id 非空",
+        "journal_instance_id > 0",
+        "item_id > 0"
+      ],
+      "group_by": [],
+      "order_by": [
+        "journal_instance_id ASC",
+        "item_id ASC"
+      ],
+      "row_granularity": "一行代表一个副本掉落物品"
+    }
+  },
+  "structure": {
+    "root_type": "map_array",
+    "lua_shape": "[journal_instance_id] = { item_id, ... }",
+    "key_field": "journal_instance_id",
+    "value_field": "item_id",
+    "comment_field": "instance_name",
+    "fields": [
+      {
+        "name": "journal_instance_id",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "item_id",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "instance_name",
+        "type": "string",
+        "required": false,
+        "usage": "comment"
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [
+      "journal_instance_id",
+      "item_id"
+    ],
+    "unique_keys": [
+      [
+        "journal_instance_id",
+        "item_id"
+      ]
+    ],
+    "non_null_fields": [
+      "journal_instance_id",
+      "item_id"
+    ],
+    "sort_rules": [
+      {
+        "field": "journal_instance_id",
+        "direction": "asc"
+      },
+      {
+        "field": "item_id",
+        "direction": "asc"
+      }
+    ]
+  },
+  "versioning": {
+    "current_schema_version": 1,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约版本"
+      }
+    ]
+  }
+}
