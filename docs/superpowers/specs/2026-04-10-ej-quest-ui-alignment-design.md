@@ -87,6 +87,7 @@ Toolbox.Data.InstanceQuestlines = {
 - `questLineQuestIDs`
 
 类型名称通过**本地映射表**展示，不直接显示数字。
+映射表位置：`Toolbox/Data/QuestTypeNames.lua`（手工维护；须使用 Data 文件头模板 B）。
 
 ### 3.1 UI 字段来源与兜底（实现前需按 AGENTS 查证 API）
 
@@ -274,7 +275,7 @@ SelectionState = {
 
 1. `schemaVersion` 是否升级到 4。
 2. `InstanceQuestlines` 是否切换为 wow.db 自动导出。
-3. 类型展示名来源与排序规则（是否要求本地化映射）。
+3. 类型展示名排序规则（本地映射表已定）。
 4. “无地图”分组显示名称。
 5. 运行时索引的落点（领域 API vs 模块缓存）。
 6. 类型视图是否需要“列表模式”或“纯任务列表”。
