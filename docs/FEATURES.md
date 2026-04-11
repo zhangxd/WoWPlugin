@@ -1,5 +1,9 @@
 # Toolbox 功能说明
 
+> 定位：本文件只维护插件的产品能力总览与稳定特性说明。
+>
+> 边界：单次需求、设计方案、实施计划、测试记录不得写入本文件；这些内容分别写入 `docs/specs/`、`docs/designs/`、`docs/plans/`、`docs/tests/`，并遵循 [DOCS-STANDARD.md](./DOCS-STANDARD.md)。
+
 ## 核心功能
 
 ### 1. 冒险指南增强（EncounterJournal）

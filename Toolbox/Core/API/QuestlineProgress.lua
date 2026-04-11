@@ -8,12 +8,29 @@
 
 Toolbox.Questlines = Toolbox.Questlines or {}
 
-local runtimeCache = { -- 运行时模型缓存
+local staticModelCache = { -- 静态结构模型缓存
+  dataRef = nil,
+  generatedAt = nil,
+  model = nil,
+  errorObject = nil,
+}
+local runtimeStateCache = { -- 任务运行时字段缓存
+  runtimeKey = nil,
+  byQuestID = {},
+}
+local typeIndexCache = { -- 类型索引缓存
   dataRef = nil,
   generatedAt = nil,
   runtimeKey = nil,
   model = nil,
   errorObject = nil,
+}
+local progressCache = { -- 地图/任务线进度缓存
+  dataRef = nil,
+  generatedAt = nil,
+  runtimeKey = nil,
+  mapByID = {},
+  questLineByID = {},
 }
 local dataOverrideTable = nil -- 测试框架注入的数据源（nil 表示使用 live 数据）
 
@@ -21,15 +38,34 @@ local getLogIndexForQuestID = C_QuestLog and C_QuestLog.GetLogIndexForQuestID or
 local isQuestCompletedFn = C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted or IsQuestFlaggedCompleted -- 任务完成状态函数
 local isQuestReadyForTurnInFn = C_QuestLog and C_QuestLog.ReadyForTurnIn or nil -- 任务可交付状态函数
 local getQuestTypeFn = C_QuestLog and C_QuestLog.GetQuestType or nil -- 任务类型函数
+local getNumQuestLogEntriesFn = C_QuestLog and C_QuestLog.GetNumQuestLogEntries or nil -- Quest Log 条目总数函数
+local getQuestLogInfoFn = C_QuestLog and C_QuestLog.GetInfo or nil -- Quest Log 条目详情函数
 
 --- 清空任务线运行时缓存，确保后续按当前数据源重新构建模型。
 local function resetRuntimeCache()
-  runtimeCache = {
+  staticModelCache = {
+    dataRef = nil,
+    generatedAt = nil,
+    model = nil,
+    errorObject = nil,
+  }
+  runtimeStateCache = {
+    runtimeKey = nil,
+    byQuestID = {},
+  }
+  typeIndexCache = {
     dataRef = nil,
     generatedAt = nil,
     runtimeKey = nil,
     model = nil,
     errorObject = nil,
+  }
+  progressCache = {
+    dataRef = nil,
+    generatedAt = nil,
+    runtimeKey = nil,
+    mapByID = {},
+    questLineByID = {},
   }
 end
 
@@ -191,10 +227,42 @@ local function getRuntimeCacheKey()
   if type(GetTime) == "function" then
     local success, currentTime = pcall(GetTime) -- 当前运行时秒数
     if success and type(currentTime) == "number" then
-      return math.floor(currentTime * 5)
+      return math.floor(currentTime)
     end
   end
   return 0
+end
+
+--- 按当前运行时窗口读取任务运行时字段缓存。
+---@param questID number
+---@return table
+local function getCachedQuestRuntimeState(questID)
+  local runtimeKey = getRuntimeCacheKey() -- 当前运行时缓存键
+  if runtimeStateCache.runtimeKey ~= runtimeKey then
+    runtimeStateCache.runtimeKey = runtimeKey
+    runtimeStateCache.byQuestID = {}
+  end
+
+  local cachedState = runtimeStateCache.byQuestID[questID] -- 已缓存运行时字段
+  if type(cachedState) == "table" then
+    return cachedState
+  end
+
+  local runtimeState = getQuestRuntimeState(questID) -- 最新运行时字段
+  runtimeStateCache.byQuestID[questID] = runtimeState
+  return runtimeState
+end
+
+--- 判断任务是否仍在当前任务日志中。
+---@param questID number
+---@return boolean
+local function isQuestCurrentlyInLog(questID)
+  if type(questID) ~= "number" or type(getLogIndexForQuestID) ~= "function" then
+    return false
+  end
+
+  local success, logIndex = pcall(getLogIndexForQuestID, questID) -- Quest Log 索引
+  return success and type(logIndex) == "number" and logIndex > 0
 end
 
 --- 检查 number 数组类型，并可选检查是否非空。
@@ -503,10 +571,11 @@ function Toolbox.Questlines.GetChainProgress(chain)
   }
 end
 
---- 基于数据表构建任务列表。
+--- 解析任务主点位。
 ---@param dataTable table 根数据
----@param questLineID number 任务线 ID
----@return table[]
+---@param questID number 任务 ID
+---@param questRecord table 任务静态记录
+---@return table|nil
 local function resolveQuestMapPos(dataTable, questID, questRecord)
   local mapPos = type(questRecord) == "table" and questRecord.MapPos or nil -- 任务主点位
   if type(mapPos) ~= "table" and type(dataTable.questPOIBlobs) == "table" and type(dataTable.questPOIPoints) == "table" then
@@ -521,60 +590,121 @@ local function resolveQuestMapPos(dataTable, questID, questRecord)
   return mapPos
 end
 
---- 基于数据表构建任务列表。
+--- 读取任务线关联链接列表。
 ---@param dataTable table 根数据
 ---@param questLineID number 任务线 ID
----@return table[]
-local function buildQuestListByQuestLineID(dataTable, questLineID)
-  local questList = {} -- 任务展示列表
-  local questLinkList = dataTable.questLineXQuest and dataTable.questLineXQuest[questLineID] or dataTable.questLineQuestIDs and dataTable.questLineQuestIDs[questLineID] or nil -- 任务线关联任务链接列表
+---@return table|nil
+local function getQuestLinkList(dataTable, questLineID)
+  return dataTable.questLineXQuest and dataTable.questLineXQuest[questLineID]
+    or dataTable.questLineQuestIDs and dataTable.questLineQuestIDs[questLineID]
+    or nil
+end
+
+--- 基于数据表构建任务 ID 列表。
+---@param dataTable table 根数据
+---@param questLineID number 任务线 ID
+---@return number[]
+local function buildQuestIDListByQuestLineID(dataTable, questLineID)
+  local questIDList = {} -- 任务 ID 列表
+  local questLinkList = getQuestLinkList(dataTable, questLineID) -- 任务线关联任务链接列表
   if type(questLinkList) ~= "table" then
-    return questList
+    return questIDList
   end
 
   for _, questLinkObject in ipairs(questLinkList) do
     local questID = type(questLinkObject) == "table" and questLinkObject.QuestID or questLinkObject -- 当前任务 ID
     local questRecord = dataTable.quests and dataTable.quests[questID] or nil -- 任务静态记录
-    if type(questRecord) == "table" then
-      local runtimeState = getQuestRuntimeState(questID) -- 任务运行时字段
-      local mapPos = resolveQuestMapPos(dataTable, questID, questRecord) -- 任务主点位
-      questList[#questList + 1] = {
-        id = questID,
-        name = runtimeState.name,
-        status = runtimeState.status,
-        readyForTurnIn = runtimeState.readyForTurnIn,
-        UiMapID = questRecord.UiMapID,
-        typeID = runtimeState.typeID,
-        mapPos = mapPos,
-        npcIDs = runtimeState.npcIDs,
-        npcPos = runtimeState.npcPos,
-        quest = questRecord,
-        runtime = runtimeState,
-      }
+    if type(questID) == "number" and type(questRecord) == "table" then
+      questIDList[#questIDList + 1] = questID
     end
   end
 
+  return questIDList
+end
+
+--- 构建单个任务展示对象。
+---@param dataTable table 根数据
+---@param questID number 任务 ID
+---@return table|nil
+local function buildQuestEntryByID(dataTable, questID)
+  local questRecord = dataTable.quests and dataTable.quests[questID] or nil -- 任务静态记录
+  if type(questRecord) ~= "table" then
+    return nil
+  end
+
+  local runtimeState = getCachedQuestRuntimeState(questID) -- 任务运行时字段
+  return {
+    id = questID,
+    name = runtimeState.name,
+    status = runtimeState.status,
+    readyForTurnIn = runtimeState.readyForTurnIn,
+    UiMapID = questRecord.UiMapID,
+    typeID = runtimeState.typeID,
+    mapPos = resolveQuestMapPos(dataTable, questID, questRecord),
+    npcIDs = runtimeState.npcIDs,
+    npcPos = runtimeState.npcPos,
+    quest = questRecord,
+    runtime = runtimeState,
+  }
+end
+
+--- 基于任务 ID 列表构建任务展示列表。
+---@param dataTable table 根数据
+---@param questIDList number[] 任务 ID 列表
+---@return table[]
+local function buildQuestListByQuestIDs(dataTable, questIDList)
+  local questList = {} -- 任务展示列表
+  for _, questID in ipairs(questIDList or {}) do
+    local questEntry = buildQuestEntryByID(dataTable, questID) -- 任务展示对象
+    if type(questEntry) == "table" then
+      questList[#questList + 1] = questEntry
+    end
+  end
   return questList
 end
 
---- 计算地图聚合进度（去重）。
----@param questLineList table[] 任务线列表
+--- 基于任务 ID 列表计算进度。
+---@param questIDList number[] 任务 ID 列表
 ---@return table
-local function buildMapProgress(questLineList)
-  local seenQuestSet = {} -- 地图内任务去重集合
-  local completedCount = 0 -- 地图已完成数量
-  local totalCount = 0 -- 地图总任务数量
+local function buildProgressFromQuestIDs(questIDList)
+  if type(questIDList) ~= "table" or #questIDList == 0 then
+    return {
+      completed = 0,
+      total = 0,
+      hasActive = false,
+      nextQuestID = nil,
+      nextQuestName = nil,
+      isCompleted = false,
+    }
+  end
 
-  for _, questLineEntry in ipairs(questLineList) do
-    local questList = questLineEntry.quests or {} -- 任务线任务列表
-    for _, questEntry in ipairs(questList) do
-      local questID = questEntry.id -- 当前任务 ID
-      if type(questID) == "number" and seenQuestSet[questID] ~= true then
-        seenQuestSet[questID] = true
-        totalCount = totalCount + 1
-        if questEntry.status == "completed" then
-          completedCount = completedCount + 1
+  local seenQuestSet = {} -- 已统计任务集合
+  local completedCount = 0 -- 已完成任务数量
+  local totalCount = 0 -- 总任务数量
+  local hasActiveQuest = false -- 是否存在进行中任务
+  local nextQuestID = nil -- 下一任务 ID
+  local nextQuestName = nil -- 下一任务名称
+
+  for _, questID in ipairs(questIDList) do
+    if type(questID) == "number" and seenQuestSet[questID] ~= true then
+      seenQuestSet[questID] = true
+      totalCount = totalCount + 1
+
+      local runtimeState = getCachedQuestRuntimeState(questID) -- 当前任务运行时字段
+      local questStatus = runtimeState.status -- 当前任务状态
+      local questName = runtimeState.name -- 当前任务名称
+
+      if questStatus == "completed" then
+        completedCount = completedCount + 1
+      elseif questStatus == "active" then
+        hasActiveQuest = true
+        if nextQuestID == nil then
+          nextQuestID = questID
+          nextQuestName = questName
         end
+      elseif nextQuestID == nil then
+        nextQuestID = questID
+        nextQuestName = questName
       end
     end
   end
@@ -582,6 +712,10 @@ local function buildMapProgress(questLineList)
   return {
     completed = completedCount,
     total = totalCount,
+    hasActive = hasActiveQuest,
+    nextQuestID = nextQuestID,
+    nextQuestName = nextQuestName,
+    isCompleted = completedCount == totalCount and totalCount > 0,
   }
 end
 
@@ -596,7 +730,7 @@ local function isRecoverableValidationError(errorObject)
   return errorCode == "E_BAD_REF" or errorCode == "E_DUPLICATE_REF"
 end
 
---- 构建任务页签运行时模型。
+--- 构建任务页签静态结构模型。
 ---@param dataTable table 根数据
 ---@return table|nil model
 ---@return table|nil errorObject
@@ -616,11 +750,6 @@ local function buildQuestTabModel(dataTable)
     typeToQuestLineIDs = {},
     typeToMapIDs = {},
   }
-  local typeSeenSet = {} -- 类型存在集合
-  local typeQuestSeenSet = {} -- typeID -> questID 集合
-  local typeQuestLineSeenSet = {} -- typeID -> questLineID 集合
-  local typeMapSeenSet = {} -- typeID -> mapID 集合
-
   -- 按 UiMapID 分组任务线，保持 questLines 定义顺序
   local orderedQuestLineIDList = {} -- 有序任务线 ID 列表
   for questLineID in pairs(dataTable.questLines) do
@@ -638,82 +767,35 @@ local function buildQuestTabModel(dataTable)
           id = uiMapID,
           name = getMapNameByID(uiMapID),
           questLines = {},
-          progress = { completed = 0, total = 0 },
+          questCount = 0,
         }
         model.mapByID[uiMapID] = mapEntry
         model.maps[#model.maps + 1] = mapEntry
       end
 
-      local questList = buildQuestListByQuestLineID(dataTable, questLineID) -- 任务线任务列表
-      local questLineTypeIDSet = {} -- 当前任务线类型集合
+      local questIDList = buildQuestIDListByQuestLineID(dataTable, questLineID) -- 任务 ID 列表
       local questLineModel = {
         id = questLineID,
         name = questLineRecord.Name_lang,
         UiMapID = uiMapID,
-        quests = questList,
-        typeIDs = {},
+        questIDs = questIDList,
+        questCount = #questIDList,
       }
-      questLineModel.progress = Toolbox.Questlines.GetChainProgress(questLineModel)
 
       mapEntry.questLines[#mapEntry.questLines + 1] = questLineModel
+      mapEntry.questCount = (mapEntry.questCount or 0) + questLineModel.questCount
       model.questLineByID[questLineID] = questLineModel
 
-      for _, questEntry in ipairs(questList) do
-        model.questToQuestLineID[questEntry.id] = questLineID
-        local typeID = questEntry.typeID -- 当前任务类型 ID
-        if type(typeID) == "number" then
-          if typeSeenSet[typeID] ~= true then
-            typeSeenSet[typeID] = true
-            model.typeList[#model.typeList + 1] = typeID
-          end
-
-          if type(typeQuestSeenSet[typeID]) ~= "table" then
-            typeQuestSeenSet[typeID] = {}
-            model.typeToQuestIDs[typeID] = {}
-          end
-          if typeQuestSeenSet[typeID][questEntry.id] ~= true then
-            typeQuestSeenSet[typeID][questEntry.id] = true
-            model.typeToQuestIDs[typeID][#model.typeToQuestIDs[typeID] + 1] = questEntry.id
-          end
-
-          questLineTypeIDSet[typeID] = true
-
-          if type(typeMapSeenSet[typeID]) ~= "table" then
-            typeMapSeenSet[typeID] = {}
-            model.typeToMapIDs[typeID] = {}
-          end
-          if typeMapSeenSet[typeID][uiMapID] ~= true then
-            typeMapSeenSet[typeID][uiMapID] = true
-            model.typeToMapIDs[typeID][#model.typeToMapIDs[typeID] + 1] = uiMapID
-          end
-        end
+      for _, questID in ipairs(questIDList) do
+        model.questToQuestLineID[questID] = questLineID
       end
-
-      for typeID in pairs(questLineTypeIDSet) do
-        questLineModel.typeIDs[#questLineModel.typeIDs + 1] = typeID
-        if type(typeQuestLineSeenSet[typeID]) ~= "table" then
-          typeQuestLineSeenSet[typeID] = {}
-          model.typeToQuestLineIDs[typeID] = {}
-        end
-        if typeQuestLineSeenSet[typeID][questLineID] ~= true then
-          typeQuestLineSeenSet[typeID][questLineID] = true
-          model.typeToQuestLineIDs[typeID][#model.typeToQuestLineIDs[typeID] + 1] = questLineID
-        end
-      end
-
-      table.sort(questLineModel.typeIDs)
     end
   end
-
-  for _, mapEntry in ipairs(model.maps) do
-    mapEntry.progress = buildMapProgress(mapEntry.questLines)
-  end
-  table.sort(model.typeList)
 
   return model, nil
 end
 
---- 获取缓存后的任务页签模型。
+--- 获取缓存后的任务页签静态结构模型。
 ---@return table|nil model
 ---@return table|nil errorObject
 local function getCachedQuestTabModel()
@@ -721,22 +803,19 @@ local function getCachedQuestTabModel()
   if type(dataTable) ~= "table" then
     return nil, buildValidationError("E_MISSING_FIELD", "root", "InstanceQuestlines table missing")
   end
-  local runtimeKey = getRuntimeCacheKey() -- 运行时缓存键
 
-  if runtimeCache.dataRef == dataTable
-    and runtimeCache.generatedAt == dataTable.generatedAt
-    and runtimeCache.runtimeKey == runtimeKey
-    and (runtimeCache.model ~= nil or runtimeCache.errorObject ~= nil)
+  if staticModelCache.dataRef == dataTable
+    and staticModelCache.generatedAt == dataTable.generatedAt
+    and (staticModelCache.model ~= nil or staticModelCache.errorObject ~= nil)
   then
-    return runtimeCache.model, runtimeCache.errorObject
+    return staticModelCache.model, staticModelCache.errorObject
   end
 
   local model, errorObject = buildQuestTabModel(dataTable) -- 构建模型
-  runtimeCache.dataRef = dataTable
-  runtimeCache.generatedAt = dataTable.generatedAt
-  runtimeCache.runtimeKey = runtimeKey
-  runtimeCache.model = model
-  runtimeCache.errorObject = errorObject
+  staticModelCache.dataRef = dataTable
+  staticModelCache.generatedAt = dataTable.generatedAt
+  staticModelCache.model = model
+  staticModelCache.errorObject = errorObject
   return model, errorObject
 end
 
@@ -798,15 +877,269 @@ end
 ---@return table[] questList
 ---@return table|nil errorObject
 function Toolbox.Questlines.GetQuestListByQuestLineID(questLineID)
+  local dataTable = getQuestlineDataTable() -- 根数据表
   local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 任务页签模型
-  if errorObject then
+  if errorObject or type(dataTable) ~= "table" then
     return {}, errorObject
   end
   local questLineEntry = type(questLineID) == "number" and model.questLineByID[questLineID] or nil -- 任务线对象
   if type(questLineEntry) ~= "table" then
     return {}, nil
   end
-  return questLineEntry.quests or {}, nil
+  return buildQuestListByQuestIDs(dataTable, questLineEntry.questIDs or {}), nil
+end
+
+--- 枚举当前 Quest Log 中的任务条目。
+---@return table[] questEntryList
+---@return table|nil errorObject
+function Toolbox.Questlines.GetCurrentQuestLogEntries()
+  if type(getNumQuestLogEntriesFn) ~= "function" or type(getQuestLogInfoFn) ~= "function" then
+    return {}, nil
+  end
+
+  local countSuccess, numShownEntries = pcall(getNumQuestLogEntriesFn) -- Quest Log 可枚举条目数
+  if not countSuccess or type(numShownEntries) ~= "number" or numShownEntries <= 0 then
+    return {}, nil
+  end
+
+  local questEntryList = {} -- 当前 Quest Log 任务列表
+  local seenQuestSet = {} -- 已收集任务集合
+  for questLogIndex = 1, numShownEntries do
+    local infoSuccess, questInfo = pcall(getQuestLogInfoFn, questLogIndex) -- 当前 Quest Log 条目
+    local questID = infoSuccess and type(questInfo) == "table" and questInfo.questID or nil -- 当前任务 ID
+    if type(questID) == "number" and questID > 0 and seenQuestSet[questID] ~= true and questInfo.isHeader ~= true then
+      seenQuestSet[questID] = true
+
+      local runtimeState = getCachedQuestRuntimeState(questID) -- 当前任务运行时字段
+      local detailObject = nil -- 当前任务详情对象
+      local detailError = nil -- 当前任务详情错误
+      detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(questID)
+      if detailError then
+        detailObject = nil
+      end
+
+      questEntryList[#questEntryList + 1] = {
+        questID = questID,
+        name = type(questInfo.title) == "string" and questInfo.title or runtimeState.name,
+        status = runtimeState.status,
+        readyForTurnIn = runtimeState.readyForTurnIn,
+        typeID = runtimeState.typeID,
+        questLineID = type(detailObject) == "table" and detailObject.questLineID or nil,
+        questLineName = type(detailObject) == "table" and detailObject.questLineName or nil,
+        UiMapID = type(detailObject) == "table" and detailObject.UiMapID or nil,
+      }
+    end
+  end
+
+  return questEntryList, nil
+end
+
+--- 按任务线 ID 获取进度摘要。
+---@param questLineID number
+---@return table progressObject
+---@return table|nil errorObject
+function Toolbox.Questlines.GetQuestLineProgress(questLineID)
+  local dataTable = getQuestlineDataTable() -- 根数据表
+  local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 任务页签模型
+  if errorObject or type(dataTable) ~= "table" then
+    return {
+      completed = 0,
+      total = 0,
+      hasActive = false,
+      nextQuestID = nil,
+      nextQuestName = nil,
+      isCompleted = false,
+    }, errorObject
+  end
+
+  local runtimeKey = getRuntimeCacheKey() -- 当前运行时缓存键
+  if progressCache.dataRef ~= dataTable
+    or progressCache.generatedAt ~= dataTable.generatedAt
+    or progressCache.runtimeKey ~= runtimeKey
+  then
+    progressCache.dataRef = dataTable
+    progressCache.generatedAt = dataTable.generatedAt
+    progressCache.runtimeKey = runtimeKey
+    progressCache.mapByID = {}
+    progressCache.questLineByID = {}
+  end
+
+  if type(progressCache.questLineByID[questLineID]) == "table" then
+    return progressCache.questLineByID[questLineID], nil
+  end
+
+  local questLineEntry = type(questLineID) == "number" and model.questLineByID[questLineID] or nil -- 任务线对象
+  if type(questLineEntry) ~= "table" then
+    return {
+      completed = 0,
+      total = 0,
+      hasActive = false,
+      nextQuestID = nil,
+      nextQuestName = nil,
+      isCompleted = false,
+    }, nil
+  end
+
+  local progressObject = buildProgressFromQuestIDs(questLineEntry.questIDs or {}) -- 任务线进度
+  progressCache.questLineByID[questLineID] = progressObject
+  return progressObject, nil
+end
+
+--- 按地图 ID 获取聚合进度。
+---@param mapID number
+---@return table progressObject
+---@return table|nil errorObject
+function Toolbox.Questlines.GetMapProgress(mapID)
+  local dataTable = getQuestlineDataTable() -- 根数据表
+  local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 任务页签模型
+  if errorObject or type(dataTable) ~= "table" then
+    return {
+      completed = 0,
+      total = 0,
+      hasActive = false,
+      nextQuestID = nil,
+      nextQuestName = nil,
+      isCompleted = false,
+    }, errorObject
+  end
+
+  local runtimeKey = getRuntimeCacheKey() -- 当前运行时缓存键
+  if progressCache.dataRef ~= dataTable
+    or progressCache.generatedAt ~= dataTable.generatedAt
+    or progressCache.runtimeKey ~= runtimeKey
+  then
+    progressCache.dataRef = dataTable
+    progressCache.generatedAt = dataTable.generatedAt
+    progressCache.runtimeKey = runtimeKey
+    progressCache.mapByID = {}
+    progressCache.questLineByID = {}
+  end
+
+  if type(progressCache.mapByID[mapID]) == "table" then
+    return progressCache.mapByID[mapID], nil
+  end
+
+  local mapEntry = type(mapID) == "number" and model.mapByID[mapID] or nil -- 地图对象
+  if type(mapEntry) ~= "table" then
+    return {
+      completed = 0,
+      total = 0,
+      hasActive = false,
+      nextQuestID = nil,
+      nextQuestName = nil,
+      isCompleted = false,
+    }, nil
+  end
+
+  local questIDList = {} -- 地图内任务 ID 列表
+  for _, questLineEntry in ipairs(mapEntry.questLines or {}) do
+    for _, questID in ipairs(questLineEntry.questIDs or {}) do
+      questIDList[#questIDList + 1] = questID
+    end
+  end
+
+  local progressObject = buildProgressFromQuestIDs(questIDList) -- 地图聚合进度
+  progressCache.mapByID[mapID] = progressObject
+  return progressObject, nil
+end
+
+--- 构建按任务类型聚合的运行时索引。
+---@param questTabModel table 任务页签静态模型
+---@return table typeIndexModel
+local function buildQuestTypeIndexModel(questTabModel)
+  local typeIndexModel = {
+    typeList = {},
+    typeToQuestIDs = {},
+    typeToQuestLineIDs = {},
+    typeToMapIDs = {},
+  }
+  local typeSeenSet = {} -- 已收录类型集合
+  local typeQuestSeenSet = {} -- typeID -> questID 集合
+  local typeQuestLineSeenSet = {} -- typeID -> questLineID 集合
+  local typeMapSeenSet = {} -- typeID -> mapID 集合
+
+  for _, mapEntry in ipairs(questTabModel.maps or {}) do
+    for _, questLineEntry in ipairs(mapEntry.questLines or {}) do
+      local questLineTypeIDSet = {} -- 当前任务线出现的类型集合
+      for _, questID in ipairs(questLineEntry.questIDs or {}) do
+        local runtimeState = getCachedQuestRuntimeState(questID) -- 任务运行时字段
+        local typeID = runtimeState.typeID -- 当前任务类型 ID
+        if type(typeID) == "number" then
+          if typeSeenSet[typeID] ~= true then
+            typeSeenSet[typeID] = true
+            typeIndexModel.typeList[#typeIndexModel.typeList + 1] = typeID
+          end
+
+          if type(typeQuestSeenSet[typeID]) ~= "table" then
+            typeQuestSeenSet[typeID] = {}
+            typeIndexModel.typeToQuestIDs[typeID] = {}
+          end
+          if typeQuestSeenSet[typeID][questID] ~= true then
+            typeQuestSeenSet[typeID][questID] = true
+            typeIndexModel.typeToQuestIDs[typeID][#typeIndexModel.typeToQuestIDs[typeID] + 1] = questID
+          end
+
+          questLineTypeIDSet[typeID] = true
+
+          if type(typeMapSeenSet[typeID]) ~= "table" then
+            typeMapSeenSet[typeID] = {}
+            typeIndexModel.typeToMapIDs[typeID] = {}
+          end
+          if typeMapSeenSet[typeID][mapEntry.id] ~= true then
+            typeMapSeenSet[typeID][mapEntry.id] = true
+            typeIndexModel.typeToMapIDs[typeID][#typeIndexModel.typeToMapIDs[typeID] + 1] = mapEntry.id
+          end
+        end
+      end
+
+      for typeID in pairs(questLineTypeIDSet) do
+        if type(typeQuestLineSeenSet[typeID]) ~= "table" then
+          typeQuestLineSeenSet[typeID] = {}
+          typeIndexModel.typeToQuestLineIDs[typeID] = {}
+        end
+        if typeQuestLineSeenSet[typeID][questLineEntry.id] ~= true then
+          typeQuestLineSeenSet[typeID][questLineEntry.id] = true
+          typeIndexModel.typeToQuestLineIDs[typeID][#typeIndexModel.typeToQuestLineIDs[typeID] + 1] = questLineEntry.id
+        end
+      end
+    end
+  end
+
+  table.sort(typeIndexModel.typeList)
+  return typeIndexModel
+end
+
+--- 获取按任务类型聚合的运行时索引。
+---@return table typeIndexModel
+---@return table|nil errorObject
+function Toolbox.Questlines.GetQuestTypeIndex()
+  local dataTable = getQuestlineDataTable() -- 根数据表
+  local questTabModel, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 静态结构模型
+  if errorObject or type(dataTable) ~= "table" then
+    return {
+      typeList = {},
+      typeToQuestIDs = {},
+      typeToQuestLineIDs = {},
+      typeToMapIDs = {},
+    }, errorObject
+  end
+
+  local runtimeKey = getRuntimeCacheKey() -- 当前运行时缓存键
+  if typeIndexCache.dataRef == dataTable
+    and typeIndexCache.generatedAt == dataTable.generatedAt
+    and typeIndexCache.runtimeKey == runtimeKey
+    and (typeIndexCache.model ~= nil or typeIndexCache.errorObject ~= nil)
+  then
+    return typeIndexCache.model, typeIndexCache.errorObject
+  end
+
+  local typeIndexModel = buildQuestTypeIndexModel(questTabModel) -- 类型运行时索引
+  typeIndexCache.dataRef = dataTable
+  typeIndexCache.generatedAt = dataTable.generatedAt
+  typeIndexCache.runtimeKey = runtimeKey
+  typeIndexCache.model = typeIndexModel
+  typeIndexCache.errorObject = nil
+  return typeIndexModel, nil
 end
 
 --- 按任务 ID 获取任务详情。
@@ -820,18 +1153,34 @@ function Toolbox.Questlines.GetQuestDetailByID(questID)
     return nil, errorObject
   end
 
-  if type(questID) ~= "number" or type(dataTable) ~= "table" then
+  if type(questID) ~= "number" then
     return nil, nil
   end
 
   local questRecord = dataTable.quests and dataTable.quests[questID] or nil -- 任务静态记录
+  local runtimeState = getCachedQuestRuntimeState(questID) -- 任务运行时字段
   if type(questRecord) ~= "table" then
+    if isQuestCurrentlyInLog(questID) then
+      return {
+        questID = questID,
+        name = runtimeState.name,
+        status = runtimeState.status,
+        readyForTurnIn = runtimeState.readyForTurnIn,
+        UiMapID = nil,
+        typeID = runtimeState.typeID,
+        mapPos = nil,
+        npcIDs = runtimeState.npcIDs,
+        npcPos = runtimeState.npcPos,
+        questLineID = nil,
+        questLineName = nil,
+        runtime = runtimeState,
+      }, nil
+    end
     return nil, nil
   end
 
   local questLineID = model.questToQuestLineID[questID] -- 任务所属任务线 ID
   local questLineEntry = type(questLineID) == "number" and model.questLineByID[questLineID] or nil -- 任务线对象
-  local runtimeState = getQuestRuntimeState(questID) -- 任务运行时字段
 
   return {
     questID = questID,

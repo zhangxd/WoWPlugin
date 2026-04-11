@@ -20,6 +20,12 @@ describe("QuestlineProgress mock data injection", function()
   local originalGetQuestLogIndexByID = nil -- 原始 GetQuestLogIndexByID 全局
   local originalIsQuestFlaggedCompleted = nil -- 原始 IsQuestFlaggedCompleted 全局
   local injectedMockData = nil -- 当前用例注入的 mock 数据
+  local questLogInfoList = nil -- Quest Log 条目列表
+  local questActiveByID = nil -- 进行中任务集合
+  local questCompletedByID = nil -- 已完成任务集合
+  local questReadyByID = nil -- 可交付任务集合
+  local questTypeByID = nil -- 任务类型集合
+  local questTitleByID = nil -- 任务标题集合
 
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
@@ -45,30 +51,51 @@ describe("QuestlineProgress mock data injection", function()
       },
     })
 
+    questLogInfoList = {
+      { questID = 81002, title = "Quest #81002", isHeader = false, isHidden = false },
+      { questID = 81003, title = "Quest #81003", isHeader = false, isHidden = false },
+    }
+    questActiveByID = {
+      [81002] = true,
+      [81003] = true,
+    }
+    questCompletedByID = {
+      [81001] = true,
+    }
+    questReadyByID = {
+      [81003] = true,
+    }
+    questTypeByID = {
+      [81001] = 34,
+      [81002] = 12,
+    }
+    questTitleByID = {
+      [81001] = "Quest #81001",
+      [81002] = "Quest #81002",
+      [81003] = "Quest #81003",
+    }
+
     rawset(_G, "C_QuestLog", {
       GetTitleForQuestID = function(questID)
-        return "Quest #" .. tostring(questID)
+        return questTitleByID[questID] or ("Quest #" .. tostring(questID))
       end,
       GetLogIndexForQuestID = function(questID)
-        if questID == 81002 or questID == 81003 then
-          return 1
-        end
-        return 0
+        return questActiveByID[questID] == true and 1 or 0
       end,
       IsQuestFlaggedCompleted = function(questID)
-        return questID == 81001
+        return questCompletedByID[questID] == true
       end,
       ReadyForTurnIn = function(questID)
-        return questID == 81003
+        return questReadyByID[questID] == true
       end,
       GetQuestType = function(questID)
-        if questID == 81001 then
-          return 34
-        end
-        if questID == 81002 then
-          return 12
-        end
-        return nil
+        return questTypeByID[questID]
+      end,
+      GetNumQuestLogEntries = function()
+        return #questLogInfoList, #questLogInfoList
+      end,
+      GetInfo = function(index)
+        return questLogInfoList[index]
       end,
     })
     rawset(_G, "C_Map", {
@@ -126,22 +153,108 @@ describe("QuestlineProgress mock data injection", function()
     assert.equals(12, typedState.typeID)
   end)
 
+  it("current_quest_log_entries_include_mapped_and_unmapped_quests", function()
+    assert.is_function(Toolbox.Questlines.GetCurrentQuestLogEntries)
+
+    questLogInfoList = {
+      { questID = 81002, title = "Quest #81002", isHeader = false, isHidden = false },
+      { title = "Campaign Header", isHeader = true, isHidden = false },
+      { questID = 99901, title = "Live Quest #99901", isHeader = false, isHidden = false },
+      { questID = 81003, title = "Quest #81003", isHeader = false, isHidden = false },
+    }
+    questActiveByID[99901] = true
+    questTitleByID[99901] = "Live Quest #99901"
+
+    local questEntryList, errorObject = Toolbox.Questlines.GetCurrentQuestLogEntries()
+    assert.is_nil(errorObject)
+    assert.equals(3, #questEntryList)
+
+    assert.equals(81002, questEntryList[1].questID)
+    assert.equals(9901, questEntryList[1].questLineID)
+    assert.equals(2371, questEntryList[1].UiMapID)
+
+    assert.equals(99901, questEntryList[2].questID)
+    assert.equals("Live Quest #99901", questEntryList[2].name)
+    assert.is_nil(questEntryList[2].questLineID)
+    assert.is_nil(questEntryList[2].questLineName)
+    assert.is_nil(questEntryList[2].UiMapID)
+
+    local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(99901)
+    assert.is_nil(detailError)
+    assert.equals(99901, detailObject.questID)
+    assert.equals("Live Quest #99901", detailObject.name)
+    assert.is_nil(detailObject.questLineID)
+    assert.is_nil(detailObject.questLineName)
+
+    assert.equals(81003, questEntryList[3].questID)
+    assert.equals(true, questEntryList[3].readyForTurnIn)
+  end)
+
   it("quest_type_label_uses_mapping_and_fallback", function()
     assert.is_function(Toolbox.Questlines.GetQuestTypeLabel)
     assert.equals("Campaign", Toolbox.Questlines.GetQuestTypeLabel(12))
     assert.equals("Unknown Type (999)", Toolbox.Questlines.GetQuestTypeLabel(999))
   end)
 
-  it("quest_tab_model_builds_type_indexes_from_runtime_fields", function()
+  it("quest_tab_model_keeps_structure_static_without_full_runtime_queries", function()
+    local titleCallCount = 0 -- 任务名查询次数
+    local logIndexCallCount = 0 -- 任务日志查询次数
+    local readyCallCount = 0 -- 可交付查询次数
+    local typeCallCount = 0 -- 类型查询次数
+
+    rawset(_G, "C_QuestLog", {
+      GetTitleForQuestID = function(questID)
+        titleCallCount = titleCallCount + 1
+        return "Quest #" .. tostring(questID)
+      end,
+      GetLogIndexForQuestID = function(questID)
+        logIndexCallCount = logIndexCallCount + 1
+        if questID == 81002 or questID == 81003 then
+          return 1
+        end
+        return 0
+      end,
+      IsQuestFlaggedCompleted = function(questID)
+        return questID == 81001
+      end,
+      ReadyForTurnIn = function(questID)
+        readyCallCount = readyCallCount + 1
+        return questID == 81003
+      end,
+      GetQuestType = function(questID)
+        typeCallCount = typeCallCount + 1
+        if questID == 81001 then
+          return 34
+        end
+        if questID == 81002 then
+          return 12
+        end
+        return nil
+      end,
+    })
+
     local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 查询模型
     assert.is_nil(errorObject)
-    assert.same({ 12, 34 }, model.typeList)
-    assert.same({ 81002 }, model.typeToQuestIDs[12])
-    assert.same({ 81001 }, model.typeToQuestIDs[34])
-    assert.same({ 9901 }, model.typeToQuestLineIDs[12])
-    assert.same({ 9901 }, model.typeToQuestLineIDs[34])
-    assert.same({ 2371 }, model.typeToMapIDs[12])
-    assert.same({ 2371 }, model.typeToMapIDs[34])
+    assert.equals(0, titleCallCount)
+    assert.equals(0, logIndexCallCount)
+    assert.equals(0, readyCallCount)
+    assert.equals(0, typeCallCount)
+    assert.same({ 81001, 81002, 81003 }, model.questLineByID[9901].questIDs)
+    assert.equals(3, model.questLineByID[9901].questCount)
+  end)
+
+  it("quest_type_index_builds_type_indexes_from_runtime_fields_on_demand", function()
+    assert.is_function(Toolbox.Questlines.GetQuestTypeIndex)
+
+    local typeIndex, errorObject = Toolbox.Questlines.GetQuestTypeIndex()
+    assert.is_nil(errorObject)
+    assert.same({ 12, 34 }, typeIndex.typeList)
+    assert.same({ 81002 }, typeIndex.typeToQuestIDs[12])
+    assert.same({ 81001 }, typeIndex.typeToQuestIDs[34])
+    assert.same({ 9901 }, typeIndex.typeToQuestLineIDs[12])
+    assert.same({ 9901 }, typeIndex.typeToQuestLineIDs[34])
+    assert.same({ 2371 }, typeIndex.typeToMapIDs[12])
+    assert.same({ 2371 }, typeIndex.typeToMapIDs[34])
   end)
 
   it("quest_tab_model_uses_injected_mock_data", function()
@@ -155,7 +268,8 @@ describe("QuestlineProgress mock data injection", function()
 
     local questLineEntry = mapEntry.questLines[1] -- 任务线模型
     assert.equals(9901, questLineEntry.id)
-    assert.equals(3, #questLineEntry.quests)
+    assert.same({ 81001, 81002, 81003 }, questLineEntry.questIDs)
+    assert.equals(3, questLineEntry.questCount)
   end)
 
   it("clearing_override_falls_back_to_live_data", function()
@@ -210,8 +324,8 @@ describe("QuestlineProgress mock data injection", function()
 
     local model, modelError = Toolbox.Questlines.GetQuestTabModel()
     assert.is_nil(modelError)
-    assert.equals(2, #model.questLineByID[9901].quests)
-    assert.same({ x = 0.11, y = 0.22, z = 0 }, model.questLineByID[9901].quests[1].mapPos)
+    assert.same({ 81001, 81002 }, model.questLineByID[9901].questIDs)
+    assert.equals(2, model.questLineByID[9901].questCount)
 
     local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(81001)
     assert.is_nil(detailError)

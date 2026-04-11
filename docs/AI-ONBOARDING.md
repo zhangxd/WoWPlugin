@@ -10,6 +10,7 @@
 |------|------|------|
 | ① | [Toolbox-addon-design.md](./Toolbox-addon-design.md) | **唯一总体方案**：架构、模块契约、数据约定、各能力边界；新功能必须能嵌进这套模型。 |
 | ①′ | [AGENTS.md](../AGENTS.md) | **与 ① 同级必读**：AI 行为规则（三关判断树）、领域对外 API、模块边界、Lua 开发规范、暴雪 UI 挂接时机；全文以该文件为准。 |
+| ①″ | [DOCS-STANDARD.md](./DOCS-STANDARD.md) | **触及 `docs/**` 时必读**：规定需求、设计、计划、测试文档的目录、命名、模板、状态与迁移规则。 |
 | ② | 仓库根 `README.md` | 安装方式、TOC 名、支持的客户端；避免 AI 假设错游戏版本。 |
 | ③ | **本次任务** | 用户消息里写清：模块名 / 行为 / 验收标准；若复杂，附 `docs/specs/` 下当期规格。 |
 
@@ -32,7 +33,9 @@
 
 ### 1.1 改动节奏（设计先行、审核、再编码）
 
-触及模块行为、存档键、TOC、设置 UI 的修改，按三步：**对齐设计** → **审核文档**（总设计 + AGENTS）→ **需求方明确「开动」**后改业务 Lua / TOC。规格可写在 `docs/specs/YYYY-MM-DD-<topic>.md`。
+触及模块行为、存档键、TOC、设置 UI 的修改，按三步：**对齐设计** → **审核文档**（总设计 + AGENTS）→ **需求方明确「开动」**后改业务 Lua / TOC。规格可写在 `docs/specs/<topic>-spec.md`。
+
+新增或修改 `docs/**` 中的需求、设计、计划、测试文档时，按三步：**先选文档类型** → **按 [DOCS-STANDARD.md](./DOCS-STANDARD.md) 选择目录与模板** → **再写内容**。禁止先写零散文档，再事后决定放到哪个目录。
 
 未开动前不改业务代码；仅改文档与 `docs/**` 允许。
 
@@ -69,19 +72,23 @@
 
 ```
 docs/
+├── DOCS-STANDARD.md          # docs/** 写作唯一规范：目录、命名、模板、状态
 ├── Toolbox-addon-design.md   # 总设计：架构 + 约定 + 已有模块说明（随功能迭代更新「映射表」）
 ├── AI-ONBOARDING.md          # 本文件：读档顺序与文档分层
-├── specs/                    # 当期需求规格（面向主插件功能）
-│   └── YYYY-MM-DD-<topic>.md # 一次大需求或复杂交互时写，实现后可合并回总设计或归档
-└── superpowers/              # 超能力子系统（冒险手册增强等）
-    ├── specs/                # 超能力功能规格
-    │   └── YYYY-MM-DD-<topic>.md
-    └── plans/                # 超能力实现计划
-        └── YYYY-MM-DD-<topic>.md
+├── FEATURES.md               # 产品功能总览，不承接单次需求/设计/计划/测试
+├── release.md                # 发布记录与发版流程
+├── specs/                    # 需求规格：<topic>-spec.md
+├── designs/                  # 设计方案：<topic>-design.md
+├── plans/                    # 实施计划：<topic>-plan.md
+├── tests/                    # 测试计划与测试记录：<topic>-test.md
+├── templates/                # 标准模板：spec/design/plan/test
+├── features/                 # 历史遗留目录，禁止新增同类文档
+└── superpowers/              # 历史遗留目录，禁止新增 specs/plans 同类文档
 ```
 
 - **总设计**：唯一长期架构；模块列表、扩展点、`ToolboxDB`、里程碑只维护这一份。
-- **specs/**：当期需求与验收；实现后合并进总设计或删除过期内容。
+- **specs/designs/plans/tests**：分别承载需求、设计、计划、测试；目录职责与模板统一见 [DOCS-STANDARD.md](./DOCS-STANDARD.md)。
+- **features/**、**superpowers/**：仅保留历史文档；后续新增文档不再进入这些目录。
 - **Lua 注释与 Locales**：以 [AGENTS.md](../AGENTS.md)「Lua 开发规范」与「项目约束」为准。
 
 ---
@@ -90,13 +97,14 @@ docs/
 
 在对话里或 `docs/specs/xxx.md` 里尽量包含：
 
-1. **模块 id**（如 `cooldown_overlay`）是否与设计文档映射表已预留一致。
-2. **客户端**：正式服（本仓库默认）。
-3. **数据**：存在 `ToolboxDB.modules.<id>` 哪些键；是否要迁移。
-4. **设置**：是否需要 `RegisterSettings`、大致控件（开关 / 滑条 / 下拉）。
-5. **边界**：不做什么（避免 AI 扩大范围）。
-6. **验收**：例如「重载后位置保留」「战斗中不报错」。
-7. **若涉及静态数据、外部生成或多种数据来源**：**主方案须唯一**（谁生成、谁维护、未知键策略）；避免仅写「用静态表」而不定来源与边界。
+1. **文档类型**：本次要写的是需求、设计、计划还是测试；按 [DOCS-STANDARD.md](./DOCS-STANDARD.md) 选目录与模板。
+2. **模块 id**（如 `cooldown_overlay`）是否与设计文档映射表已预留一致。
+3. **客户端**：正式服（本仓库默认）。
+4. **数据**：存在 `ToolboxDB.modules.<id>` 哪些键；是否要迁移。
+5. **设置**：是否需要 `RegisterSettings`、大致控件（开关 / 滑条 / 下拉）。
+6. **边界**：不做什么（避免 AI 扩大范围）。
+7. **验收**：例如「重载后位置保留」「战斗中不报错」。
+8. **若涉及静态数据、外部生成或多种数据来源**：**主方案须唯一**（谁生成、谁维护、未知键策略）；避免仅写「用静态表」而不定来源与边界。
 
 ---
 
@@ -121,6 +129,7 @@ docs/
 ## 6. 不建议的做法
 
 - 多份「总架构」互不同步（只保留 **Toolbox-addon-design.md** 为总纲）。
+- 在 `docs/features/`、`docs/superpowers/specs/`、`docs/superpowers/plans/` 继续新增需求/设计/计划文档（新文档统一走 [DOCS-STANDARD.md](./DOCS-STANDARD.md) 定义的目录）。
 - 把大段 API 教程复制进仓库（链到 [warcraft.wiki.gg](https://warcraft.wiki.gg) 或官方文档即可）。
 - 无日期、无主题的零碎 `notes.md` 长期堆在根目录。
 - AI 在需求仍含糊时跳过三关、直接改业务 Lua / TOC（见 AGENTS.md「AI 行为规则」）。
@@ -138,3 +147,5 @@ docs/
 | 2026-04-05 | 重构：§1.2 改为判断树背景说明（判断树移至 AGENTS.md「AI 行为规则」）；去重「言行一致」「本地隔离」等原则（统一在 AGENTS.md）；§5 明确权威性归属 |
 | 2026-04-09 | 可选阅读补充「Data 静态数据导出」入口：统一指向 AGENTS.md 的 WoWDB 导出强制规则与文件头驱动约定 |
 | 2026-04-09 | AGENTS.md 补充 Data 文件头标准模板（数据库导出模板 / 手工维护模板），用于 AI 自动识别导出范围 |
+| 2026-04-12 | 新增 `DOCS-STANDARD.md` 作为 `docs/**` 写作规范；文档分层收口为 `specs/designs/plans/tests/templates`，并将 `features/`、`superpowers/` 标为历史遗留目录 |
+| 2026-04-12 | 文档命名规则改为 `<topic>-<type>.md`；同一类型只保留一份文档，变更追溯依赖 Git 历史 |

@@ -24,7 +24,9 @@ function FakeFrame.new(options)
   self._height = 0 -- 高度缓存
   self._id = nil -- ID 缓存
   self._scrollChild = nil -- 滚动子容器
+  self._verticalScroll = 0 -- 垂直滚动偏移
   self._highlightTexture = nil -- 高亮贴图替身
+  self._textColor = nil -- 文本颜色缓存
   return self
 end
 
@@ -153,7 +155,19 @@ end
 function FakeFrame:SetJustifyH() end
 function FakeFrame:SetJustifyV() end
 function FakeFrame:SetWordWrap() end
-function FakeFrame:SetTextColor() end
+function FakeFrame:SetTextColor(redValue, greenValue, blueValue)
+  self._textColor = {
+    tonumber(redValue) or 0,
+    tonumber(greenValue) or 0,
+    tonumber(blueValue) or 0,
+  }
+end
+function FakeFrame:GetTextColor()
+  if type(self._textColor) == "table" then
+    return self._textColor[1], self._textColor[2], self._textColor[3]
+  end
+  return nil
+end
 function FakeFrame:GetStringWidth()
   return #(self._text or "") * 8
 end
@@ -172,8 +186,12 @@ function FakeFrame:SetFrameLevel() end
 function FakeFrame:ClearAllPoints() end
 function FakeFrame:GetEffectiveScale() return 1 end
 function FakeFrame:GetTop() return 0 end
-function FakeFrame:GetVerticalScroll() return 0 end
-function FakeFrame:SetVerticalScroll() end
+function FakeFrame:GetVerticalScroll()
+  return self._verticalScroll or 0
+end
+function FakeFrame:SetVerticalScroll(scrollValue)
+  self._verticalScroll = tonumber(scrollValue) or 0
+end
 function FakeFrame:SetScrollChild(childFrame)
   self._scrollChild = childFrame
 end

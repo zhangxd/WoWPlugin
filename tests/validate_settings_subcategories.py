@@ -430,7 +430,8 @@ def validate_encounter_journal_questline_tree_feature() -> None:
     require_contains(module_text, "currentRootState == \"native\"", "encounter journal guards native restore by target state")
     require_contains(module_text, "UIPanelScrollFrameTemplate", "encounter journal quest tree uses scrollable container")
     require_contains(module_text, "self.scrollFrame:SetScrollChild(self.scrollChild)", "encounter journal quest tree binds scroll child")
-    require_contains(module_text, "collapseState[rowData.collapseKey]", "encounter journal quest tree writes collapsed state on row click")
+    if "collapseState[rowData.collapseKey]" not in module_text and "setTreeNodeCollapsed(" not in module_text:
+        raise AssertionError("encounter journal quest tree should update collapsed state on row click")
     if 'CreateFrame("Button", "ToolboxEJQuestlineTab", infoFrame, "UIPanelButtonTemplate")' in module_text:
         raise AssertionError("questline entry should be a tab template, not a plain panel button template")
 
