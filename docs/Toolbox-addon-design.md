@@ -171,7 +171,7 @@ sequenceDiagram
 | 加载聊天提示 | `chat_notify` | `modules.chat_notify`（`enabled`/`debug`） | 独立子页面：启用、调试、清理并重建、说明文案 |
 | 地下城 / 团队副本共享目录页面与开关 | `dungeon_raid_directory` | `modules.dungeon_raid_directory`（`enabled`/`debug`）+ `global.dungeonRaidDirectory`（`schemaVersion` / `interfaceBuild` / `lastBuildAt` / `tierNames` / `difficultyMeta` / `records`） | 独立子页面：启用、调试、清理并重建、状态、进度、手动重建、调试快照 |
 | 冒险指南仅坐骑筛选 | `ej_mount_filter` | `modules.ej_mount_filter`（`enabled`/`debug`）；掉落判断统一读取 `global.dungeonRaidDirectory.records[*].summary`，并允许目录层按名称补源已知假阴性；仅当**当前页签 + 当前资料片**下全部副本摘要就绪时才启用复选框，勾选后由覆盖列表接管显示 | 冒险手册内复选框 + 独立设置子页面；右下角微型菜单 `EJMicroButton` 的 tooltip 末尾追加当前副本锁定摘要（与小地图“冒险手册”悬停项同源） |
-| 冒险手册任务页签任务线树 | `encounter_journal` | `modules.encounter_journal`（`questlineTreeEnabled`/`questlineTreeCollapsed`/`questlineSelection` 等）+ `Toolbox.Data.InstanceQuestlines`（schema v3） | 在冒险手册根页签中增加“任务”页签；左侧地图/任务线树 + 右侧任务线/任务/详情联动；任务数据异常时按可恢复错误降级构建可用模型，避免整页签不可用 |
+| 冒险手册任务页签多视图 | `encounter_journal` | `modules.encounter_journal`（`questlineTreeEnabled`/`questlineTreeCollapsed`/`questViewMode`/`questViewSelected*` 等）+ `Toolbox.Data.InstanceQuestlines`（schema v4，DB-shape 文档结构）+ `Toolbox.Questlines` 运行时字段组装 | 在冒险手册根页签中增加“任务”页签；支持 `状态 / 类型 / 地图` 三视图；左侧地图树过滤与右侧详情区共享统一模型；任务名、状态、类型等动态字段统一由 `Toolbox.Questlines` 运行时获取 |
 | （核心不提供业务数据） | — | `global` 其余键 | 调试、开发者选项可放 `global` |
 
 新增功能时：**新增一行 + 新文件 + TOC 一条**，不必改核心契约。
@@ -352,3 +352,4 @@ ToolboxDB = {
 | 2026-04-05 | 规范重构：三关关 3 触发条件精确化（移除「新 ToolboxDB 键」）；RegisterSettings 补充允许读取存档值；§5.3 After(0.06) 加限制条件；§2.1 领域对外 API 表补充 `Toolbox.MinimapButton.RegisterFlyoutEntry`；§3 补充账号级 vs 角色级存档约定 |
 | 2026-04-08 | 冒险手册锁定摘要增强：小地图悬停菜单内置“冒险手册”项与右下角 `EJMicroButton` tooltip 均追加当前副本锁定摘要（实例/难度/重置时间，团队本含进度）；`Toolbox.EJ` 增加锁定摘要与 tooltip 行构建接口 |
 | 2026-04-10 | 任务线链路对齐：`InstanceQuestlines` 升级并按 schema v3 使用；`QuestlineProgress` 增加 `SetDataOverride`（测试注入）与可恢复容错（坏引用不再导致整页签失效）；补充 `encounter_journal` 任务页签映射说明与离线逻辑测试规范链接 |
+| 2026-04-11 | 任务页签进入多视图阶段：`InstanceQuestlines` 切到 schema v4 DB-shape 文档结构；`Type / NpcIDs / NpcPos` 归入运行时字段层；`Toolbox.Questlines` 负责静态数据 + 动态数据的统一组装；`encounter_journal` 接入状态/类型/地图三视图与新选择状态键 |

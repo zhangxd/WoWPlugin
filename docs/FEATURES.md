@@ -17,6 +17,13 @@
   - 精确的重置时间
   - 扩展状态
 
+**任务页签多视图**
+- 在冒险手册根页签中增加“任务”页签
+- 支持 `状态 / 类型 / 地图` 三种视图切换
+- 左侧地图树可按地图过滤任务与任务线
+- 类型视图的 `typeID` 由运行时 `C_QuestLog.GetQuestType(questID)` 获取
+- 任务详情、任务线详情、地图详情使用统一领域模型
+
 **技术特性**
 - 事件驱动架构，无性能损耗
 - 自动过滤已过期的锁定
@@ -31,10 +38,10 @@
 
 ### 3. 聊天增强
 
-**频道管理**
-- 快速切换聊天频道
-- 自定义频道快捷键
-- 频道历史记录
+**加载提示与统一输出**
+- 插件加载完成后可在默认聊天框输出提示
+- 模块统一通过 `Toolbox.Chat` 输出消息
+- 颜色与文案走统一领域 API 和本地化表
 
 ### 4. 小地图按钮
 
@@ -57,18 +64,23 @@ Modules（功能模块层）
 ```
 
 **Data 层**
-- 静态数据表（副本映射、掉落数据）
+- 静态数据表（副本映射、掉落数据、任务线关系文档）
 - 只读，不包含逻辑
 
 **Core API 层**
 - 封装 WoW 原生 API
 - 提供统一的高层接口
-- 命名空间：`Toolbox.EJ`、`Toolbox.Chat`、`Toolbox.Tooltip`
+- 命名空间：`Toolbox.EJ`、`Toolbox.Chat`、`Toolbox.Tooltip`、`Toolbox.Questlines`
 
 **Modules 层**
 - 独立的功能模块
 - 可单独启用/禁用
 - 通过 `Toolbox.RegisterModule` 注册
+
+**任务页签字段分层**
+- 静态导出层只保留稳定 DB 字段
+- 运行时字段（任务名、状态、类型等）由 `Toolbox.Questlines` 获取
+- UI 最终消费统一 `QuestEntry` 模型，而不是直接拼装静态数据
 
 ## 配置系统
 
@@ -80,7 +92,8 @@ ToolboxDB = {
     encounter_journal = {
       enabled = true,
       mountFilterEnabled = true,
-      lockoutOverlayEnabled = true
+      lockoutOverlayEnabled = true,
+      questViewMode = "status"
     },
     -- 其他模块...
   }
@@ -196,7 +209,8 @@ print(loc.MY_STRING)
 
 1. 副本 CD 显示依赖 `GetSavedInstanceInfo` API
 2. 坐骑筛选需要静态数据表维护
-3. 部分功能需要 `Blizzard_EncounterJournal` 插件加载
+3. 任务类型依赖运行时 `C_QuestLog.GetQuestType(questID)`，静态数据层不缓存该字段
+4. 部分功能需要 `Blizzard_EncounterJournal` 插件加载
 
 ## 更新日志
 
