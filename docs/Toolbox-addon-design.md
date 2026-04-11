@@ -10,7 +10,7 @@
 |------|------|
 | **定位** | 单插件「工具箱」：统一入口、可扩展模块、统一存档与设置 UI。 |
 | **客户端** | **仅正式服（Retail）**，以 `Settings` API 与当前 Interface 版本为准。 |
-| **初版能力** | ① **模块 `mover`**：本插件自建 `Frame`（`Toolbox.Mover.RegisterFrame`）+ 可选 **暴雪顶层窗口**（默认经 `ShowUIPanel` 挂标题栏拖动，类 BlizzMove；内置名单 + 额外 Frame 名；商城等受保护界面排除；**不**移动微型按钮条本身）；② ESC 游戏菜单 + 系统「选项」中的插件类目入口；③ Tooltip 锚点（见 **TooltipAnchor**）。 |
+| **当前能力** | ① **模块 `mover`**：插件自建窗体与可选暴雪顶层窗口拖动；② **模块 `tooltip_anchor`**：Tooltip 锚点与跟随模式；③ **模块 `chat_notify`**：统一加载提示；④ **模块 `minimap_button`**：小地图按钮与飞出菜单；⑤ **模块 `encounter_journal`**：冒险指南列表增强、详情页增强、任务页签与锁定摘要联动；⑥ ESC 游戏菜单 + 系统「选项」中的插件类目入口。 |
 | **扩展方式** | 新功能 = 新模块文件 + `RegisterModule` + TOC 加载顺序；核心保持稳定，业务只增模块。 |
 
 ---
@@ -20,17 +20,21 @@
 ```
 Core（薄层）
 ├── 根命名空间（如 Toolbox）
-├── SavedVariables 加载 / 版本迁移
+├── Runtime / SavedVariables 加载 / 版本迁移
 ├── **Chat（领域对外 API）** — 默认聊天框输出、TOC 元数据读取；见 `Core/API/Chat.lua`
 ├── **Tooltip（领域对外 API）** — `GameTooltip_SetDefaultAnchor` hook 与光标锚点；见 `Core/API/Tooltip.lua`
+├── **EJ（领域对外 API）** — 冒险指南锁定、坐骑掉落与锁定摘要；见 `Core/API/EncounterJournal.lua`
+├── **Questlines（领域对外 API）** — 任务线静态模型与运行时任务字段；见 `Core/API/QuestlineProgress.lua`
 ├── ModuleRegistry（注册、排序、生命周期）
 └── 可选：轻量事件（模块增多后再评估 EventHub）
 
 Modules（平级业务，持续增加）
 ├── Mover — 插件自有 Frame
 ├── （兼容）MicroMenuPanels.lua — 旧 API 委托给 Mover，不再单独 `RegisterModule`
-├── MinimapButton — 小地图旁打开 Toolbox 设置的按钮（可单独隐藏）；悬停展开纵向操作列，`Toolbox.MinimapButton.RegisterFlyoutEntry` 供其它模块追加项
+├── ChatNotify — 默认聊天框加载提示
+├── MinimapButton — 小地图旁打开 Toolbox 设置的按钮（可单独隐藏）；悬停展开纵向操作列，内置“冒险手册”等飞出项
 ├── TooltipAnchor — GameTooltip 等锚点/跟随鼠标
+└── EncounterJournal — 冒险指南列表增强、详情页增强、任务页签和锁定摘要联动
 
 UI
 ├── SettingsHost — Retail Canvas 主类目总览页 + 各功能真实子页面 + 关于页
@@ -114,11 +118,8 @@ flowchart TB
 |------|------|------|
 | `Toolbox.Chat` | `Core/API/Chat.lua` | 面向玩家的默认聊天框输出（`PrintAddonMessage`）、插件 TOC 元数据（`GetAddOnMetadata`）。**模块内禁止**直接调用 `DEFAULT_CHAT_FRAME:AddMessage`；新增聊天类能力须先扩展本 API。 |
 | `Toolbox.Tooltip` | `Core/API/Tooltip.lua` | `InstallDefaultAnchorHook()`、`RefreshDriver()`；读取 `modules.tooltip_anchor`。**模块 tooltip_anchor** 仅负责 `RegisterModule` 与设置 UI，不直接 `hooksecurefunc` GameTooltip。 |
-| `Toolbox.Lockouts` | `Core/API/Lockouts.lua` | 锁定列表：`GetNumSavedInstances` / `GetSavedInstanceInfo` 等封装（至暗之夜仍以此为主流 API，便于日后替换）。 |
-| `Toolbox.EJ` | `Core/API/EncounterJournal.lua` | **优先 `C_EncounterJournal`**，兜底时再考虑全局 `EJ_*`；业务模块禁止直接调用 `EJ_*`。含 `SetDifficulty` / `IsValidInstanceDifficulty` 等；副本列表语境以 `EncounterJournal.selectedTab` 与 `GetEncounterJournalInstanceListButtonIds` 为准（与 `GetJournalTabId` 可能不是同一套数字）。 |
-| `Toolbox.MountJournal` | `Core/API/MountJournal.lua` | `C_MountJournal`（坐骑物品、是否已学会）。 |
-| `Toolbox.Item` | `Core/API/Item.lua` | 物品名/链接、`GameTooltip:SetItemByID` 等展示辅助。 |
-| `Toolbox.Map` | `Core/API/Map.lua` | `C_Map.OpenWorldMap` 优先。 |
+| `Toolbox.EJ` | `Core/API/EncounterJournal.lua` | 冒险指南相关高层查询入口：当前页签语境、坐骑掉落集合、实例锁定、当前难度锁定、当前角色锁定摘要与 tooltip 行文本。业务模块禁止直接复制 `GetSavedInstanceInfo` / `EJ_*` 查询逻辑。 |
+| `Toolbox.Questlines` | `Core/API/QuestlineProgress.lua` | 任务线静态结构缓存、运行时任务字段、当前任务日志、任务详情、任务线进度与三视图聚合。任务页签 UI 通过本 API 获取模型，而不是直接拼装静态数据。 |
 | `Toolbox.MinimapButton` | `Modules/MinimapButton.lua` | `RegisterFlyoutEntry(def)` 供其他模块向小地图按钮悬停菜单追加项；`def` 至少包含 `id` 与 `onClick`，可选 `titleKey`/`tooltipKey`/`icon`/`order`/`augmentTooltip`（用于在悬停提示中追加动态内容）。禁止直接操作 `flyoutRegistry` 或 `flyoutSlotIds`。 |
 
 **模块间协作原则**
@@ -167,11 +168,9 @@ sequenceDiagram
 |------|-----------------|------|------|
 | 窗口拖动（自建 + 可选暴雪） | `mover` | `modules.mover`（`enabled`/`debug`/`frames`/`blizzardDragHitMode`/`allowDragInCombat`）；旧 `micromenu_panels.frames` 一次性迁入 `mover` | 独立子页面：启用、调试、清理并重建、拖动命中模式、战斗中是否允许拖；暴雪顶层仅代码内 `PANEL_KEYS` |
 | Tooltip 锚点 | `tooltip_anchor` | `modules.tooltip_anchor`（`enabled`/`debug`/`mode`/`offsetX`/`offsetY`） | 独立子页面：启用、调试、清理并重建、锚点模式与偏移 |
-| 小地图打开设置按钮 | `minimap_button` | `modules.minimap_button`（`enabled`/`debug`/`showMinimapButton`/`minimapPos`/`buttonShape`/`flyoutExpand`/`flyoutSlotIds`/`flyoutLauncherGap`/`flyoutPad`/`flyoutGap`） | 独立子页面：启用、调试、清理并重建、是否显示小地图按钮、恢复默认位置；款式（圆/方）、展开方式（纵向/横向）、悬停项顺序与功能池拖放、`flyoutSlotIds`；预览区为居中微缩按钮 + 展开示意（缝宽/内边距/项间距拖动，非游戏内角度）；游戏内沿小地图边缘拖动定角；悬停向左展开（扩展见 `RegisterFlyoutEntry`）；内置“冒险手册”悬停项通过 `augmentTooltip` 追加当前副本锁定摘要。 |
+| 小地图打开设置按钮 | `minimap_button` | `modules.minimap_button`（`enabled`/`debug`/`showMinimapButton`/`showCoordsOnMinimap`/`minimapCoordsAnchor`/`minimapPos`/`buttonShape`/`flyoutExpand`/`flyoutSlotIds`/`flyoutLauncherGap`/`flyoutPad`/`flyoutGap`） | 独立子页面：启用、调试、清理并重建、是否显示小地图按钮、坐标显示、恢复默认位置；款式（圆/方）、展开方式（纵向/横向）、悬停项顺序与功能池拖放、`flyoutSlotIds`；内置“冒险手册”飞出项会打开冒险指南，并在 tooltip 里追加当前副本锁定摘要。 |
 | 加载聊天提示 | `chat_notify` | `modules.chat_notify`（`enabled`/`debug`） | 独立子页面：启用、调试、清理并重建、说明文案 |
-| 地下城 / 团队副本共享目录页面与开关 | `dungeon_raid_directory` | `modules.dungeon_raid_directory`（`enabled`/`debug`）+ `global.dungeonRaidDirectory`（`schemaVersion` / `interfaceBuild` / `lastBuildAt` / `tierNames` / `difficultyMeta` / `records`） | 独立子页面：启用、调试、清理并重建、状态、进度、手动重建、调试快照 |
-| 冒险指南仅坐骑筛选 | `ej_mount_filter` | `modules.ej_mount_filter`（`enabled`/`debug`）；掉落判断统一读取 `global.dungeonRaidDirectory.records[*].summary`，并允许目录层按名称补源已知假阴性；仅当**当前页签 + 当前资料片**下全部副本摘要就绪时才启用复选框，勾选后由覆盖列表接管显示 | 冒险手册内复选框 + 独立设置子页面；右下角微型菜单 `EJMicroButton` 的 tooltip 末尾追加当前副本锁定摘要（与小地图“冒险手册”悬停项同源） |
-| 冒险手册任务页签多视图 | `encounter_journal` | `modules.encounter_journal`（`questlineTreeEnabled`/`questlineTreeCollapsed`/`questViewMode`/`questViewSelected*` 等）+ `Toolbox.Data.InstanceQuestlines`（schema v4，DB-shape 文档结构）+ `Toolbox.Questlines` 运行时字段组装 | 在冒险手册根页签中增加“任务”页签；支持 `状态 / 类型 / 地图` 三视图；左侧地图树过滤与右侧详情区共享统一模型；任务名、状态、类型等动态字段统一由 `Toolbox.Questlines` 运行时获取 |
+| 冒险指南增强 | `encounter_journal` | `modules.encounter_journal`（`enabled`/`debug`/`mountFilterEnabled`/`lockoutOverlayEnabled`/`detailMountOnlyEnabled`/`questlineTreeEnabled`/`questlineTreeCollapsed`/`questlineTreeSelection`/`questViewMode`/`questViewSelected*`/`rootTabOrderIds`/`rootTabHiddenIds`）+ `Toolbox.Data.MountDrops` + `Toolbox.Data.InstanceMapIDs` + `Toolbox.Data.InstanceQuestlines` + `Toolbox.Data.QuestTypeNames` + `Toolbox.EJ` + `Toolbox.Questlines` | 覆盖副本列表“仅坐骑”、列表锁定叠加、悬停锁定详情、详情页“仅坐骑”、详情页重置标签、任务页签三视图、主页页签顺序/显隐设置，以及 `EJMicroButton` tooltip 锁定摘要。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
 | （核心不提供业务数据） | — | `global` 其余键 | 调试、开发者选项可放 `global` |
 
 新增功能时：**新增一行 + 新文件 + TOC 一条**，不必改核心契约。
@@ -188,16 +187,30 @@ ToolboxDB = {
   global = {
     debug = false,
     locale = "auto",  -- locale：auto | zhCN | enUS，见 Locales.lua
-    dungeonRaidDirectory = { ... },
   },
   modules = {
     mover = { enabled = true, debug = false, ... },
     micromenu_panels = { enabled = true, debug = false, ... },
     tooltip_anchor = { enabled = true, debug = false, ... },
-    minimap_button = { enabled = true, debug = false, showMinimapButton = true, minimapPos = nil, buttonShape = "round", flyoutExpand = "vertical", flyoutSlotIds = { "reload_ui" }, flyoutLauncherGap = 0, flyoutPad = 4, flyoutGap = 0 },
+    minimap_button = { enabled = true, debug = false, showMinimapButton = true, showCoordsOnMinimap = true, minimapCoordsAnchor = "bottom", minimapPos = nil, buttonShape = "round", flyoutExpand = "vertical", flyoutSlotIds = { "reload_ui" }, flyoutLauncherGap = 0, flyoutPad = 4, flyoutGap = 0 },
     chat_notify = { enabled = true, debug = false, ... },
-    dungeon_raid_directory = { enabled = true, debug = false },
-    ej_mount_filter = { enabled = false, debug = false },
+    encounter_journal = {
+      enabled = true,
+      debug = false,
+      mountFilterEnabled = true,
+      lockoutOverlayEnabled = true,
+      detailMountOnlyEnabled = false,
+      questlineTreeEnabled = true,
+      questlineTreeCollapsed = {},
+      questlineTreeSelection = {},
+      questViewMode = "status",
+      questViewSelectedMapID = 0,
+      questViewSelectedTypeID = 0,
+      questViewSelectedQuestLineID = 0,
+      questViewSelectedQuestID = 0,
+      rootTabOrderIds = {},
+      rootTabHiddenIds = {},
+    },
   },
 }
 ```
@@ -212,7 +225,7 @@ ToolboxDB = {
 - **迁移逻辑必须幂等**：重复执行结果不变；用 nil 检查或专用 `_migrated` 标记防止重跑。
 - **废弃键在同次迁移中置 nil**：不留到"下次再清"——旧键会永久占用玩家的 SavedVariables 文件。
 - **`ToolboxDB.version`** 用于不可幂等的一次性结构重命名；每次此类迁移时递增，并在 `ver < N` 块中执行；已迁移的 SV 不会重跑。
-- **模块级迁移**：字段范围较小的迁移可在 `DB.Init()` 单独的 `do…end` 块中处理，无需递增全局 `version`（见 `ej_mount_filter.debugChat → debug`、`mover._micromenuMerged` 等现有模式）。
+- **模块级迁移**：字段范围较小的迁移可在 `DB.Init()` 单独的 `do…end` 块中处理，无需递增全局 `version`（见 `encounter_journal.questlineTreeExpanded → questlineTreeCollapsed`、`mover._micromenuMerged` 等现有模式）。
 - **禁止在模块文件顶层**（非函数体内）读写 `ToolboxDB`：SavedVariables 在 `ADDON_LOADED` 之后才可用，顶层执行时 `ToolboxDB` 可能仍是 `nil`。
 
 ### Settings API 注册规范
@@ -289,20 +302,35 @@ ToolboxDB = {
 | **模块** | `chat_notify`：是否输出、旧档迁移、`Locales` 文案键；`PrintLoadComplete()` 组装正文后调用 `Toolbox.Chat.PrintAddonMessage`。 |
 | **调用时机** | `Core/Bootstrap.lua` 在 `ADDON_LOADED` 主流程末尾（DB、语言、模块 OnModuleLoad、设置 UI、斜杠注册之后）调用 `PrintLoadComplete()`，避免 `OnModuleLoad` + `C_Timer` 间接触发。 |
 
+### 5.6 冒险指南增强（encounter_journal）
+
+| 项 | 说明 |
+|----|------|
+| **目标** | 在不替换暴雪冒险指南主框架的前提下，增强副本列表、详情页、任务浏览与外部入口摘要。 |
+| **模块归属** | 主体 UI 与 hook 落在 `Modules/EncounterJournal.lua`；小地图“冒险手册”飞出项落在 `Modules/MinimapButton.lua`。 |
+| **领域对外 API** | `Toolbox.EJ` 负责锁定、坐骑掉落和锁定摘要；`Toolbox.Questlines` 负责任务线静态结构、运行时任务字段和三视图聚合。 |
+| **列表增强** | 提供“仅坐骑”筛选、列表行内 CD 叠加、悬停锁定详情。 |
+| **详情页增强** | 在掉落页提供“仅坐骑”筛选；在详情页标题区域显示当前难度的重置时间。 |
+| **任务页签** | 新增“任务”页签，支持 `状态 / 类型 / 地图` 三视图，记录视图模式、选中项和折叠状态；设置页可调整冒险指南根页签顺序与显隐。 |
+| **外部入口** | 小地图飞出菜单中的“冒险手册”项和 `EJMicroButton` tooltip 都会显示当前副本锁定摘要。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
+
 ---
 
 ## 6. TOC 与加载顺序（建议）
 
-1. `Core/Foundation/Namespace.lua` — 根表  
-2. `Core/Foundation/Locales.lua` — `Toolbox.L` 多语言（须在 Settings 与 Modules 之前）  
-3. `Core/Foundation/Config.lua` — 默认表、迁移  
-4. `Core/API/Chat.lua` — 聊天领域对外 API  
-5. `Core/API/Tooltip.lua` — 提示框领域对外 API（须在 `Modules/TooltipAnchor.lua` 之前）  
-6. `Core/API/Lockouts.lua`、`Core/API/EncounterJournal.lua`、`Core/API/MountJournal.lua`、`Core/API/Item.lua`、`Core/API/Map.lua` — 领域对外 API
-7. `Core/Foundation/ModuleRegistry.lua`
-8. `UI/SettingsHost.lua`
-9. `Modules/Mover.lua`、`Modules/MicroMenuPanels.lua`（兼容委托，无 `RegisterModule`）、`Modules/TooltipAnchor.lua`、`Modules/ChatNotify.lua`（顺序可按依赖微调）
-10. `Core/Foundation/Bootstrap.lua` — `ADDON_LOADED` 中初始化并启用模块
+1. `Core/Foundation/Namespace.lua` — 根表
+2. `Core/Foundation/Runtime.lua` — 运行时适配
+3. `Core/Foundation/Locales.lua` — `Toolbox.L` 多语言（须在 Settings 与 Modules 之前）
+4. `Core/Foundation/Config.lua` — 默认表、迁移
+5. `Core/Foundation/ModuleRegistry.lua` — 模块注册与生命周期
+6. `Core/API/Chat.lua` — 聊天领域对外 API
+7. `Core/API/Tooltip.lua` — 提示框领域对外 API
+8. `Core/API/EncounterJournal.lua`、`Core/API/QuestlineProgress.lua` — 冒险指南与任务线领域对外 API
+9. `UI/SettingsHost.lua`
+10. `Modules/Mover.lua`、`Modules/MicroMenuPanels.lua`、`Modules/TooltipAnchor.lua`、`Modules/ChatNotify.lua`、`Modules/MinimapButton.lua`
+11. `Data/InstanceMapIDs.lua`、`Data/InstanceDrops_Mount.lua`、`Data/QuestTypeNames.lua`、`Data/InstanceQuestlines.lua`
+12. `Modules/EncounterJournal.lua` — 依赖上述 Data 与 API 的冒险指南增强模块
+13. `Core/Foundation/Bootstrap.lua` — `ADDON_LOADED` 中初始化并启用模块
 
 `## Interface:` 与正式服客户端一致，大版本后更新。
 
@@ -353,3 +381,4 @@ ToolboxDB = {
 | 2026-04-08 | 冒险手册锁定摘要增强：小地图悬停菜单内置“冒险手册”项与右下角 `EJMicroButton` tooltip 均追加当前副本锁定摘要（实例/难度/重置时间，团队本含进度）；`Toolbox.EJ` 增加锁定摘要与 tooltip 行构建接口 |
 | 2026-04-10 | 任务线链路对齐：`InstanceQuestlines` 升级并按 schema v3 使用；`QuestlineProgress` 增加 `SetDataOverride`（测试注入）与可恢复容错（坏引用不再导致整页签失效）；补充 `encounter_journal` 任务页签映射说明与离线逻辑测试规范链接 |
 | 2026-04-11 | 任务页签进入多视图阶段：`InstanceQuestlines` 切到 schema v4 DB-shape 文档结构；`Type / NpcIDs / NpcPos` 归入运行时字段层；`Toolbox.Questlines` 负责静态数据 + 动态数据的统一组装；`encounter_journal` 接入状态/类型/地图三视图与新选择状态键 |
+| 2026-04-12 | 按当前代码重写冒险指南相关架构：移除已下线的 `ej_mount_filter` / `dungeon_raid_directory` 表述，对齐 `encounter_journal`、`Toolbox.EJ`、`Toolbox.Questlines`、小地图飞出项与 TOC 实际结构；新增 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md) 作为冒险指南总设计 |

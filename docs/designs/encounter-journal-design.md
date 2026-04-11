@@ -1,0 +1,178 @@
+# 冒险指南设计
+
+- 文档类型：设计
+- 状态：已落地
+- 主题：encounter-journal
+- 适用范围：`encounter_journal`、`minimap_button`、`Toolbox.EJ`、`Toolbox.Questlines`
+- 关联模块：`encounter_journal`、`minimap_button`
+- 关联文档：
+  - `docs/features/encounter-journal-features.md`
+  - `docs/specs/encounter-journal-spec.md`
+  - `docs/plans/encounter-journal-plan.md`
+  - `docs/tests/encounter-journal-test.md`
+  - `docs/FEATURES.md`
+  - `docs/Toolbox-addon-design.md`
+- 最后更新：2026-04-12
+
+## 1. 背景
+
+- 当前冒险指南相关能力已经落在代码中，但说明分散在 `FEATURES.md`、`Toolbox-addon-design.md` 和多份历史规格/计划文档里，且存在与现有代码不一致的表述。
+- 当前实现已经覆盖“副本列表”“副本详情页”“任务页签”“小地图与微型按钮联动”四类场景，需要一份按代码现状收口的总设计文档。
+- 本文以当前仓库代码为唯一事实来源，对现有冒险指南能力做统一设计说明，不再沿用旧模块拆分和旧数据链路表述。
+
+## 2. 设计目标
+
+- 用一份文档完整描述当前冒险指南相关能力、模块归属、数据来源和设置边界。
+- 对齐当前代码实现，避免继续把已合并到 `encounter_journal` 的能力写成独立模块。
+- 为 [FEATURES.md](../FEATURES.md) 和 [Toolbox-addon-design.md](../Toolbox-addon-design.md) 提供统一上游依据。
+
+## 3. 非目标
+
+- 不描述尚未落地的未来功能。
+- 不覆盖与冒险指南无关的 Tooltip、Mover、聊天提示等功能设计。
+- 不保留历史实现阶段的逐步计划细节；这些内容不再作为当前设计事实来源。
+
+## 4. 方案对比
+
+### 4.1 方案 A：按子功能分散维护
+
+- 做法：继续分别维护“仅坐骑”“锁定摘要”“任务页签”“小地图入口”等多份文档。
+- 优点：单篇文档短，局部修改成本低。
+- 风险 / 缺点：容易与代码现状脱节，也容易重复解释同一数据来源和模块边界。
+
+### 4.2 方案 B：按代码现状合并为一份总设计
+
+- 做法：以当前代码实现为准，统一描述 `encounter_journal`、`minimap_button`、`Toolbox.EJ`、`Toolbox.Questlines` 之间的协作。
+- 优点：模块归属、数据来源、用户可见功能都能一次讲清，入口文档也能统一引用。
+- 风险 / 缺点：单篇文档更长，需要控制层次与边界。
+
+### 4.3 选型结论
+
+- 选定方案：方案 B。
+- 选择原因：用户要求“生成冒险指南所有功能的文档，并对齐现有代码”，因此必须由一份总设计统一收口，不能继续依赖分散历史文档。
+
+## 5. 选定方案
+
+### 5.1 功能范围
+
+当前冒险指南设计覆盖以下能力：
+
+1. 副本列表中的“仅坐骑”筛选。
+2. 副本列表中的锁定信息叠加显示与悬停详情。
+3. 副本详情页掉落列表中的“仅坐骑”筛选。
+4. 副本详情页当前难度的重置时间标签。
+5. 冒险指南根页中的“任务”页签，以及 `状态 / 类型 / 地图` 三视图。
+6. 冒险指南根页签顺序与显隐设置。
+7. 小地图悬停菜单中的“冒险手册”入口与锁定摘要。
+8. `EJMicroButton` tooltip 末尾的当前副本锁定摘要。
+
+### 5.2 模块归属
+
+| 能力 | 落点 | 说明 |
+|------|------|------|
+| 副本列表“仅坐骑”筛选 | `Toolbox/Modules/EncounterJournal.lua` | 在副本列表界面创建复选框，并在 `EncounterJournal_ListInstances` 后处理当前列表。 |
+| 副本列表锁定叠加与 tooltip 详情 | `Toolbox/Modules/EncounterJournal.lua` + `Toolbox.EJ` | 列表行内显示重置时间，悬停补充难度、进度和延长状态。 |
+| 副本详情页“仅坐骑”筛选 | `Toolbox/Modules/EncounterJournal.lua` | 仅在掉落页生效，按当前副本的坐骑掉落集合过滤显示。 |
+| 副本详情页重置标签 | `Toolbox/Modules/EncounterJournal.lua` + `Toolbox.EJ` | 读取当前所选难度的锁定数据，展示“重置：xx”。 |
+| 任务页签与三视图 | `Toolbox/Modules/EncounterJournal.lua` + `Toolbox.Questlines` | 模块负责 UI、选择状态与页签接管；领域 API 负责任务模型和运行时字段。 |
+| 任务运行时模型 | `Toolbox/Core/API/QuestlineProgress.lua` | 负责静态结构缓存、任务日志枚举、任务详情和各视图聚合。 |
+| 副本锁定查询与摘要拼装 | `Toolbox/Core/API/EncounterJournal.lua` | 负责当前角色副本锁定汇总、难度匹配、坐骑掉落集合和 tooltip 文本拼装。 |
+| 小地图“冒险手册”入口 | `Toolbox/Modules/MinimapButton.lua` | 内置飞出项，点击后加载并打开 `Blizzard_EncounterJournal`。 |
+| `EJMicroButton` tooltip 锁定摘要 | `Toolbox/Modules/EncounterJournal.lua` | 在右下角微型按钮 tooltip 末尾追加当前锁定摘要，与小地图摘要同源。 |
+
+### 5.3 数据来源
+
+| 数据 | 来源 | 用途 |
+|------|------|------|
+| 坐骑掉落映射 | `Toolbox.Data.MountDrops` | 判断某个冒险指南副本是否存在坐骑掉落，并构建详情页“仅坐骑”物品集合。 |
+| 冒险指南副本到地图 ID 映射 | `Toolbox.Data.InstanceMapIDs` | 将 `GetSavedInstanceInfo` 返回的实例 ID 反查为 `journalInstanceID`。 |
+| 任务线静态结构 | `Toolbox.Data.InstanceQuestlines` | 提供任务线、地图、任务链路等稳定 DB 结构。 |
+| 任务类型名称 | `Toolbox.Data.QuestTypeNames` | 为任务页签的类型视图提供静态类型名映射。 |
+| 角色副本锁定 | `GetNumSavedInstances` / `GetSavedInstanceInfo` | 生成副本列表叠加文案、详情页重置标签和两处锁定摘要。 |
+| 任务日志运行时字段 | `C_QuestLog.*` / 兼容 API | 提供任务名、任务状态、可交付状态、任务类型、当前任务列表等运行时信息。 |
+
+### 5.4 用户可见行为
+
+#### 5.4.1 副本列表
+
+- 当当前根页签处于地下城或团队副本列表时，列表上方出现“仅坐骑”复选框。
+- 勾选后，仅保留当前列表中可掉落坐骑的副本。
+- 开启“显示副本 CD”时，列表行内会直接显示重置时间；团队副本同时显示首领进度。
+- 鼠标悬停副本列表项时，tooltip 会补充当前角色的锁定难度、进度、精确重置时间和延长状态。
+
+#### 5.4.2 副本详情页
+
+- 在掉落页内可切换“仅坐骑”，只保留当前副本掉落列表中的坐骑物品。
+- 详情页标题区会显示当前选中难度的重置时间；若当前难度没有锁定，则显示“重置：无”。
+
+#### 5.4.3 任务页签
+
+- 在冒险指南根页签中新增“任务”页签。
+- 任务页签支持 `状态 / 类型 / 地图` 三视图。
+- `状态` 视图左侧显示当前任务日志中的“当前任务”列表，右侧显示所选任务所属的完整任务线；没有任务线映射时回退为任务详情。
+- `类型` 与 `地图` 视图继续按统一模型组织任务、任务线与详情区。
+- 模块记忆视图模式、选中项和树节点折叠状态；任务模型改为“静态结构缓存 + 动态字段按需查询”。
+- 设置页提供冒险指南主页页签顺序与显隐编辑器，支持拖拽排序、即时显隐和恢复默认顺序。
+
+#### 5.4.4 外部入口与摘要
+
+- 小地图按钮飞出菜单内置“冒险手册”入口，点击可直接打开冒险指南。
+- 小地图“冒险手册”入口 tooltip 末尾会追加当前角色副本锁定摘要。
+- 右下角 `EJMicroButton` 的 tooltip 也会追加同源锁定摘要。
+
+### 5.5 设置与存档
+
+冒险指南功能统一落在 `ToolboxDB.modules.encounter_journal`，当前主要字段包括：
+
+- `mountFilterEnabled`
+- `lockoutOverlayEnabled`
+- `detailMountOnlyEnabled`
+- `questlineTreeEnabled`
+- `questlineTreeCollapsed`
+- `questlineTreeSelection`
+- `questViewMode`
+- `questViewSelectedMapID`
+- `questViewSelectedTypeID`
+- `questViewSelectedQuestLineID`
+- `questViewSelectedQuestID`
+- `rootTabOrderIds`
+- `rootTabHiddenIds`
+
+这些字段分别对应列表筛选、锁定叠加、详情页过滤、任务页签开关、三视图浏览状态与根页签排序设置。旧的 `ej_mount_filter` 与 `dungeon_raid_directory` 相关存档已迁移或清理，不再作为当前设计的一部分。
+
+## 6. 影响面
+
+- 数据与存档：
+  `ToolboxDB.modules.encounter_journal` 保存所有冒险指南设置与浏览状态；`minimap_button` 仅保存小地图按钮与飞出菜单本身的配置。
+- API 与模块边界：
+  `encounter_journal` 负责界面、交互与 hook，`Toolbox.EJ` 负责锁定与坐骑查询，`Toolbox.Questlines` 负责任务模型与运行时字段。
+- 文件与目录：
+  关键代码文件为 `Toolbox/Modules/EncounterJournal.lua`、`Toolbox/Modules/MinimapButton.lua`、`Toolbox/Core/API/EncounterJournal.lua`、`Toolbox/Core/API/QuestlineProgress.lua`。
+- 文档回写：
+  [FEATURES.md](../FEATURES.md) 只保留产品向能力说明，[Toolbox-addon-design.md](../Toolbox-addon-design.md) 只保留长期架构与模块映射。
+
+## 7. 风险与回退
+
+- 风险：
+  Blizzard 可能调整冒险指南 Frame 名称、函数名或 tooltip 行为，导致 hook 和控件锚点失效。
+- 风险：
+  静态数据表与运行时 API 若出现版本偏差，会影响坐骑筛选和任务线展示完整性。
+- 风险：
+  任务页签依赖 `C_QuestLog` 运行时数据，部分任务可能没有可识别类型或没有任务线映射。
+- 回退或缓解方式：
+  各子能力均受模块总开关和对应设置控制；当某项能力失效时，可单独关闭该子开关而不影响其它冒险指南增强。
+
+## 8. 验证策略
+
+- 逻辑验证：
+  运行 `python tests/run_all.py --ci`，确认静态校验与 `tests/logic/spec` 中的冒险指南相关用例通过。
+- 游戏内验证：
+  检查副本列表“仅坐骑”、CD 叠加、tooltip 详情、详情页“仅坐骑”、详情页重置标签、任务页签三视图、根页签排序设置、小地图与 `EJMicroButton` 锁定摘要是否均可用。
+- 文档验证：
+  `FEATURES.md`、`Toolbox-addon-design.md` 与本文件的模块归属、数据来源和能力边界必须保持一致。
+
+## 9. 修订记录
+
+| 日期 | 内容 |
+|------|------|
+| 2026-04-12 | 首版：按当前代码现状归并冒险指南全部能力，统一模块归属、数据来源与入口说明 |
