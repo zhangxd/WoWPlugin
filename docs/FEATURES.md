@@ -1,221 +1,104 @@
-# Toolbox 功能说明
+# Toolbox 可用功能
 
-> 定位：本文件只维护插件的产品能力总览与稳定特性说明。
+> 定位：本文件只维护插件当前已经可用、可直接使用的功能说明，面向玩家与需求方阅读。
 >
-> 边界：单次需求、设计方案、实施计划、测试记录不得写入本文件；这些内容分别写入 `docs/specs/`、`docs/designs/`、`docs/plans/`、`docs/tests/`，并遵循 [DOCS-STANDARD.md](./DOCS-STANDARD.md)。
+> 边界：单次需求、设计方案、实施计划、测试记录、架构细节、开发接入说明与示例代码不得写入本文件；这些内容分别写入对应文档，并遵循 [DOCS-STANDARD.md](./DOCS-STANDARD.md)。
+>
+> 相关文档：
+> 架构与模块映射见 [Toolbox-addon-design.md](./Toolbox-addon-design.md)
+> 文档写作规范见 [DOCS-STANDARD.md](./DOCS-STANDARD.md)
 
-## 核心功能
+## 这是什么
 
-### 1. 冒险指南增强（EncounterJournal）
+`Toolbox` 是一个面向魔兽世界正式服的工具箱插件，当前重点增强以下几类体验：
 
-**坐骑筛选**
-- 在冒险指南副本列表中添加"仅坐骑"复选框
-- 快速筛选掉落坐骑的副本
-- 支持所有资料片的副本
+- 冒险指南浏览
+- Tooltip 显示位置
+- 插件消息输出
+- 小地图快捷入口
+- 插件设置与模块开关
 
-**副本 CD 显示**
-- 在副本列表中直接显示锁定信息
-- 显示难度、进度、剩余重置时间
-- 鼠标悬停显示详细信息：
-  - 已击杀的首领列表
-  - 精确的重置时间
-  - 扩展状态
+## 怎么打开
 
-**任务页签多视图**
-- 在冒险手册根页签中增加“任务”页签
-- 支持 `状态 / 类型 / 地图` 三种视图切换
-- 左侧地图树可按地图过滤任务与任务线
-- 类型视图的 `typeID` 由运行时 `C_QuestLog.GetQuestType(questID)` 获取
-- 任务详情、任务线详情、地图详情使用统一领域模型
+你可以通过以下方式使用或进入设置：
 
-**技术特性**
-- 事件驱动架构，无性能损耗
-- 自动过滤已过期的锁定
-- 支持多难度副本
+- 输入命令：`/toolbox`
+- 从游戏设置面板打开插件配置
+- 使用小地图按钮快速进入
 
-### 2. Tooltip 增强
+## 当前可用功能
 
-**位置优化**
-- 智能定位，避免遮挡游戏界面
-- 支持自定义锚点位置
-- 自动调整显示位置
+### 冒险指南增强
 
-### 3. 聊天增强
+适用场景：想更快查看副本坐骑、锁定信息和任务线内容时。
 
-**加载提示与统一输出**
+当前包含：
+
+- **仅坐骑筛选**
+  在冒险指南副本列表中提供“仅坐骑”筛选，方便快速定位掉落坐骑的副本。
+- **副本锁定信息显示**
+  在副本列表中直接显示锁定状态，包括难度、进度和剩余重置时间。
+- **锁定详情悬停查看**
+  鼠标悬停时可查看更详细的锁定信息，例如已击杀首领和更精确的重置时间。
+- **任务页签多视图**
+  在冒险手册根页签中增加“任务”页签，并支持 `状态 / 类型 / 地图` 三种浏览方式。
+- **地图树过滤**
+  左侧地图树可按地图筛选任务与任务线，方便缩小浏览范围。
+
+### Tooltip 增强
+
+适用场景：默认提示框容易挡住界面，或者希望提示框跟随更稳定时。
+
+当前包含：
+
+- 支持自定义提示框锚点位置
+- 优化提示框显示位置，尽量减少遮挡
+- 支持更稳定的提示框跟随与偏移控制
+
+### 聊天增强
+
+适用场景：希望插件消息输出更统一、加载提示更清晰时。
+
+当前包含：
+
 - 插件加载完成后可在默认聊天框输出提示
-- 模块统一通过 `Toolbox.Chat` 输出消息
-- 颜色与文案走统一领域 API 和本地化表
+- 插件消息走统一样式与前缀
+- 中英文文案统一走本地化表
 
-### 4. 小地图按钮
+### 小地图按钮
 
-**快速访问**
-- 一键打开设置面板
-- 显示模块启用状态
-- 支持拖拽调整位置
-- 悬停“冒险手册”菜单项时，tooltip 显示当前副本 CD 摘要（实例、难度、重置时间；团队本含进度）
+适用场景：希望快速进入插件设置或查看冒险指南相关摘要时。
 
-## 模块化架构
+当前包含：
 
-### 三层架构
+- 一键打开插件设置
+- 支持拖拽调整按钮位置
+- 悬停可查看扩展功能项
+- 悬停“冒险手册”相关入口时，可查看当前副本 CD 摘要
 
-```
-Data（数据层）
-  ↓
-Core API（核心 API 层）
-  ↓
-Modules（功能模块层）
-```
+### 设置与模块开关
 
-**Data 层**
-- 静态数据表（副本映射、掉落数据、任务线关系文档）
-- 只读，不包含逻辑
+适用场景：希望按需启用、关闭或调整各项功能时。
 
-**Core API 层**
-- 封装 WoW 原生 API
-- 提供统一的高层接口
-- 命名空间：`Toolbox.EJ`、`Toolbox.Chat`、`Toolbox.Tooltip`、`Toolbox.Questlines`
+当前包含：
 
-**Modules 层**
-- 独立的功能模块
-- 可单独启用/禁用
-- 通过 `Toolbox.RegisterModule` 注册
+- 每个模块都有独立设置页
+- 支持公共启用/禁用开关
+- 支持恢复默认值或重建相关配置
 
-**任务页签字段分层**
-- 静态导出层只保留稳定 DB 字段
-- 运行时字段（任务名、状态、类型等）由 `Toolbox.Questlines` 获取
-- UI 最终消费统一 `QuestEntry` 模型，而不是直接拼装静态数据
+## 适用环境
 
-## 配置系统
+- **WoW 版本**：12.0+（The War Within）
+- **客户端**：国服 / 美服 / 欧服
+- **语言**：简体中文、英文
 
-### 存档结构
+## 当前限制
 
-```lua
-ToolboxDB = {
-  modules = {
-    encounter_journal = {
-      enabled = true,
-      mountFilterEnabled = true,
-      lockoutOverlayEnabled = true,
-      questViewMode = "status"
-    },
-    -- 其他模块...
-  }
-}
-```
-
-### 设置界面
-
-- 游戏内设置面板：`/toolbox`
-- 每个模块独立的设置页
-- 支持重置为默认值
-
-## 性能优化
-
-### 事件驱动
-- 使用游戏事件触发更新
-- 移除 OnUpdate 轮询
-- 防抖机制避免重复刷新
-
-### 缓存机制
-- ScrollBox 缓存（5 秒 TTL）
-- 减少重复查询
-- 智能失效策略
-
-### 内存管理
-- 弱引用表管理 Hook
-- 自动清理过期数据
-- 最小化全局变量
-
-## 开发指南
-
-### 添加新模块
-
-1. 在 `Toolbox/Modules/` 创建模块文件
-2. 使用 `Toolbox.RegisterModule` 注册
-3. 在 `Toolbox.toc` 中添加文件引用
-
-```lua
-Toolbox.RegisterModule({
-  id = "my_module",
-  nameKey = "MODULE_MY_MODULE",
-  settingsIntroKey = "MODULE_MY_MODULE_INTRO",
-  settingsOrder = 100,
-  
-  OnModuleLoad = function()
-    -- 初始化逻辑
-  end,
-  
-  OnModuleEnable = function()
-    -- 启用逻辑
-  end,
-  
-  RegisterSettings = function(box)
-    -- 创建设置 UI
-  end,
-})
-```
-
-### 使用 Core API
-
-```lua
--- 查询副本锁定
-local lockouts = Toolbox.EJ.GetAllLockoutsForInstance(journalInstanceID)
-
--- 查询已击杀首领
-local bosses = Toolbox.EJ.GetKilledBosses(journalInstanceID)
-
--- 检查副本是否掉落坐骑
-local hasMounts = Toolbox.EJ.HasMountDrops(journalInstanceID)
-
--- 获取当前角色的副本锁定摘要（按剩余时间排序）
-local summary = Toolbox.EJ.GetSavedInstanceLockoutSummary()
-
--- 构建用于 tooltip 展示的锁定行文本
-local lines, overflow = Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines(8)
-
--- 打印消息到聊天
-Toolbox.Chat.PrintAddonMessage("消息内容")
-```
-
-## 本地化
-
-### 添加新字符串
-
-在 `Toolbox/Core/Locales.lua` 中添加：
-
-```lua
-Toolbox.L = {
-  -- 英文（默认）
-  MY_STRING = "My String",
-  
-  -- 简体中文
-  ["zhCN"] = {
-    MY_STRING = "我的字符串",
-  },
-}
-```
-
-### 使用本地化字符串
-
-```lua
-local loc = Toolbox.L or {}
-print(loc.MY_STRING)
-```
-
-## 兼容性
-
-- **WoW 版本**: 12.0+ (The War Within)
-- **客户端**: 国服/美服/欧服
-- **语言**: 简体中文、英文
-
-## 已知限制
-
-1. 副本 CD 显示依赖 `GetSavedInstanceInfo` API
-2. 坐骑筛选需要静态数据表维护
-3. 任务类型依赖运行时 `C_QuestLog.GetQuestType(questID)`，静态数据层不缓存该字段
-4. 部分功能需要 `Blizzard_EncounterJournal` 插件加载
+- 副本 CD 显示依赖游戏原生 `GetSavedInstanceInfo` API
+- 坐骑筛选依赖静态数据表维护
+- 任务页签中的类型信息依赖游戏运行时任务数据，个别任务可能没有可识别类型
+- 部分功能需要 `Blizzard_EncounterJournal` 插件已加载
 
 ## 更新日志
 
-见 [release.md](release.md)
+详见 [release.md](./release.md)
