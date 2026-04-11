@@ -942,6 +942,71 @@ local function resolveDefaultMapID(questTabModel, selectedView)
   return mapList[1] and mapList[1].id or nil
 end
 
+local function resolveTypeEntryID(typeEntry)
+  if type(typeEntry) == "number" then
+    return typeEntry
+  end
+  if type(typeEntry) == "table" and type(typeEntry.id) == "number" then
+    return typeEntry.id
+  end
+  return nil
+end
+
+local function resolveTypeEntryName(typeEntry)
+  if type(typeEntry) == "table" and type(typeEntry.name) == "string" and typeEntry.name ~= "" then
+    return typeEntry.name
+  end
+
+  local typeID = resolveTypeEntryID(typeEntry) -- 当前类型 ID
+  if type(typeID) == "number"
+    and Toolbox.Questlines
+    and type(Toolbox.Questlines.GetQuestTypeLabel) == "function"
+  then
+    return Toolbox.Questlines.GetQuestTypeLabel(typeID)
+  end
+  return nil
+end
+
+local function listContainsTypeID(typeList, typeID)
+  if type(typeList) ~= "table" or type(typeID) ~= "number" then
+    return false
+  end
+
+  for _, typeEntry in ipairs(typeList) do
+    if resolveTypeEntryID(typeEntry) == typeID then
+      return true
+    end
+  end
+  return false
+end
+
+local function getFirstTypeID(typeList)
+  if type(typeList) ~= "table" then
+    return nil
+  end
+
+  for _, typeEntry in ipairs(typeList) do
+    local typeID = resolveTypeEntryID(typeEntry) -- 当前类型 ID
+    if type(typeID) == "number" then
+      return typeID
+    end
+  end
+  return nil
+end
+
+local function findTypeEntryByID(typeList, typeID)
+  if type(typeList) ~= "table" or type(typeID) ~= "number" then
+    return nil
+  end
+
+  for _, typeEntry in ipairs(typeList) do
+    if resolveTypeEntryID(typeEntry) == typeID then
+      return typeEntry
+    end
+  end
+  return nil
+end
+
 function QuestlineTreeView:resolveSelectionWithModel(questTabModel)
   local mapList = questTabModel and questTabModel.maps or nil -- 地图列表
   if type(mapList) ~= "table" or #mapList == 0 then
@@ -988,8 +1053,8 @@ function QuestlineTreeView:resolveSelectionWithModel(questTabModel)
       return
     end
 
-    if not listContainsNumber(typeList, self.selectedTypeID) then
-      self.selectedTypeID = typeList[1]
+    if not listContainsTypeID(typeList, self.selectedTypeID) then
+      self.selectedTypeID = getFirstTypeID(typeList)
       self.selectedMapID = nil
       self.selectedQuestLineID = nil
       self.selectedQuestID = nil
@@ -1068,6 +1133,28 @@ function QuestlineTreeView:resolveSelectionWithModel(questTabModel)
   end
 end
 
+local function resolveQuestLineDisplayName(questLineEntry)
+  if type(questLineEntry) ~= "table" then
+    return nil
+  end
+
+  local questLineID = type(questLineEntry.id) == "number" and questLineEntry.id or nil -- 当前任务线 ID
+  if type(questLineID) == "number"
+    and Toolbox.Questlines
+    and type(Toolbox.Questlines.GetQuestLineDisplayName) == "function"
+  then
+    local displayName, errorObject = Toolbox.Questlines.GetQuestLineDisplayName(questLineID) -- 任务线显示名
+    if not errorObject and type(displayName) == "string" and displayName ~= "" then
+      return displayName
+    end
+  end
+
+  if type(questLineEntry.name) == "string" and questLineEntry.name ~= "" then
+    return questLineEntry.name
+  end
+  return nil
+end
+
 function QuestlineTreeView:buildQuestlineTreeRows(questTabModel)
   local localeTable = Toolbox.L or {} -- 本地化文案
   local rowList = {} -- 左侧树行列表
@@ -1117,7 +1204,8 @@ function QuestlineTreeView:buildQuestlineTreeRows(questTabModel)
         local questLineCollapsed = isTreeNodeCollapsed(collapseState, questLineCollapseKey) -- 任务线折叠状态
         local questLinePrefix = questLineCollapsed and "+" or "-" -- 任务线展开前缀
         local questLineSelected = self.selectedKind == "questline" and self.selectedQuestLineID == questLineID
-        local questLineText = string.format("%s %s", questLinePrefix, questLineEntry.name or ("QuestLine #" .. tostring(questLineID or "?")))
+        local questLineName = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(questLineID or "?")) -- 当前任务线显示名
+        local questLineText = string.format("%s %s", questLinePrefix, questLineName)
         if (not questLineCollapsed or questLineSelected)
           and Toolbox.Questlines
           and type(Toolbox.Questlines.GetQuestLineProgress) == "function"
@@ -1289,7 +1377,7 @@ collectStatusQuestEntries = function(questTabModel)
                 questID = questEntry.id,
                 questName = questEntry.name,
                 questLineID = questLineID,
-                questLineName = questLineEntry.name,
+                questLineName = resolveQuestLineDisplayName(questLineEntry),
                 mapID = mapID,
                 status = questEntry.status,
                 readyForTurnIn = questEntry.readyForTurnIn == true,
@@ -1398,6 +1486,7 @@ function QuestlineTreeView:buildTypeViewRows(questTabModel)
       }
     end
     for _, questLineEntry in ipairs(questLineList) do
+      local questLineName = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(questLineEntry.id or "?")) -- 当前任务线显示名
       if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestListByQuestLineID) == "function" then
         local questList, queryListError = Toolbox.Questlines.GetQuestListByQuestLineID(questLineEntry.id) -- 当前任务线任务列表
         if not queryListError and type(questList) == "table" then
@@ -1405,7 +1494,7 @@ function QuestlineTreeView:buildTypeViewRows(questTabModel)
             if questEntry.typeID == self.selectedTypeID then
               local questID = questEntry.id -- 当前任务 ID
               rightRows[#rightRows + 1] = {
-                text = string.format("%s [%s] %s", formatQuestStatusPrefix(questEntry.status), questLineEntry.name or ("QuestLine #" .. tostring(questLineEntry.id or "?")), questEntry.name or ("Quest #" .. tostring(questID or "?"))),
+                text = string.format("%s [%s] %s", formatQuestStatusPrefix(questEntry.status), questLineName, questEntry.name or ("Quest #" .. tostring(questID or "?"))),
                 questID = questID,
                 status = questEntry.status,
                 selected = self.selectedKind == "quest" and self.selectedQuestID == questID,
@@ -1429,72 +1518,76 @@ function QuestlineTreeView:buildTypeViewRows(questTabModel)
     return rightRows
   end
 
-  for _, typeID in ipairs(typeList) do
-    local typeLabel = Toolbox.Questlines.GetQuestTypeLabel(typeID) -- 类型展示名
-    local isSelectedType = self.selectedTypeID == typeID -- 是否当前选中类型
-    rightRows[#rightRows + 1] = {
-      text = string.format("%s %s", isSelectedType and "-" or "+", typeLabel),
-      onClick = function()
-        self.selectedTypeID = typeID
-        self.selectedKind = "type"
-        self.selectedMapID = nil
-        self.selectedQuestLineID = nil
-        self.selectedQuestID = nil
-      end,
-    }
+  for _, typeEntry in ipairs(typeList) do
+    local typeID = resolveTypeEntryID(typeEntry) -- 当前类型 ID
+    local typeLabel = resolveTypeEntryName(typeEntry) or ("Type #" .. tostring(typeID or "?")) -- 类型展示名
+    if type(typeID) == "number" then
+      local isSelectedType = self.selectedTypeID == typeID -- 是否当前选中类型
+      rightRows[#rightRows + 1] = {
+        text = string.format("%s %s", isSelectedType and "-" or "+", typeLabel),
+        onClick = function()
+          self.selectedTypeID = typeID
+          self.selectedKind = "type"
+          self.selectedMapID = nil
+          self.selectedQuestLineID = nil
+          self.selectedQuestID = nil
+        end,
+      }
 
-    if isSelectedType then
-      local typeMapList = typeIndexModel and typeIndexModel.typeToMapIDs and typeIndexModel.typeToMapIDs[typeID] or {} -- 当前类型地图列表
-      if type(typeMapList) == "table" and #typeMapList > 0 then
-        for _, mapID in ipairs(typeMapList) do
-          local mapEntry = questTabModel.mapByID and questTabModel.mapByID[mapID] or nil -- 当前地图
-          local mapText = (mapEntry and mapEntry.name) or ("Map #" .. tostring(mapID or "?"))
-          local mapSelected = self.selectedMapID == mapID -- 地图是否选中
-          rightRows[#rightRows + 1] = {
-            text = string.format("  %s %s", mapSelected and "-" or "+", mapText),
-            onClick = function()
-              self.selectedTypeID = typeID
-              self.selectedKind = "map"
-              self.selectedMapID = mapID
-              self.selectedQuestLineID = nil
-              self.selectedQuestID = nil
-            end,
-          }
+      if isSelectedType then
+        local typeMapList = typeIndexModel and typeIndexModel.typeToMapIDs and typeIndexModel.typeToMapIDs[typeID] or {} -- 当前类型地图列表
+        if type(typeMapList) == "table" and #typeMapList > 0 then
+          for _, mapID in ipairs(typeMapList) do
+            local mapEntry = questTabModel.mapByID and questTabModel.mapByID[mapID] or nil -- 当前地图
+            local mapText = (mapEntry and mapEntry.name) or ("Map #" .. tostring(mapID or "?"))
+            local mapSelected = self.selectedMapID == mapID -- 地图是否选中
+            rightRows[#rightRows + 1] = {
+              text = string.format("  %s %s", mapSelected and "-" or "+", mapText),
+              onClick = function()
+                self.selectedTypeID = typeID
+                self.selectedKind = "map"
+                self.selectedMapID = mapID
+                self.selectedQuestLineID = nil
+                self.selectedQuestID = nil
+              end,
+            }
 
-          if mapSelected then
-            for _, questLineEntry in ipairs(buildQuestLineListForType(questTabModel, typeIndexModel, typeID, mapID)) do
-              local questLineSelected = self.selectedQuestLineID == questLineEntry.id -- 当前任务线是否选中
-              rightRows[#rightRows + 1] = {
-                text = string.format("    %s %s", questLineSelected and "-" or "+", questLineEntry.name or ("QuestLine #" .. tostring(questLineEntry.id or "?"))),
-                onClick = function()
-                  self.selectedTypeID = typeID
-                  self.selectedKind = "questline"
-                  self.selectedMapID = mapID
-                  self.selectedQuestLineID = questLineEntry.id
-                  self.selectedQuestID = nil
-                end,
-              }
+            if mapSelected then
+              for _, questLineEntry in ipairs(buildQuestLineListForType(questTabModel, typeIndexModel, typeID, mapID)) do
+                local questLineSelected = self.selectedQuestLineID == questLineEntry.id -- 当前任务线是否选中
+                local questLineName = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(questLineEntry.id or "?")) -- 当前任务线显示名
+                rightRows[#rightRows + 1] = {
+                  text = string.format("    %s %s", questLineSelected and "-" or "+", questLineName),
+                  onClick = function()
+                    self.selectedTypeID = typeID
+                    self.selectedKind = "questline"
+                    self.selectedMapID = mapID
+                    self.selectedQuestLineID = questLineEntry.id
+                    self.selectedQuestID = nil
+                  end,
+                }
 
-              if questLineSelected then
-                if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestListByQuestLineID) == "function" then
-                  local questList, queryListError = Toolbox.Questlines.GetQuestListByQuestLineID(questLineEntry.id) -- 当前任务线任务列表
-                  if not queryListError and type(questList) == "table" then
-                    for _, questEntry in ipairs(questList) do
-                      if questEntry.typeID == typeID then
-                        local questID = questEntry.id -- 当前任务 ID
-                        rightRows[#rightRows + 1] = {
-                          text = string.format("      %s %s", formatQuestStatusPrefix(questEntry.status), questEntry.name or ("Quest #" .. tostring(questID or "?"))),
-                          questID = questID,
-                          status = questEntry.status,
-                          selected = self.selectedKind == "quest" and self.selectedQuestID == questID,
-                          onClick = function()
-                            self.selectedTypeID = typeID
-                            self.selectedKind = "quest"
-                            self.selectedMapID = mapID
-                            self.selectedQuestLineID = questLineEntry.id
-                            self.selectedQuestID = questID
-                          end,
-                        }
+                if questLineSelected then
+                  if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestListByQuestLineID) == "function" then
+                    local questList, queryListError = Toolbox.Questlines.GetQuestListByQuestLineID(questLineEntry.id) -- 当前任务线任务列表
+                    if not queryListError and type(questList) == "table" then
+                      for _, questEntry in ipairs(questList) do
+                        if questEntry.typeID == typeID then
+                          local questID = questEntry.id -- 当前任务 ID
+                          rightRows[#rightRows + 1] = {
+                            text = string.format("      %s %s", formatQuestStatusPrefix(questEntry.status), questEntry.name or ("Quest #" .. tostring(questID or "?"))),
+                            questID = questID,
+                            status = questEntry.status,
+                            selected = self.selectedKind == "quest" and self.selectedQuestID == questID,
+                            onClick = function()
+                              self.selectedTypeID = typeID
+                              self.selectedKind = "quest"
+                              self.selectedMapID = mapID
+                              self.selectedQuestLineID = questLineEntry.id
+                              self.selectedQuestID = questID
+                            end,
+                          }
+                        end
                       end
                     end
                   end
@@ -1502,41 +1595,42 @@ function QuestlineTreeView:buildTypeViewRows(questTabModel)
               end
             end
           end
-        end
-      else
-        for _, questLineEntry in ipairs(buildQuestLineListForType(questTabModel, typeIndexModel, typeID, nil)) do
-          local questLineSelected = self.selectedQuestLineID == questLineEntry.id -- 当前任务线是否选中
-          rightRows[#rightRows + 1] = {
-            text = string.format("  %s %s", questLineSelected and "-" or "+", questLineEntry.name or ("QuestLine #" .. tostring(questLineEntry.id or "?"))),
-            onClick = function()
-              self.selectedTypeID = typeID
-              self.selectedKind = "questline"
-              self.selectedMapID = nil
-              self.selectedQuestLineID = questLineEntry.id
-              self.selectedQuestID = nil
-            end,
-          }
+        else
+          for _, questLineEntry in ipairs(buildQuestLineListForType(questTabModel, typeIndexModel, typeID, nil)) do
+            local questLineSelected = self.selectedQuestLineID == questLineEntry.id -- 当前任务线是否选中
+            local questLineName = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(questLineEntry.id or "?")) -- 当前任务线显示名
+            rightRows[#rightRows + 1] = {
+              text = string.format("  %s %s", questLineSelected and "-" or "+", questLineName),
+              onClick = function()
+                self.selectedTypeID = typeID
+                self.selectedKind = "questline"
+                self.selectedMapID = nil
+                self.selectedQuestLineID = questLineEntry.id
+                self.selectedQuestID = nil
+              end,
+            }
 
-          if questLineSelected then
-            if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestListByQuestLineID) == "function" then
-              local questList, queryListError = Toolbox.Questlines.GetQuestListByQuestLineID(questLineEntry.id) -- 当前任务线任务列表
-              if not queryListError and type(questList) == "table" then
-                for _, questEntry in ipairs(questList) do
-                  if questEntry.typeID == typeID then
-                    local questID = questEntry.id -- 当前任务 ID
-                    rightRows[#rightRows + 1] = {
-                      text = string.format("    %s %s", formatQuestStatusPrefix(questEntry.status), questEntry.name or ("Quest #" .. tostring(questID or "?"))),
-                      questID = questID,
-                      status = questEntry.status,
-                      selected = self.selectedKind == "quest" and self.selectedQuestID == questID,
-                      onClick = function()
-                        self.selectedTypeID = typeID
-                        self.selectedKind = "quest"
-                        self.selectedMapID = nil
-                        self.selectedQuestLineID = questLineEntry.id
-                        self.selectedQuestID = questID
-                      end,
-                    }
+            if questLineSelected then
+              if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestListByQuestLineID) == "function" then
+                local questList, queryListError = Toolbox.Questlines.GetQuestListByQuestLineID(questLineEntry.id) -- 当前任务线任务列表
+                if not queryListError and type(questList) == "table" then
+                  for _, questEntry in ipairs(questList) do
+                    if questEntry.typeID == typeID then
+                      local questID = questEntry.id -- 当前任务 ID
+                      rightRows[#rightRows + 1] = {
+                        text = string.format("    %s %s", formatQuestStatusPrefix(questEntry.status), questEntry.name or ("Quest #" .. tostring(questID or "?"))),
+                        questID = questID,
+                        status = questEntry.status,
+                        selected = self.selectedKind == "quest" and self.selectedQuestID == questID,
+                        onClick = function()
+                          self.selectedTypeID = typeID
+                          self.selectedKind = "quest"
+                          self.selectedMapID = nil
+                          self.selectedQuestLineID = questLineEntry.id
+                          self.selectedQuestID = questID
+                        end,
+                      }
+                    end
                   end
                 end
               end
@@ -1998,8 +2092,9 @@ function QuestlineTreeView:render()
     rightRows = self:buildStatusViewRows(questTabModel)
     if self.rightTitle then
       local questLineEntry = type(self.selectedQuestLineID) == "number" and questTabModel.questLineByID and questTabModel.questLineByID[self.selectedQuestLineID] or nil -- 当前任务线对象
-      if type(questLineEntry) == "table" and type(questLineEntry.name) == "string" and questLineEntry.name ~= "" then
-        self.rightTitle:SetText(questLineEntry.name)
+      local questLineName = resolveQuestLineDisplayName(questLineEntry) -- 当前任务线显示名
+      if type(questLineName) == "string" and questLineName ~= "" then
+        self.rightTitle:SetText(questLineName)
       else
         self.rightTitle:SetText(localeTable.EJ_QUEST_VIEW_STATUS or "状态")
       end
@@ -2007,7 +2102,17 @@ function QuestlineTreeView:render()
   elseif self.selectedView == "type" then
     rightRows = self:buildTypeViewRows(questTabModel)
     if self.rightTitle then
-      if type(self.selectedTypeID) == "number" and Toolbox.Questlines and type(Toolbox.Questlines.GetQuestTypeLabel) == "function" then
+      local typeIndexModel = nil -- 类型索引模型
+      local selectedTypeEntry = nil -- 当前选中类型对象
+      local selectedTypeName = nil -- 当前选中类型名称
+      if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestTypeIndex) == "function" then
+        typeIndexModel = Toolbox.Questlines.GetQuestTypeIndex()
+      end
+      selectedTypeEntry = findTypeEntryByID(typeIndexModel and typeIndexModel.typeList or nil, self.selectedTypeID)
+      selectedTypeName = resolveTypeEntryName(selectedTypeEntry)
+      if type(selectedTypeName) == "string" and selectedTypeName ~= "" then
+        self.rightTitle:SetText(selectedTypeName)
+      elseif type(self.selectedTypeID) == "number" and Toolbox.Questlines and type(Toolbox.Questlines.GetQuestTypeLabel) == "function" then
         self.rightTitle:SetText(Toolbox.Questlines.GetQuestTypeLabel(self.selectedTypeID))
       else
         self.rightTitle:SetText(localeTable.EJ_QUEST_VIEW_TYPE or "类型")
@@ -2037,13 +2142,14 @@ function QuestlineTreeView:render()
         for _, questLineEntry in ipairs(questLineList) do
           local progressInfo = nil -- 任务线进度
           local progressError = nil -- 任务线进度查询错误
+          local questLineName = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(questLineEntry.id or "?")) -- 当前任务线显示名
           if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestLineProgress) == "function" then
             progressInfo, progressError = Toolbox.Questlines.GetQuestLineProgress(questLineEntry.id)
           end
           local progressText = formatProgressText(progressInfo, localeTable) or "0/0" -- 任务线进度文本
           local questCount = tonumber(questLineEntry.questCount) or 0 -- 任务数量
           rightRows[#rightRows + 1] = {
-            text = string.format("%s  (%s · %d)", questLineEntry.name or ("QuestLine #" .. tostring(questLineEntry.id or "?")), progressText, questCount),
+            text = string.format("%s  (%s · %d)", questLineName, progressText, questCount),
             onClick = function()
               self.selectedKind = "questline"
               self.selectedQuestLineID = questLineEntry.id

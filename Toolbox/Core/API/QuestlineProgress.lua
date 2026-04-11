@@ -1,9 +1,9 @@
 --[[
   任务线进度领域 API（Toolbox.Questlines）。
   设计目标：
-    1. 以 schema v3（quests/questLines/questLineQuestIDs）作为唯一数据源。
+    1. 兼容 schema v3/v4 的任务线静态数据结构。
     2. 提供 strict 校验、任务页签查询模型与任务详情查询接口。
-    3. 字段名与 wow.db 对齐：ID/Name_lang/UiMapID。
+    3. 字段名与 wow.db 对齐：ID/UiMapID；任务线名称由运行时 API 或注释回溯兜底。
 ]]
 
 Toolbox.Questlines = Toolbox.Questlines or {}
@@ -32,12 +32,17 @@ local progressCache = { -- 地图/任务线进度缓存
   mapByID = {},
   questLineByID = {},
 }
+local questLineNameCache = { -- 任务线显示名缓存
+  runtimeKey = nil,
+  byQuestLineID = {},
+}
 local dataOverrideTable = nil -- 测试框架注入的数据源（nil 表示使用 live 数据）
 
 local getLogIndexForQuestID = C_QuestLog and C_QuestLog.GetLogIndexForQuestID or GetQuestLogIndexByID -- 任务日志索引查询函数
 local isQuestCompletedFn = C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted or IsQuestFlaggedCompleted -- 任务完成状态函数
 local isQuestReadyForTurnInFn = C_QuestLog and C_QuestLog.ReadyForTurnIn or nil -- 任务可交付状态函数
 local getQuestTypeFn = C_QuestLog and C_QuestLog.GetQuestType or nil -- 任务类型函数
+local getQuestTagInfoFn = C_QuestLog and C_QuestLog.GetQuestTagInfo or nil -- 任务类型标签函数
 local getNumQuestLogEntriesFn = C_QuestLog and C_QuestLog.GetNumQuestLogEntries or nil -- Quest Log 条目总数函数
 local getQuestLogInfoFn = C_QuestLog and C_QuestLog.GetInfo or nil -- Quest Log 条目详情函数
 
@@ -66,6 +71,10 @@ local function resetRuntimeCache()
     runtimeKey = nil,
     mapByID = {},
     questLineByID = {},
+  }
+  questLineNameCache = {
+    runtimeKey = nil,
+    byQuestLineID = {},
   }
 end
 
@@ -171,6 +180,32 @@ local function getQuestTypeLabel(typeID)
 
   local fallbackFormat = localeTable.EJ_QUEST_TYPE_UNKNOWN_FMT or "Unknown Type (%s)" -- 未知类型兜底格式
   return string.format(fallbackFormat, tostring(typeID or "?"))
+end
+
+--- 构建未知任务类型兜底名称。
+---@param typeID number|nil
+---@return string
+local function formatUnknownQuestTypeLabel(typeID)
+  local localeTable = Toolbox.L or {} -- 本地化字符串表
+  local fallbackFormat = localeTable.EJ_QUEST_TYPE_UNKNOWN_FMT or "Unknown Type (%s)" -- 未知类型兜底格式
+  return string.format(fallbackFormat, tostring(typeID or "?"))
+end
+
+--- 按任务 ID 查询运行时任务类型名称。
+---@param questID number
+---@param typeID number|nil
+---@return string
+local function getRuntimeQuestTypeName(questID, typeID)
+  if type(questID) == "number" and type(getQuestTagInfoFn) == "function" then
+    local success, tagInfo = pcall(getQuestTagInfoFn, questID) -- 任务类型标签
+    if success and type(tagInfo) == "table" then
+      local tagName = tagInfo.tagName -- 运行时类型名称
+      if type(tagName) == "string" and tagName ~= "" then
+        return tagName
+      end
+    end
+  end
+  return formatUnknownQuestTypeLabel(typeID)
 end
 
 --- 对外暴露任务类型展示名查询。
@@ -453,8 +488,8 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     if questLineEntry.ID ~= questLineID then
       return false, buildValidationError("E_KEY_VALUE_MISMATCH", "questLines[" .. tostring(questLineID) .. "].ID", "ID must match key")
     end
-    if type(questLineEntry.Name_lang) ~= "string" or questLineEntry.Name_lang == "" then
-      return false, buildValidationError("E_MISSING_FIELD", "questLines[" .. tostring(questLineID) .. "].Name_lang", "non-empty string expected")
+    if questLineEntry.Name_lang ~= nil and (type(questLineEntry.Name_lang) ~= "string" or questLineEntry.Name_lang == "") then
+      return false, buildValidationError("E_TYPE_MISMATCH", "questLines[" .. tostring(questLineID) .. "].Name_lang", "non-empty string expected when provided")
     end
     if type(questLineEntry.UiMapID) ~= "number" or questLineEntry.UiMapID <= 0 then
       return false, buildValidationError("E_MISSING_FIELD", "questLines[" .. tostring(questLineID) .. "].UiMapID", "positive number expected")
@@ -776,7 +811,7 @@ local function buildQuestTabModel(dataTable)
       local questIDList = buildQuestIDListByQuestLineID(dataTable, questLineID) -- 任务 ID 列表
       local questLineModel = {
         id = questLineID,
-        name = questLineRecord.Name_lang,
+        name = type(questLineRecord.Name_lang) == "string" and questLineRecord.Name_lang or nil,
         UiMapID = uiMapID,
         questIDs = questIDList,
         questCount = #questIDList,
@@ -837,6 +872,96 @@ function Toolbox.Questlines.GetQuestTabModel()
     typeToQuestLineIDs = {},
     typeToMapIDs = {},
   }, errorObject
+end
+
+--- 获取任务线显示名缓存表。
+---@return table
+local function getQuestLineNameCacheBucket()
+  local runtimeKey = getRuntimeCacheKey() -- 当前运行时缓存键
+  if questLineNameCache.runtimeKey ~= runtimeKey then
+    questLineNameCache.runtimeKey = runtimeKey
+    questLineNameCache.byQuestLineID = {}
+  end
+  return questLineNameCache.byQuestLineID
+end
+
+--- 选择用于查询任务线名称的代表任务 ID。
+---@param questLineEntry table 任务线对象
+---@return number|nil
+local function selectRepresentativeQuestID(questLineEntry)
+  local fallbackQuestID = nil -- 当前任务线回退任务 ID
+  for _, questID in ipairs(questLineEntry and questLineEntry.questIDs or {}) do
+    if type(questID) == "number" then
+      if fallbackQuestID == nil then
+        fallbackQuestID = questID
+      end
+      if isQuestCurrentlyInLog(questID) then
+        return questID
+      end
+    end
+  end
+  return fallbackQuestID
+end
+
+--- 按代表任务查询运行时任务线名称。
+---@param questLineID number 任务线 ID
+---@param questLineEntry table 任务线对象
+---@return string|nil
+local function queryRuntimeQuestLineName(questLineID, questLineEntry)
+  if type(C_QuestLine) ~= "table" or type(C_QuestLine.GetQuestLineInfo) ~= "function" then
+    return nil
+  end
+
+  local representativeQuestID = selectRepresentativeQuestID(questLineEntry) -- 代表任务 ID
+  if type(representativeQuestID) ~= "number" then
+    return nil
+  end
+
+  local success, questLineInfo = pcall(C_QuestLine.GetQuestLineInfo, representativeQuestID, questLineEntry.UiMapID, false) -- 运行时任务线信息
+  if not success or type(questLineInfo) ~= "table" then
+    return nil
+  end
+
+  local runtimeQuestLineID = questLineInfo.questLineID -- 运行时任务线 ID
+  local runtimeQuestLineName = questLineInfo.questLineName -- 运行时任务线名称
+  if type(runtimeQuestLineID) == "number" and runtimeQuestLineID ~= questLineID then
+    return nil
+  end
+  if type(runtimeQuestLineName) ~= "string" or runtimeQuestLineName == "" then
+    return nil
+  end
+  return runtimeQuestLineName
+end
+
+--- 获取任务线显示名。优先使用运行时 API，失败时回退到静态名称。
+---@param questLineID number 任务线 ID
+---@return string|nil displayName
+---@return table|nil errorObject
+function Toolbox.Questlines.GetQuestLineDisplayName(questLineID)
+  local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 任务页签模型
+  if errorObject then
+    return nil, errorObject
+  end
+  if type(questLineID) ~= "number" then
+    return nil, nil
+  end
+
+  local questLineEntry = model.questLineByID and model.questLineByID[questLineID] or nil -- 当前任务线对象
+  if type(questLineEntry) ~= "table" then
+    return nil, nil
+  end
+
+  local staticName = type(questLineEntry.name) == "string" and questLineEntry.name or ("QuestLine #" .. tostring(questLineID or "?")) -- 静态任务线名称
+  local cacheBucket = getQuestLineNameCacheBucket() -- 任务线显示名缓存表
+  local cachedName = cacheBucket[questLineID] -- 已缓存显示名
+  if type(cachedName) == "string" and cachedName ~= "" then
+    return cachedName, nil
+  end
+
+  local runtimeName = queryRuntimeQuestLineName(questLineID, questLineEntry) -- 运行时任务线名称
+  local displayName = type(runtimeName) == "string" and runtimeName ~= "" and runtimeName or staticName -- 最终显示名称
+  cacheBucket[questLineID] = displayName
+  return displayName, nil
 end
 
 --- 按当前选中节点查询任务线列表。
@@ -1067,7 +1192,10 @@ local function buildQuestTypeIndexModel(questTabModel)
         if type(typeID) == "number" then
           if typeSeenSet[typeID] ~= true then
             typeSeenSet[typeID] = true
-            typeIndexModel.typeList[#typeIndexModel.typeList + 1] = typeID
+            typeIndexModel.typeList[#typeIndexModel.typeList + 1] = {
+              id = typeID,
+              name = getRuntimeQuestTypeName(questID, typeID),
+            }
           end
 
           if type(typeQuestSeenSet[typeID]) ~= "table" then
@@ -1105,7 +1233,17 @@ local function buildQuestTypeIndexModel(questTabModel)
     end
   end
 
-  table.sort(typeIndexModel.typeList)
+  table.sort(typeIndexModel.typeList, function(leftEntry, rightEntry)
+    local leftID = type(leftEntry) == "table" and leftEntry.id or nil -- 左侧类型 ID
+    local rightID = type(rightEntry) == "table" and rightEntry.id or nil -- 右侧类型 ID
+    if type(leftID) ~= "number" then
+      return false
+    end
+    if type(rightID) ~= "number" then
+      return true
+    end
+    return leftID < rightID
+  end)
   return typeIndexModel
 end
 

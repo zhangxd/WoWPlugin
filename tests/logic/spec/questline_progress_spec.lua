@@ -15,6 +15,7 @@ end
 describe("QuestlineProgress mock data injection", function()
   local originalToolbox = nil -- 原始 Toolbox 全局
   local originalCQuestLog = nil -- 原始 C_QuestLog 全局
+  local originalCQuestLine = nil -- 原始 C_QuestLine 全局
   local originalCMap = nil -- 原始 C_Map 全局
   local originalQuestUtilsGetQuestName = nil -- 原始 QuestUtils_GetQuestName 全局
   local originalGetQuestLogIndexByID = nil -- 原始 GetQuestLogIndexByID 全局
@@ -30,6 +31,7 @@ describe("QuestlineProgress mock data injection", function()
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
     originalCQuestLog = rawget(_G, "C_QuestLog")
+    originalCQuestLine = rawget(_G, "C_QuestLine")
     originalCMap = rawget(_G, "C_Map")
     originalQuestUtilsGetQuestName = rawget(_G, "QuestUtils_GetQuestName")
     originalGetQuestLogIndexByID = rawget(_G, "GetQuestLogIndexByID")
@@ -91,6 +93,15 @@ describe("QuestlineProgress mock data injection", function()
       GetQuestType = function(questID)
         return questTypeByID[questID]
       end,
+      GetQuestTagInfo = function(questID)
+        if questID == 81002 then
+          return {
+            tagID = 12,
+            tagName = "Campaign",
+          }
+        end
+        return nil
+      end,
       GetNumQuestLogEntries = function()
         return #questLogInfoList, #questLogInfoList
       end,
@@ -128,6 +139,7 @@ describe("QuestlineProgress mock data injection", function()
 
     rawset(_G, "Toolbox", originalToolbox)
     rawset(_G, "C_QuestLog", originalCQuestLog)
+    rawset(_G, "C_QuestLine", originalCQuestLine)
     rawset(_G, "C_Map", originalCMap)
     rawset(_G, "QuestUtils_GetQuestName", originalQuestUtilsGetQuestName)
     rawset(_G, "GetQuestLogIndexByID", originalGetQuestLogIndexByID)
@@ -151,6 +163,79 @@ describe("QuestlineProgress mock data injection", function()
 
     local typedState = Toolbox.Questlines.GetQuestRuntimeState(81002)
     assert.equals(12, typedState.typeID)
+  end)
+
+  it("quest_line_display_name_prefers_runtime_api_name", function()
+    rawset(_G, "C_QuestLine", {
+      GetQuestLineInfo = function(questID)
+        if questID == 81002 then
+          return {
+            questLineID = 9901,
+            questLineName = "Live QuestLine Alpha",
+          }
+        end
+        return nil
+      end,
+    })
+
+    assert.is_function(Toolbox.Questlines.GetQuestLineDisplayName)
+
+    local displayName, errorObject = Toolbox.Questlines.GetQuestLineDisplayName(9901)
+    assert.is_nil(errorObject)
+    assert.equals("Live QuestLine Alpha", displayName)
+  end)
+
+  it("quest_line_display_name_falls_back_to_static_name_when_runtime_name_missing", function()
+    rawset(_G, "C_QuestLine", {
+      GetQuestLineInfo = function()
+        return {
+          questLineID = 9901,
+          questLineName = nil,
+        }
+      end,
+    })
+
+    assert.is_function(Toolbox.Questlines.GetQuestLineDisplayName)
+
+    local displayName, errorObject = Toolbox.Questlines.GetQuestLineDisplayName(9901)
+    assert.is_nil(errorObject)
+    assert.equals("Mock QuestLine Alpha", displayName)
+  end)
+
+  it("supports_v4_without_questline_name_field_and_falls_back_to_id_label", function()
+    local v4Data = {
+      schemaVersion = 4,
+      sourceMode = "mock",
+      generatedAt = "2026-01-03T00:00:00Z",
+      quests = {
+        [81001] = { ID = 81001, UiMapID = 2371 },
+        [81002] = { ID = 81002, UiMapID = 2371 },
+      },
+      questLines = {
+        [9901] = { ID = 9901, UiMapID = 2371 },
+      },
+      questLineXQuest = {
+        [9901] = {
+          { QuestID = 81001, OrderIndex = 1 },
+          { QuestID = 81002, OrderIndex = 2 },
+        },
+      },
+    }
+
+    rawset(_G, "C_QuestLine", nil)
+    Toolbox.Questlines.SetDataOverride(v4Data)
+
+    local valid, errorObject = Toolbox.Questlines.ValidateInstanceQuestlinesData(v4Data, true)
+    assert.is_true(valid)
+    assert.is_nil(errorObject)
+
+    local model, modelError = Toolbox.Questlines.GetQuestTabModel()
+    assert.is_nil(modelError)
+    assert.is_nil(model.questLineByID[9901].name)
+
+    local displayName, displayError = Toolbox.Questlines.GetQuestLineDisplayName(9901)
+    assert.is_nil(displayError)
+    assert.equals("QuestLine #9901", displayName)
   end)
 
   it("current_quest_log_entries_include_mapped_and_unmapped_quests", function()
@@ -248,7 +333,10 @@ describe("QuestlineProgress mock data injection", function()
 
     local typeIndex, errorObject = Toolbox.Questlines.GetQuestTypeIndex()
     assert.is_nil(errorObject)
-    assert.same({ 12, 34 }, typeIndex.typeList)
+    assert.same({
+      { id = 12, name = "Campaign" },
+      { id = 34, name = "Unknown Type (34)" },
+    }, typeIndex.typeList)
     assert.same({ 81002 }, typeIndex.typeToQuestIDs[12])
     assert.same({ 81001 }, typeIndex.typeToQuestIDs[34])
     assert.same({ 9901 }, typeIndex.typeToQuestLineIDs[12])

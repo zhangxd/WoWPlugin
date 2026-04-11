@@ -351,6 +351,208 @@ describe("EncounterJournal event lifecycle", function()
     assert.equals(1003, rightRowList[3].questID)
   end)
 
+  it("map_view_questline_row_uses_runtime_display_name_accessor", function()
+    local journalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal") -- 冒险手册根框体
+    journalFrame:Show()
+    journalFrame.instanceSelect = harness.runtime.CreateFrame("Frame", nil, journalFrame)
+    journalFrame.Tabs = {}
+    journalFrame.selectedTab = 4
+    rawset(_G, "EncounterJournal", journalFrame)
+
+    harness.moduleDb.questViewMode = "map"
+    harness.moduleDb.questViewSelectedMapID = 1
+    harness.moduleDb.questlineTreeCollapsed = {
+      ["map:1"] = false,
+    }
+
+    Toolbox.Questlines.GetQuestTabModel = function()
+      return {
+        maps = {
+          {
+            id = 1,
+            name = "Map #1",
+            questLines = {
+              {
+                id = 101,
+                name = "Static QuestLine #101",
+                UiMapID = 1,
+                questIDs = { 1001 },
+                questCount = 1,
+              },
+            },
+          },
+        },
+        mapByID = {
+          [1] = {
+            id = 1,
+            name = "Map #1",
+            questLines = {
+              {
+                id = 101,
+                name = "Static QuestLine #101",
+                UiMapID = 1,
+                questIDs = { 1001 },
+                questCount = 1,
+              },
+            },
+          },
+        },
+        questLineByID = {
+          [101] = {
+            id = 101,
+            name = "Static QuestLine #101",
+            UiMapID = 1,
+            questIDs = { 1001 },
+            questCount = 1,
+          },
+        },
+        questToQuestLineID = {
+          [1001] = 101,
+        },
+        typeList = {},
+        typeToQuestIDs = {},
+        typeToQuestLineIDs = {},
+        typeToMapIDs = {},
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestListByQuestLineID = function()
+      return {
+        { id = 1001, name = "Quest #1001", status = "active", readyForTurnIn = false, typeID = 12 },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestLineDisplayName = function(questLineID)
+      if questLineID == 101 then
+        return "Live QuestLine #101", nil
+      end
+      return nil, nil
+    end
+    Toolbox.Questlines.GetMapProgress = function()
+      return { completed = 0, total = 1 }, nil
+    end
+    Toolbox.Questlines.GetQuestLineProgress = function()
+      return { completed = 0, total = 1 }, nil
+    end
+
+    local treeView = Toolbox.TestHooks.EncounterJournal:getQuestlineTreeView()
+    treeView:refresh()
+    treeView:setSelected(true)
+
+    local visibleRowTextList = {} -- 左树可见行文本
+    for _, rowButton in ipairs(treeView.rowButtons) do
+      if rowButton:IsShown() then
+        visibleRowTextList[#visibleRowTextList + 1] = rowButton.rowFont:GetText()
+      end
+    end
+
+    assert.is_true(#visibleRowTextList >= 2)
+    assert.is_true(string.find(visibleRowTextList[2], "Live QuestLine #101", 1, true) ~= nil)
+  end)
+
+  it("status_view_title_uses_runtime_display_name_accessor", function()
+    local journalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal") -- 冒险手册根框体
+    journalFrame:Show()
+    journalFrame.instanceSelect = harness.runtime.CreateFrame("Frame", nil, journalFrame)
+    journalFrame.Tabs = {}
+    journalFrame.selectedTab = 4
+    rawset(_G, "EncounterJournal", journalFrame)
+
+    Toolbox.Questlines.GetQuestTabModel = function()
+      return {
+        maps = {
+          {
+            id = 1,
+            name = "Map #1",
+            questLines = {
+              {
+                id = 101,
+                name = "Static QuestLine #101",
+                UiMapID = 1,
+                questIDs = { 1001, 1002 },
+                questCount = 2,
+              },
+            },
+          },
+        },
+        mapByID = {
+          [1] = {
+            id = 1,
+            name = "Map #1",
+            questLines = {
+              {
+                id = 101,
+                name = "Static QuestLine #101",
+                UiMapID = 1,
+                questIDs = { 1001, 1002 },
+                questCount = 2,
+              },
+            },
+          },
+        },
+        questLineByID = {
+          [101] = {
+            id = 101,
+            name = "Static QuestLine #101",
+            UiMapID = 1,
+            questIDs = { 1001, 1002 },
+            questCount = 2,
+          },
+        },
+        questToQuestLineID = {
+          [1001] = 101,
+          [1002] = 101,
+        },
+        typeList = {},
+        typeToQuestIDs = {},
+        typeToQuestLineIDs = {},
+        typeToMapIDs = {},
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestListByQuestLineID = function()
+      return {
+        { id = 1001, name = "Quest #1001", status = "active", readyForTurnIn = true, typeID = 12 },
+        { id = 1002, name = "Quest #1002", status = "pending", readyForTurnIn = false, typeID = 12 },
+      }, nil
+    end
+    Toolbox.Questlines.GetCurrentQuestLogEntries = function()
+      return {
+        { questID = 1001, name = "Quest #1001", status = "active", readyForTurnIn = true, questLineID = 101, questLineName = "Static QuestLine #101", UiMapID = 1 },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestDetailByID = function(questID)
+      if questID == 1001 or questID == 1002 then
+        return {
+          questID = questID,
+          name = "Quest #" .. tostring(questID),
+          status = questID == 1001 and "active" or "pending",
+          readyForTurnIn = questID == 1001,
+          UiMapID = 1,
+          typeID = 12,
+          questLineID = 101,
+          questLineName = "Static QuestLine #101",
+        }, nil
+      end
+      return nil, nil
+    end
+    Toolbox.Questlines.GetQuestLineDisplayName = function(questLineID)
+      if questLineID == 101 then
+        return "Live QuestLine #101", nil
+      end
+      return nil, nil
+    end
+    Toolbox.Questlines.GetMapProgress = function()
+      return { completed = 0, total = 2 }, nil
+    end
+    Toolbox.Questlines.GetQuestLineProgress = function()
+      return { completed = 0, total = 2 }, nil
+    end
+
+    local treeView = Toolbox.TestHooks.EncounterJournal:getQuestlineTreeView()
+    treeView:refresh()
+    treeView:setSelected(true)
+
+    assert.equals("Live QuestLine #101", treeView.rightTitle:GetText())
+  end)
+
   it("completed_tasks_render_in_green", function()
     local journalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal") -- 冒险手册根框体
     journalFrame:Show()
@@ -683,6 +885,114 @@ describe("EncounterJournal event lifecycle", function()
     assert.equals(0.2, redValue)
     assert.equals(0.8, greenValue)
     assert.equals(0.2, blueValue)
+  end)
+
+  it("type_view_prefers_runtime_name_from_type_index", function()
+    local journalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal") -- 冒险手册根框体
+    journalFrame:Show()
+    journalFrame.instanceSelect = harness.runtime.CreateFrame("Frame", nil, journalFrame)
+    journalFrame.Tabs = {}
+    journalFrame.selectedTab = 4
+    rawset(_G, "EncounterJournal", journalFrame)
+
+    harness.moduleDb.questViewMode = "type"
+    harness.moduleDb.questViewSelectedTypeID = 12
+
+    Toolbox.Questlines.GetQuestTabModel = function()
+      return {
+        maps = {
+          {
+            id = 1,
+            name = "Map #1",
+            questLines = {
+              {
+                id = 101,
+                name = "QuestLine #101",
+                UiMapID = 1,
+                questIDs = { 1001 },
+                questCount = 1,
+              },
+            },
+          },
+        },
+        mapByID = {
+          [1] = {
+            id = 1,
+            name = "Map #1",
+            questLines = {
+              {
+                id = 101,
+                name = "QuestLine #101",
+                UiMapID = 1,
+                questIDs = { 1001 },
+                questCount = 1,
+              },
+            },
+          },
+        },
+        questLineByID = {
+          [101] = {
+            id = 101,
+            name = "QuestLine #101",
+            UiMapID = 1,
+            questIDs = { 1001 },
+            questCount = 1,
+          },
+        },
+        questToQuestLineID = {
+          [1001] = 101,
+        },
+        typeList = {},
+        typeToQuestIDs = {},
+        typeToQuestLineIDs = {},
+        typeToMapIDs = {},
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestTypeIndex = function()
+      return {
+        typeList = {
+          { id = 12, name = "Campaign Tag" },
+        },
+        typeToQuestIDs = {
+          [12] = { 1001 },
+        },
+        typeToQuestLineIDs = {
+          [12] = { 101 },
+        },
+        typeToMapIDs = {
+          [12] = { 1 },
+        },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestTypeLabel = function(typeID)
+      return "Wrong Label #" .. tostring(typeID)
+    end
+    Toolbox.Questlines.GetQuestListByQuestLineID = function()
+      return {
+        { id = 1001, name = "Quest #1001", status = "active", readyForTurnIn = false, typeID = 12 },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestDetailByID = function(questID)
+      if questID == 1001 then
+        return {
+          questID = 1001,
+          name = "Quest #1001",
+          status = "active",
+          readyForTurnIn = false,
+          UiMapID = 1,
+          typeID = 12,
+          questLineID = 101,
+          questLineName = "QuestLine #101",
+        }, nil
+      end
+      return nil, nil
+    end
+
+    local treeView = Toolbox.TestHooks.EncounterJournal:getQuestlineTreeView()
+    treeView:refresh()
+    treeView:setSelected(true)
+
+    assert.equals("Campaign Tag", treeView.rightTitle:GetText())
   end)
 
   it("status_view_falls_back_to_detail_for_unmapped_current_quest", function()

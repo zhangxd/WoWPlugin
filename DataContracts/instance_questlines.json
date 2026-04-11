@@ -1,7 +1,7 @@
 {
   "contract": {
     "contract_id": "instance_questlines",
-    "schema_version": 2,
+    "schema_version": 3,
     "summary": "冒险手册任务页签静态任务线文档",
     "source_of_truth": "WoWPlugin",
     "status": "active"
@@ -162,8 +162,10 @@
         ],
         "value_template": {
           "ID": "quest_line_id",
-          "Name_lang": "quest_line_name",
           "UiMapID": "quest_line_ui_map_id"
+        },
+        "comment_template": {
+          "Name_lang": "quest_line_name"
         }
       },
       {
@@ -283,7 +285,7 @@
     ]
   },
   "versioning": {
-    "current_schema_version": 2,
+    "current_schema_version": 3,
     "change_log": [
       {
         "schema_version": 1,
@@ -292,6 +294,10 @@
       {
         "schema_version": 2,
         "summary": "切换为 DB-shape 文档结构，导出任务线关系与 POI 关系块"
+      },
+      {
+        "schema_version": 3,
+        "summary": "questLines 块移除 Name_lang 字段，改为同名 Lua 尾注释"
       }
     ]
   }
