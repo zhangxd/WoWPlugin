@@ -10,7 +10,7 @@
   - `docs/specs/encounter-journal-spec.md`
   - `docs/designs/encounter-journal-design.md`
   - `docs/tests/encounter-journal-test.md`
-- 最后更新：2026-04-12
+- 最后更新：2026-04-13
 
 ## 1. 目标
 
@@ -37,6 +37,10 @@
   - `docs/designs/encounter-journal-design.md`
   - `docs/plans/encounter-journal-plan.md`
   - `docs/tests/encounter-journal-test.md`
+- 历史并回项：
+  - 任务页签导航重构
+  - 任务线运行时名称
+  - 任务类型运行时名称
 
 ## 4. 执行步骤
 
@@ -46,11 +50,12 @@
 - [x] 建立设计文档，统一模块归属、数据来源与边界。
 - [x] 建立测试基线文档，记录现有自动化验证与手工检查清单。
 - [x] 覆盖旧的阶段性文档，使其只作为历史入口，不再作为并行事实来源。
+- [x] 将 `encounter-journal-*` 子专题中的仍有效内容并回主文档，仅保留 `encounter-journal` 五份主文档。
 
 ## 5. 验证
 
 - 目录验证：
-  `encounter_journal` 已具备 `features / spec / design / plan / test` 五类配套文档。
+  `encounter_journal` 已具备 `features / spec / design / plan / test` 五类配套文档，且不再保留继续维护的 `encounter-journal-*` 子专题平行文档。
 - 一致性验证：
   文档中的模块归属、数据来源、入口说明必须与当前代码一致。
 - 自动化验证：
@@ -74,9 +79,11 @@
   - 若功能已对外可见，同步更新 `encounter-journal-features.md`
   - 补充或更新 `encounter-journal-test.md`
   - 最后回写 `FEATURES.md` 与 `Toolbox-addon-design.md`
+- 同一功能下的导航重构、名称来源调整、验证补充等子专题，也统一落在这五份主文档中，不再单独新建 `encounter-journal-xxx-plan.md` 等文件。
 
 ## 8. 修订记录
 
 | 日期 | 内容 |
 |------|------|
 | 2026-04-12 | 初稿：建立 `encounter_journal` 的现状基线与后续演进计划 |
+| 2026-04-13 | 文档收口：明确仅保留 `encounter-journal` 五份主文档，子专题执行记录统一并回主计划 |

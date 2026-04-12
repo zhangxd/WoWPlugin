@@ -10,7 +10,7 @@
   - `docs/specs/encounter-journal-spec.md`
   - `docs/designs/encounter-journal-design.md`
   - `docs/tests/encounter-journal-test.md`
-- 最后更新：2026-04-12
+- 最后更新：2026-04-13
 
 ## 1. 定位
 

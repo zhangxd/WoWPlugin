@@ -12,7 +12,7 @@
   - `docs/tests/encounter-journal-test.md`
   - `docs/FEATURES.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-12
+- 最后更新：2026-04-13
 
 ## 1. 背景
 
@@ -23,7 +23,7 @@
 ## 2. 设计目标
 
 - 用一份文档完整描述当前冒险指南相关能力、模块归属、数据来源和设置边界。
-- 对齐当前代码实现，避免继续把已合并到 `encounter_journal` 的能力写成独立模块。
+- 对齐当前代码实现，避免继续把已合并到 `encounter_journal` 的能力写成独立模块或独立子专题文档。
 - 为 [FEATURES.md](../FEATURES.md) 和 [Toolbox-addon-design.md](../Toolbox-addon-design.md) 提供统一上游依据。
 
 ## 3. 非目标
@@ -31,6 +31,7 @@
 - 不描述尚未落地的未来功能。
 - 不覆盖与冒险指南无关的 Tooltip、Mover、聊天提示等功能设计。
 - 不保留历史实现阶段的逐步计划细节；这些内容不再作为当前设计事实来源。
+- 不再为 `encounter_journal` 下的导航、名称来源、测试补充等子专题单独维护并行设计文档。
 
 ## 4. 方案对比
 
@@ -114,6 +115,7 @@
 - 地图主区中的每条任务线独占一行；点击后在原地展开其任务列表，再次点击折叠；同一时刻只展开一条任务线。
 - `任务类型` 入口下显示归并后的任务类型大类；选中某个类型后，主区直接显示任务列表，不再增加任务线中间层。
 - 任务线名称优先使用运行时 API，失败时回退为 `QuestLine #<id>`。
+- `Toolbox.Data.InstanceQuestlines.questLines` 不再导出结构化 `Name_lang` 字段，只保留 Lua 注释供人工排查。
 - 任务列表只显示任务名称；鼠标悬停显示 tooltip；点击后显示任务详情弹框，不再在主界面右侧内嵌详情文本。
 - 若任务具备任务线归属，详情弹框提供“跳转到对应地图 / 任务线”的入口，并自动展开目标任务线。
 - 模块记忆当前资料片、当前模式、当前地图 / 类型大类和当前展开任务线；旧的顶部分类与更早的三视图状态已迁移并清理。
@@ -152,7 +154,7 @@
 - 文件与目录：
   关键代码文件为 `Toolbox/Modules/EncounterJournal.lua`、`Toolbox/Modules/MinimapButton.lua`、`Toolbox/Core/API/EncounterJournal.lua`、`Toolbox/Core/API/QuestlineProgress.lua`。
 - 文档回写：
-  [FEATURES.md](../FEATURES.md) 只保留产品向能力说明，[Toolbox-addon-design.md](../Toolbox-addon-design.md) 只保留长期架构与模块映射。
+  [FEATURES.md](../FEATURES.md) 只保留产品向能力说明，[Toolbox-addon-design.md](../Toolbox-addon-design.md) 只保留长期架构与模块映射；`encounter_journal` 的后续子专题统一回写本设计文档，不再拆分新的 `encounter-journal-*.md` 设计文件。
 
 ## 7. 风险与回退
 
@@ -183,3 +185,4 @@
 | 2026-04-12 | 调整：`InstanceQuestlines.questLines` 不再导出 `Name_lang` 字段，只保留 Lua 注释；运行时失败回退为 `QuestLine #<id>` |
 | 2026-04-12 | 更新：任务页签重构为“资料片 -> 分类 -> 任务线 -> 任务”导航，详情改为 tooltip + 点击弹框 |
 | 2026-04-13 | 更新：任务页签最终改为左侧资料片树，资料片下收纳“地图任务线 / 任务类型”，地图主区使用任务线单展开列表 |
+| 2026-04-13 | 文档收口：`encounter_journal` 的导航与名称来源子专题并回主设计文档，后续不再维护平行子设计文件 |

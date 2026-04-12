@@ -583,8 +583,6 @@ end
 local QuestlineTreeView = {
   tabButton = nil,
   panelFrame = nil,
-  headerFrame = nil,
-  contentFrame = nil,
   leftTree = nil,
   rightContent = nil,
   scrollFrame = nil,
@@ -595,7 +593,6 @@ local QuestlineTreeView = {
   rightScrollChild = nil,
   rightRowButtons = {},
   rightTitle = nil,
-  detailText = nil,
   rowHeight = 18,
   selected = false,
   selectedExpansionID = nil,
@@ -781,9 +778,6 @@ local function normalizeSelectionID(value)
   end
   return nil
 end
-
-local collectStatusQuestEntries = nil -- 状态视图当前任务集合构造器
-local findStatusQuestEntryByID = nil -- 状态视图任务查询器
 
 local function getCurrentPlayerMapID()
   if not C_Map or type(C_Map.GetBestMapForUnit) ~= "function" then

@@ -363,12 +363,12 @@ ToolboxDB = {
 | 2026-04-02 | 领域对外 API `Toolbox.Chat`（Core/Chat.lua）；chat_notify 仅经 `Toolbox.Chat`；TOC 与 §5.6 补充 |
 | 2026-04-02 | 领域对外 API `Toolbox.Tooltip`（Core/Tooltip.lua）；tooltip_anchor 变薄；MicroMenuPanels 统一 `getMicroMenuDb()` |
 | 2026-04-02 | Core 下锁定/手册/坐骑/物品/地图分别置于 `Lockouts.lua`、`EncounterJournal.lua`、`MountJournal.lua`、`Item.lua`、`Map.lua`；物品对外 API 为 `Toolbox.Item`；文档用语统一为「领域对外 API」 |
-| 2026-04-02 | §5.1 指向 `specs/2026-04-02-design-workflow-and-settings-groups.md`（协作节奏 + 设置页可折叠分组设计草案） |
+| 2026-04-02 | §5.1 曾引用旧规范下的阶段性设置分组草案；现行协作节奏与文档入口以后续 `AI-ONBOARDING.md`、`DOCS-STANDARD.md` 与相关成套文档为准 |
 | 2026-04-02 | §2.1 增加对 [AGENTS.md](../AGENTS.md)「Lua 开发规范」的引用 |
 | 2026-04-02 | 鸟瞰图与 §2.2、§3：移除已不存在的 `saved_instances` 模块描述；§3 示例与旧存档说明 |
 | 2026-04-02 | §1 原则区增加「协作与需求确认」：指向 AI-ONBOARDING §1.2 硬约束与 AGENTS 模糊需求清单 |
-| 2026-04-03 | 移除未契约化的冒险手册「仅坐骑」实现（原 `SavedInstancesEJ.lua` / `global.ejMountFilter`）；重做方案见 [specs/2026-04-03-adventure-guide-mount-filter-lockout-redesign.md](./specs/2026-04-03-adventure-guide-mount-filter-lockout-redesign.md)，待开动后按模块模型落地 |
-| 2026-04-03 | 落地 `ej_mount_filter`：`Modules/EJMountFilter.lua`；规格 [superpowers/specs/2026-04-03-ej-mounts-only-filter-design.md](./superpowers/specs/2026-04-03-ej-mounts-only-filter-design.md) |
+| 2026-04-03 | 移除未契约化的冒险手册“仅坐骑”实现（原 `SavedInstancesEJ.lua` / `global.ejMountFilter`）；该阶段文档属于旧规范下的历史记录，现行能力说明以后续 `encounter-journal` 成套文档为准 |
+| 2026-04-03 | 历史阶段曾落地 `ej_mount_filter` 与相关实验性方案；这些记录仅保留为修订脉络，现行文档入口统一收口到 `docs/features/encounter-journal-features.md`、`docs/specs/encounter-journal-spec.md` 与 `docs/designs/encounter-journal-design.md` |
 | 2026-04-03 | 新增 `Toolbox.DungeonRaidDirectory`：`Core/DungeonRaidDirectory.lua` + `global.dungeonRaidDirectory`；`ej_mount_filter` 改为消费共享目录摘要，Settings 增加缓存状态 / 进度 / 重建入口 / 调试快照查看器 |
 | 2026-04-03 | §1「协作与需求确认」补充：数据来源/主方案未分叉前不得以「是否实现」收尾；指向 AI-ONBOARDING §1.2「防未选定主方案就问是否实现」 |
 | 2026-04-04 | `DungeonRaidDirectory` 调整为登录后预热缓存；玩家浏览冒险手册地下城 / 团队副本列表时暂停后台扫描，离开后恢复；`ej_mount_filter` 在当前列表摘要未全部就绪前置灰，数据层可按名称补源已知假阴性，筛选显示改为覆盖列表以避开原生分页与空槽位问题；目录构建调度改为“当前资料片优先，其余后台补齐”，且单副本命中坐骑后停止扫描剩余难度 |

@@ -8,11 +8,11 @@
 - 关联文档：
   - `docs/designs/docs-writing-standard-design.md`
   - `docs/DOCS-STANDARD.md`
-- 最后更新：2026-04-12
+- 最后更新：2026-04-13
 
 ## 1. 目标
 
-- 为 `docs/**` 落地统一的需求、设计、计划、测试文档规范，并把入口文档回写到强制使用该规范。
+- 为 `docs/**` 落地统一的功能、需求、设计、计划、测试文档规范，并把入口文档回写到强制使用该规范。
 
 ## 2. 输入文档
 
@@ -24,6 +24,7 @@
 
 - 新增：
   - `docs/DOCS-STANDARD.md`
+  - `docs/templates/features-template.md`
   - `docs/templates/spec-template.md`
   - `docs/templates/design-template.md`
   - `docs/templates/plan-template.md`
@@ -38,16 +39,18 @@
 
 - [x] 梳理现有 `docs/**` 目录与文档类型混写问题。
 - [x] 定义规范文档中的目录边界、命名规则、状态流转和禁止项。
-- [x] 新增需求、设计、计划、测试四类模板。
+- [x] 新增功能、需求、设计、计划、测试五类模板。
 - [x] 回写 `docs/AI-ONBOARDING.md`，把规范纳入读档路径与文档分层。
 - [x] 回写 `docs/FEATURES.md`，声明其只承载产品功能总览。
+- [x] 补充单功能单文档续写原则，要求同一功能的后续重构与补充直接修改原文档。
 
 ## 5. 验证
 
 - 检查 `docs/DOCS-STANDARD.md` 是否包含目录、命名、模板、状态、迁移规则。
-- 检查 `docs/templates/` 是否已存在四类模板。
+- 检查 `docs/templates/` 是否已存在五类模板。
 - 检查 `docs/AI-ONBOARDING.md` 是否引用 `DOCS-STANDARD.md` 并更新目录结构。
 - 检查 `docs/FEATURES.md` 是否声明自身边界。
+- 检查 `DOCS-STANDARD.md` 与入口文档是否明确“同一功能同一类型只保留一份当前文档”。
 
 ## 6. 风险与回滚
 
@@ -65,3 +68,4 @@
 |------|------|
 | 2026-04-12 | 初稿并完成本轮规范落地 |
 | 2026-04-12 | 文件名按新规则改为 `docs-writing-standard-plan.md`，关联引用同步调整 |
+| 2026-04-13 | 对齐现行规范：补充 `features` 模板与单功能单文档续写要求 |
