@@ -21,6 +21,21 @@ def require_file(*parts: str) -> None:
         raise AssertionError(f"missing file: {path}")
 
 
+def read_encounter_journal_bundle_text() -> str:
+    paths = [
+        ("Toolbox", "Modules", "EncounterJournal.lua"),
+        ("Toolbox", "Modules", "EncounterJournal", "Shared.lua"),
+        ("Toolbox", "Modules", "EncounterJournal", "DetailEnhancer.lua"),
+        ("Toolbox", "Modules", "EncounterJournal", "QuestNavigation.lua"),
+        ("Toolbox", "Modules", "EncounterJournal", "LockoutOverlay.lua"),
+    ]
+    texts = []
+    for parts in paths:
+        require_file(*parts)
+        texts.append(read_text(*parts))
+    return "\n".join(texts)
+
+
 def extract_tagged_header_metadata(text: str) -> dict[str, str]:
     header_start = text.find("--[[")
     header_end = text.find("]]", header_start + 4)
@@ -142,13 +157,17 @@ def validate_modules() -> None:
 def validate_toc() -> None:
     text = read_text("Toolbox", "Toolbox.toc")
     require_contains(text, "Core\\Foundation\\Runtime.lua", "runtime adapter toc entry")
+    require_contains(text, "Modules\\EncounterJournal\\Shared.lua", "encounter journal shared toc entry")
+    require_contains(text, "Modules\\EncounterJournal\\DetailEnhancer.lua", "encounter journal detail enhancer toc entry")
+    require_contains(text, "Modules\\EncounterJournal\\QuestNavigation.lua", "encounter journal quest navigation toc entry")
+    require_contains(text, "Modules\\EncounterJournal\\LockoutOverlay.lua", "encounter journal lockout overlay toc entry")
     require_contains(text, "Modules\\EncounterJournal.lua", "encounter journal module toc entry")
     require_contains(text, "Modules\\MinimapButton.lua", "minimap button module toc entry")
     require_contains(text, "## Interface: 120000, 120001", "retail toc compatibility range")
 
 
 def validate_encounter_journal_regressions() -> None:
-    text = read_text("Toolbox", "Modules", "EncounterJournal.lua")
+    text = read_encounter_journal_bundle_text()
     # 调度器应通过 Runtime 统一走可取消句柄，避免 C_Timer.After 防抖失效导致并发刷新。
     require_contains(text, "Runtime.NewTimer", "encounter journal uses runtime cancellable timer")
     # 关闭叠加后应主动清理已绘制文本，避免残留显示。
@@ -159,7 +178,8 @@ def validate_encounter_journal_regressions() -> None:
     require_contains(text, 'eventFrame:RegisterEvent("UPDATE_INSTANCE_INFO")', "encounter journal re-registers lockout event when enabled")
     require_contains(text, "if isModuleEnabled() then", "encounter journal guards update callbacks by enabled state")
     # 列表 hook 未触发时也要主动创建“仅坐骑”按钮，避免入口缺失。
-    require_contains(text, "local function refreshAll()\n  MountFilter:createUI()", "encounter journal creates mount filter ui in unified refresh path")
+    require_contains(text, "local function refreshAll()", "encounter journal defines unified refresh path")
+    require_contains(text, "MountFilter:createUI()", "encounter journal creates mount filter ui in unified refresh path")
     require_contains(text, "local function refreshAfterHookInit()", "encounter journal defines deterministic post-hook init refresh helper")
     require_contains(
         text,
@@ -171,7 +191,8 @@ def validate_encounter_journal_regressions() -> None:
         'if Runtime.IsAddOnLoaded("Blizzard_EncounterJournal") then\n    initHooks()\n    refreshAfterHookInit()',
         "encounter journal runs deterministic refresh through runtime adapter when ej was already loaded",
     )
-    require_contains(text, "MountFilter:createUI()\n          MountFilter:updateVisibility()", "encounter journal creates mount filter ui on EJ OnShow")
+    require_contains(text, "MountFilter:createUI()", "encounter journal creates mount filter ui on EJ OnShow")
+    require_contains(text, "MountFilter:updateVisibility()", "encounter journal refreshes mount filter visibility on EJ OnShow")
     require_contains(text, "return Toolbox.EJ.IsRaidOrDungeonInstanceListTab() == true", "encounter journal mount filter visibility delegates to ej domain api")
     require_contains(text, "local anchorTarget = instSel.ExpansionDropdown or instSel", "encounter journal mount filter anchor falls back when expansion dropdown missing")
     require_contains(text, "if Toolbox.EJ.IsRaidOrDungeonInstanceListTab() ~= true then", "encounter journal lockout overlay is gated by raid or dungeon tab")
@@ -289,7 +310,7 @@ def validate_encounter_journal_detail_page_feature() -> None:
     config_text = read_text("Toolbox", "Core", "Foundation", "Config.lua")
     locale_text = read_text("Toolbox", "Core", "Foundation", "Locales.lua")
     api_text = read_text("Toolbox", "Core", "API", "EncounterJournal.lua")
-    module_text = read_text("Toolbox", "Modules", "EncounterJournal.lua")
+    module_text = read_encounter_journal_bundle_text()
 
     # 模块存档：详情页“仅坐骑”开关状态。
     require_contains(config_text, "detailMountOnlyEnabled", "encounter journal detail mount-only setting default")
@@ -313,7 +334,7 @@ def validate_encounter_journal_detail_page_feature() -> None:
 
 
 def validate_encounter_journal_micro_button_tooltip_lockouts_feature() -> None:
-    module_text = read_text("Toolbox", "Modules", "EncounterJournal.lua")
+    module_text = read_encounter_journal_bundle_text()
 
     # 右下角微型菜单「冒险手册」按钮：悬停 tooltip 需追加副本 CD 摘要。
     require_contains(module_text, "_G.EJMicroButton", "encounter journal retail micro button global reference")
@@ -327,7 +348,7 @@ def validate_encounter_journal_questline_tree_feature() -> None:
     toc_text = read_text("Toolbox", "Toolbox.toc")
     config_text = read_text("Toolbox", "Core", "Foundation", "Config.lua")
     locale_text = read_text("Toolbox", "Core", "Foundation", "Locales.lua")
-    module_text = read_text("Toolbox", "Modules", "EncounterJournal.lua")
+    module_text = read_encounter_journal_bundle_text()
     data_text = read_text("Toolbox", "Data", "InstanceQuestlines.lua")
     require_file("Toolbox", "Data", "InstanceQuestlines.lua")
     require_file("Toolbox", "Core", "API", "QuestlineProgress.lua")

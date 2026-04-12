@@ -1,7 +1,7 @@
 # 冒险指南现状基线与演进计划
 
 - 文档类型：计划
-- 状态：已完成
+- 状态：进行中
 - 主题：encounter-journal
 - 适用范围：`encounter_journal` 当前能力基线整理与后续增量演进入口
 - 关联模块：`encounter_journal`、`minimap_button`
@@ -10,7 +10,7 @@
   - `docs/specs/encounter-journal-spec.md`
   - `docs/designs/encounter-journal-design.md`
   - `docs/tests/encounter-journal-test.md`
-- 最后更新：2026-04-13
+- 最后更新：2026-04-14
 
 ## 1. 目标
 
@@ -81,9 +81,31 @@
   - 最后回写 `FEATURES.md` 与 `Toolbox-addon-design.md`
 - 同一功能下的导航重构、名称来源调整、验证补充等子专题，也统一落在这五份主文档中，不再单独新建 `encounter-journal-xxx-plan.md` 等文件。
 
-## 8. 修订记录
+## 8. 当前执行任务：EncounterJournal 结构重构
+
+- 当前目标：
+  在**不改变现有行为**的前提下，将 `Toolbox/Modules/EncounterJournal.lua` 按职责拆分为主入口 + 私有实现文件，降低单文件复杂度与后续回归风险。
+- 已确认主方案：
+  - 允许新增 `Toolbox/Modules/EncounterJournal/` 子目录。
+  - 允许更新 `Toolbox/Toolbox.toc` 加载顺序。
+  - 不新增 `ToolboxDB.modules.encounter_journal` 键。
+  - 不改变 `Toolbox.EJ`、`Toolbox.Questlines`、`Toolbox.Tooltip` 的对外契约。
+- 推荐拆分边界：
+  - `EncounterJournal.lua`：模块注册、事件入口、总协调。
+  - `EncounterJournal/QuestNavigation.lua`：任务页签主对象与外部入口。
+  - `EncounterJournal/QuestNavigationView.lua`：任务页签 widgets、左树、主区、breadcrumb、popup 渲染。
+  - `EncounterJournal/QuestNavigationState.lua`：`questNav*` 状态读写与归一化。
+  - `EncounterJournal/LockoutOverlay.lua`：副本列表 CD 叠加与相关 tooltip。
+  - `EncounterJournal/DetailEnhancer.lua`：详情页“仅坐骑”和重置时间标签。
+- 验收标准：
+  - 副本列表“仅坐骑”、列表 CD、详情页增强、任务页签、`EJMicroButton` / 小地图锁定摘要行为保持不变。
+  - 不再保留被后续实现覆盖的重复方法、空声明、无引用状态字段。
+  - `python tests/run_all.py` 全绿。
+
+## 9. 修订记录
 
 | 日期 | 内容 |
 |------|------|
 | 2026-04-12 | 初稿：建立 `encounter_journal` 的现状基线与后续演进计划 |
 | 2026-04-13 | 文档收口：明确仅保留 `encounter-journal` 五份主文档，子专题执行记录统一并回主计划 |
+| 2026-04-14 | 状态改为进行中：记录 `EncounterJournal.lua` 结构重构的已确认主方案、拆分边界与验收标准 |

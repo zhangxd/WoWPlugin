@@ -48,6 +48,10 @@ Data\InstanceQuestlines.lua
 # ============================================================================
 # Modules（功能模块 - 依赖 Data）
 # ============================================================================
+Modules\EncounterJournal\Shared.lua
+Modules\EncounterJournal\DetailEnhancer.lua
+Modules\EncounterJournal\QuestNavigation.lua
+Modules\EncounterJournal\LockoutOverlay.lua
 Modules\EncounterJournal.lua
 
 # ============================================================================

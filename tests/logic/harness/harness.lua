@@ -175,12 +175,20 @@ function Harness:setLockoutTooltipData(lineList, overflowCount)
 end
 
 function Harness:loadEncounterJournalModule()
-  local modulePath = self.rootPath .. "/Toolbox/Modules/EncounterJournal.lua" -- 模块路径
-  local moduleChunk, loadError = loadfile(modulePath) -- 加载模块 chunk
-  if not moduleChunk then
-    error(loadError)
+  local modulePathList = {
+    self.rootPath .. "/Toolbox/Modules/EncounterJournal/Shared.lua",
+    self.rootPath .. "/Toolbox/Modules/EncounterJournal/DetailEnhancer.lua",
+    self.rootPath .. "/Toolbox/Modules/EncounterJournal/QuestNavigation.lua",
+    self.rootPath .. "/Toolbox/Modules/EncounterJournal/LockoutOverlay.lua",
+    self.rootPath .. "/Toolbox/Modules/EncounterJournal.lua",
+  } -- encounter journal 相关加载顺序
+  for _, modulePath in ipairs(modulePathList) do
+    local moduleChunk, loadError = loadfile(modulePath) -- 加载模块 chunk
+    if not moduleChunk then
+      error(loadError)
+    end
+    moduleChunk()
   end
-  moduleChunk()
   self.moduleDef = self.toolboxTable._registeredModules.encounter_journal
   assert(self.moduleDef, "encounter_journal module should be registered")
   if type(self.moduleDef.OnModuleLoad) == "function" then

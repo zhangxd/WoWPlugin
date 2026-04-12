@@ -12,7 +12,7 @@
   - `docs/tests/encounter-journal-test.md`
   - `docs/FEATURES.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-13
+- 最后更新：2026-04-14
 
 ## 1. 背景
 
@@ -80,6 +80,19 @@
 | 副本锁定查询与摘要拼装 | `Toolbox/Core/API/EncounterJournal.lua` | 负责当前角色副本锁定汇总、难度匹配、坐骑掉落集合和 tooltip 文本拼装。 |
 | 小地图“冒险手册”入口 | `Toolbox/Modules/MinimapButton.lua` | 内置飞出项，点击后加载并打开 `Blizzard_EncounterJournal`。 |
 | `EJMicroButton` tooltip 锁定摘要 | `Toolbox/Modules/EncounterJournal.lua` | 在右下角微型按钮 tooltip 末尾追加当前锁定摘要，与小地图摘要同源。 |
+
+#### 5.2.1 已确认的内部结构重构方向
+
+- `encounter_journal` 继续作为**单模块能力边界**存在，不拆成新的 `RegisterModule`。
+- 允许将当前单文件实现重构为 `Toolbox/Modules/EncounterJournal/` 下的多个**私有实现文件**，并通过 `Toolbox/Toolbox.toc` 明确加载顺序。
+- 推荐内部职责拆分如下：
+  - `EncounterJournal.lua`：模块注册、事件入口、总协调。
+  - `EncounterJournal/QuestNavigation.lua`：任务页签主对象与外部入口。
+  - `EncounterJournal/QuestNavigationView.lua`：任务页签 widgets、左树、主区、breadcrumb、popup 渲染。
+  - `EncounterJournal/QuestNavigationState.lua`：`questNav*` 状态归一化与存档读写。
+  - `EncounterJournal/LockoutOverlay.lua`：副本列表 CD 叠加与相关 tooltip。
+  - `EncounterJournal/DetailEnhancer.lua`：详情页“仅坐骑”和重置时间标签。
+- 该重构属于**纯结构优化**，不改变现有玩家可见行为，也不改变 `Toolbox.EJ`、`Toolbox.Questlines` 的对外契约。
 
 ### 5.3 数据来源
 
@@ -186,3 +199,4 @@
 | 2026-04-12 | 更新：任务页签重构为“资料片 -> 分类 -> 任务线 -> 任务”导航，详情改为 tooltip + 点击弹框 |
 | 2026-04-13 | 更新：任务页签最终改为左侧资料片树，资料片下收纳“地图任务线 / 任务类型”，地图主区使用任务线单展开列表 |
 | 2026-04-13 | 文档收口：`encounter_journal` 的导航与名称来源子专题并回主设计文档，后续不再维护平行子设计文件 |
+| 2026-04-14 | 补充：确认 `EncounterJournal.lua` 可按私有实现文件拆分，模块边界、存档键与对外 API 保持不变 |
