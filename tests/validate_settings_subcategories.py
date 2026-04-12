@@ -338,8 +338,9 @@ def validate_encounter_journal_questline_tree_feature() -> None:
 
     require_contains(config_text, "questlineTreeEnabled", "encounter journal questline tree setting default")
     require_contains(config_text, "questNavExpansionID", "encounter journal quest navigation expansion default")
-    require_contains(config_text, "questNavCategoryKey", "encounter journal quest navigation category default")
-    require_contains(config_text, "questNavSelectedQuestLineID", "encounter journal quest navigation selected questline default")
+    require_contains(config_text, "questNavModeKey", "encounter journal quest navigation mode default")
+    require_contains(config_text, "questNavSelectedMapID", "encounter journal quest navigation selected map default")
+    require_contains(config_text, "questNavExpandedQuestLineID", "encounter journal quest navigation expanded questline default")
 
     require_contains(locale_text, "EJ_QUESTLINE_TREE_LABEL", "questline tree label locale")
     require_contains(locale_text, "EJ_QUESTLINE_TREE_EMPTY", "questline tree empty locale")
@@ -382,9 +383,9 @@ def validate_encounter_journal_questline_tree_feature() -> None:
     if "detailObject.mapID" in module_text:
         raise AssertionError("encounter journal should not read detail mapID from legacy field")
     require_contains(module_text, "selectedExpansionID", "encounter journal quest tab keeps selected expansion state")
-    require_contains(module_text, "selectedCategoryKey", "encounter journal quest tab keeps selected category state")
-    require_contains(module_text, "expansionButtons", "encounter journal quest tab has expansion navigation buttons")
-    require_contains(module_text, "categoryButtons", "encounter journal quest tab has category navigation buttons")
+    require_contains(module_text, "selectedModeKey", "encounter journal quest tab keeps selected mode state")
+    require_contains(module_text, "breadcrumbButtons", "encounter journal quest tab has breadcrumb navigation buttons")
+    require_contains(module_text, "breadcrumbFrame", "encounter journal quest tab has breadcrumb container")
     require_contains(module_text, "detailPopupFrame", "encounter journal quest tab uses popup for quest detail")
     require_contains(module_text, "EJ_QUESTLINE_TREE_LABEL", "encounter journal renders questline tab label")
     require_contains(module_text, "if journalFrame and type(journalFrame.Tabs) == \"table\" then", "encounter journal reads native root tabs from encounter journal tabs list")
