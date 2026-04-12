@@ -61,7 +61,7 @@
 2. 副本列表中的锁定信息叠加显示与悬停详情。
 3. 副本详情页掉落列表中的“仅坐骑”筛选。
 4. 副本详情页当前难度的重置时间标签。
-5. 冒险指南根页中的“任务”页签，以及 `状态 / 类型 / 地图` 三视图。
+5. 冒险指南根页中的“任务”页签，以及左侧 `资料片 -> 地图任务线 / 任务类型` 树导航。
 6. 冒险指南根页签顺序与显隐设置。
 7. 小地图悬停菜单中的“冒险手册”入口与锁定摘要。
 8. `EJMicroButton` tooltip 末尾的当前副本锁定摘要。
@@ -74,8 +74,8 @@
 | 副本列表锁定叠加与 tooltip 详情 | `Toolbox/Modules/EncounterJournal.lua` + `Toolbox.EJ` | 列表行内显示重置时间，悬停补充难度、进度和延长状态。 |
 | 副本详情页“仅坐骑”筛选 | `Toolbox/Modules/EncounterJournal.lua` | 仅在掉落页生效，按当前副本的坐骑掉落集合过滤显示。 |
 | 副本详情页重置标签 | `Toolbox/Modules/EncounterJournal.lua` + `Toolbox.EJ` | 读取当前所选难度的锁定数据，展示“重置：xx”。 |
-| 任务页签与三视图 | `Toolbox/Modules/EncounterJournal.lua` + `Toolbox.Questlines` | 模块负责 UI、选择状态与页签接管；领域 API 负责任务模型和运行时字段。 |
-| 任务运行时模型 | `Toolbox/Core/API/QuestlineProgress.lua` | 负责静态结构缓存、任务日志枚举、任务详情和各视图聚合。 |
+| 任务页签与导航模型 | `Toolbox/Modules/EncounterJournal.lua` + `Toolbox.Questlines` | 模块负责左侧资料片树、地图主区折叠列表、类型任务列表与详情弹框；领域 API 负责任务导航模型、资料片归属和运行时字段。 |
+| 任务运行时模型 | `Toolbox/Core/API/QuestlineProgress.lua` | 负责静态结构缓存、资料片导航模型、任务日志枚举、任务详情和任务进度聚合。 |
 | 副本锁定查询与摘要拼装 | `Toolbox/Core/API/EncounterJournal.lua` | 负责当前角色副本锁定汇总、难度匹配、坐骑掉落集合和 tooltip 文本拼装。 |
 | 小地图“冒险手册”入口 | `Toolbox/Modules/MinimapButton.lua` | 内置飞出项，点击后加载并打开 `Blizzard_EncounterJournal`。 |
 | `EJMicroButton` tooltip 锁定摘要 | `Toolbox/Modules/EncounterJournal.lua` | 在右下角微型按钮 tooltip 末尾追加当前锁定摘要，与小地图摘要同源。 |
@@ -86,7 +86,7 @@
 |------|------|------|
 | 坐骑掉落映射 | `Toolbox.Data.MountDrops` | 判断某个冒险指南副本是否存在坐骑掉落，并构建详情页“仅坐骑”物品集合。 |
 | 冒险指南副本到地图 ID 映射 | `Toolbox.Data.InstanceMapIDs` | 将 `GetSavedInstanceInfo` 返回的实例 ID 反查为 `journalInstanceID`。 |
-| 任务线静态结构 | `Toolbox.Data.InstanceQuestlines` | 提供任务线、地图、任务链路等稳定 DB 结构；`questLines` 块仅保留 `ID` / `UiMapID`，任务线名称只以 Lua 尾注释保留。 |
+| 任务线静态结构 | `Toolbox.Data.InstanceQuestlines` | 提供任务线、地图、资料片归属与任务链路等稳定 DB 结构；`questLines` 块保留 `ID` / `UiMapID` / `ExpansionID`，任务线名称只以 Lua 尾注释保留。 |
 | 任务类型名称 | `C_QuestLog.GetQuestTagInfo` | 在构建类型索引时，按代表任务读取运行时 `tagName`；失败时回退到 `Unknown Type (%s)`。 |
 | 角色副本锁定 | `GetNumSavedInstances` / `GetSavedInstanceInfo` | 生成副本列表叠加文案、详情页重置标签和两处锁定摘要。 |
 | 任务日志运行时字段 | `C_QuestLog.*` / 兼容 API | 提供任务名、任务状态、可交付状态、任务类型、任务类型显示名、当前任务列表等运行时信息。 |
@@ -109,10 +109,14 @@
 #### 5.4.3 任务页签
 
 - 在冒险指南根页签中新增“任务”页签。
-- 任务页签支持 `状态 / 类型 / 地图` 三视图。
-- `状态` 视图左侧显示当前任务日志中的“当前任务”列表，右侧显示所选任务所属的完整任务线；任务线名称优先使用运行时 API，失败时回退为 `QuestLine #<id>`；没有任务线映射时回退为任务详情。
-- `类型` 与 `地图` 视图继续按统一模型组织任务、任务线与详情区。
-- 模块记忆视图模式、选中项和树节点折叠状态；任务模型改为“静态结构缓存 + 动态字段按需查询”。
+- 左侧第一层固定为资料片列表；选中某个资料片后，展开两个子入口：`地图任务线` 与 `任务类型`。
+- `地图任务线` 入口下显示当前资料片的地图列表；选中地图后，主区显示任务线单行列表。
+- 地图主区中的每条任务线独占一行；点击后在原地展开其任务列表，再次点击折叠；同一时刻只展开一条任务线。
+- `任务类型` 入口下显示归并后的任务类型大类；选中某个类型后，主区直接显示任务列表，不再增加任务线中间层。
+- 任务线名称优先使用运行时 API，失败时回退为 `QuestLine #<id>`。
+- 任务列表只显示任务名称；鼠标悬停显示 tooltip；点击后显示任务详情弹框，不再在主界面右侧内嵌详情文本。
+- 若任务具备任务线归属，详情弹框提供“跳转到对应地图 / 任务线”的入口，并自动展开目标任务线。
+- 模块记忆当前资料片、当前模式、当前地图 / 类型大类和当前展开任务线；旧的顶部分类与更早的三视图状态已迁移并清理。
 - 设置页提供冒险指南主页页签顺序与显隐编辑器，支持拖拽排序、即时显隐和恢复默认顺序。
 
 #### 5.4.4 外部入口与摘要
@@ -129,17 +133,15 @@
 - `lockoutOverlayEnabled`
 - `detailMountOnlyEnabled`
 - `questlineTreeEnabled`
-- `questlineTreeCollapsed`
-- `questlineTreeSelection`
-- `questViewMode`
-- `questViewSelectedMapID`
-- `questViewSelectedTypeID`
-- `questViewSelectedQuestLineID`
-- `questViewSelectedQuestID`
+- `questNavExpansionID`
+- `questNavModeKey`
+- `questNavSelectedMapID`
+- `questNavSelectedTypeKey`
+- `questNavExpandedQuestLineID`
 - `rootTabOrderIds`
 - `rootTabHiddenIds`
 
-这些字段分别对应列表筛选、锁定叠加、详情页过滤、任务页签开关、三视图浏览状态与根页签排序设置。旧的 `ej_mount_filter` 与 `dungeon_raid_directory` 相关存档已迁移或清理，不再作为当前设计的一部分。
+这些字段分别对应列表筛选、锁定叠加、详情页过滤、任务页签开关、新左树状态与根页签排序设置。旧的 `questView*`、`questNavCategoryKey`、`questNavSelectedQuestLineID`、`questlineTreeCollapsed`、`questlineTreeSelection`、`ej_mount_filter` 与 `dungeon_raid_directory` 相关存档已迁移或清理，不再作为当前设计的一部分。
 
 ## 6. 影响面
 
@@ -159,7 +161,7 @@
 - 风险：
   静态数据表与运行时 API 若出现版本偏差，会影响坐骑筛选和任务线展示完整性。
 - 风险：
-  任务页签依赖 `C_QuestLog` 运行时数据，部分任务可能没有可识别类型或没有任务线映射。
+  任务页签依赖 `C_QuestLog` 运行时数据与导出的 `ExpansionID` 字段，个别任务或任务线可能出现“未知类型”或“未归类资料片”回退。
 - 回退或缓解方式：
   各子能力均受模块总开关和对应设置控制；当某项能力失效时，可单独关闭该子开关而不影响其它冒险指南增强。
 
@@ -168,7 +170,7 @@
 - 逻辑验证：
   运行 `python tests/run_all.py --ci`，确认静态校验与 `tests/logic/spec` 中的冒险指南相关用例通过。
 - 游戏内验证：
-  检查副本列表“仅坐骑”、CD 叠加、tooltip 详情、详情页“仅坐骑”、详情页重置标签、任务页签三视图、根页签排序设置、小地图与 `EJMicroButton` 锁定摘要是否均可用。
+  检查副本列表“仅坐骑”、CD 叠加、tooltip 详情、详情页“仅坐骑”、详情页重置标签、任务页签左侧资料片树、资料片下两个入口、地图列表、任务线折叠展开、类型任务列表、tooltip、详情弹框、详情回跳、根页签排序设置、小地图与 `EJMicroButton` 锁定摘要是否均可用。
 - 文档验证：
   `FEATURES.md`、`Toolbox-addon-design.md` 与本文件的模块归属、数据来源和能力边界必须保持一致。
 
@@ -179,3 +181,5 @@
 | 2026-04-12 | 首版：按当前代码现状归并冒险指南全部能力，统一模块归属、数据来源与入口说明 |
 | 2026-04-12 | 补充：任务页签中的任务线名称改为运行时 API 优先、静态名称兜底 |
 | 2026-04-12 | 调整：`InstanceQuestlines.questLines` 不再导出 `Name_lang` 字段，只保留 Lua 注释；运行时失败回退为 `QuestLine #<id>` |
+| 2026-04-12 | 更新：任务页签重构为“资料片 -> 分类 -> 任务线 -> 任务”导航，详情改为 tooltip + 点击弹框 |
+| 2026-04-13 | 更新：任务页签最终改为左侧资料片树，资料片下收纳“地图任务线 / 任务类型”，地图主区使用任务线单展开列表 |

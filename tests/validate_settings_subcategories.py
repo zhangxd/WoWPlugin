@@ -337,37 +337,41 @@ def validate_encounter_journal_questline_tree_feature() -> None:
     require_contains(toc_text, "Core\\API\\QuestlineProgress.lua", "questline api toc entry")
 
     require_contains(config_text, "questlineTreeEnabled", "encounter journal questline tree setting default")
-    require_contains(config_text, "questlineTreeCollapsed", "encounter journal questline tree collapsed default")
+    require_contains(config_text, "questNavExpansionID", "encounter journal quest navigation expansion default")
+    require_contains(config_text, "questNavCategoryKey", "encounter journal quest navigation category default")
+    require_contains(config_text, "questNavSelectedQuestLineID", "encounter journal quest navigation selected questline default")
 
     require_contains(locale_text, "EJ_QUESTLINE_TREE_LABEL", "questline tree label locale")
     require_contains(locale_text, "EJ_QUESTLINE_TREE_EMPTY", "questline tree empty locale")
     require_contains(locale_text, "EJ_QUESTLINE_TREE_TYPE_MAP", "questline tree map type locale")
     require_contains(locale_text, "EJ_QUESTLINE_PROGRESS_FMT", "questline tree progress locale")
+    require_contains(locale_text, "EJ_QUEST_EXPANSION_UNKNOWN_FMT", "questline expansion fallback locale")
 
     require_contains(questline_api_text, "Toolbox.Questlines", "questline namespace")
     require_contains(questline_api_text, "function Toolbox.Questlines.GetChainProgress(", "questline chain progress api")
     require_contains(questline_api_text, "function Toolbox.Questlines.ValidateInstanceQuestlinesData(", "questline strict validation api")
     require_contains(questline_api_text, "function Toolbox.Questlines.GetQuestTabModel(", "questline quest tab model api")
+    require_contains(questline_api_text, "function Toolbox.Questlines.GetQuestNavigationModel(", "questline navigation model api")
     require_contains(questline_api_text, "function Toolbox.Questlines.GetQuestListByQuestLineID(", "questline list api")
     require_contains(questline_api_text, "function Toolbox.Questlines.GetQuestDetailByID(", "quest detail api")
     if "function Toolbox.Questlines.GetExpansionTree(" in questline_api_text:
         raise AssertionError("questline api should not keep legacy GetExpansionTree compatibility")
     if "function Toolbox.Questlines.GetInstanceTree(" in questline_api_text:
         raise AssertionError("questline api should not keep legacy GetInstanceTree compatibility")
-    if "schemaVersion = 3" not in data_text and "schemaVersion = 4" not in data_text:
-        raise AssertionError("missing questline data schema version: expected schemaVersion = 3 or schemaVersion = 4")
+    if "schemaVersion = 3" not in data_text and "schemaVersion = 4" not in data_text and "schemaVersion = 5" not in data_text:
+        raise AssertionError("missing questline data schema version: expected schemaVersion = 3, 4 or 5")
     require_contains(data_text, 'sourceMode = "live"', "questline data source mode")
     require_contains(data_text, "generatedAt = ", "questline data generated timestamp")
     require_contains(data_text, "quests = {", "questline data quests table")
     require_contains(data_text, "questLines = {", "questline data questlines table")
     if "questLineQuestIDs = {" not in data_text and "questLineXQuest = {" not in data_text:
         raise AssertionError("missing questline data questline relation block")
+    require_contains(data_text, "ExpansionID =", "questline data expansion id field")
     require_contains(questline_api_text, "function Toolbox.Questlines.SetDataOverride(", "questline mock data override api")
 
     require_contains(module_text, "QuestlineTreeView", "encounter journal questline tree view")
     require_contains(module_text, "questlineTreeEnabled", "encounter journal questline tree setting usage")
-    require_contains(module_text, "Toolbox.Questlines.GetQuestTabModel", "encounter journal uses quest tab model api")
-    require_contains(module_text, "Toolbox.Questlines.GetQuestLinesForSelection", "encounter journal uses selection questline query api")
+    require_contains(module_text, "Toolbox.Questlines.GetQuestNavigationModel", "encounter journal uses quest navigation model api")
     require_contains(module_text, "Toolbox.Questlines.GetQuestListByQuestLineID", "encounter journal uses questline task list api")
     require_contains(module_text, "Toolbox.Questlines.GetQuestDetailByID", "encounter journal uses quest detail api")
     require_contains(module_text, "detailObject.UiMapID", "encounter journal quest detail uses UiMapID field")
@@ -377,9 +381,11 @@ def validate_encounter_journal_questline_tree_feature() -> None:
         raise AssertionError("encounter journal should not read questline mapID from legacy field")
     if "detailObject.mapID" in module_text:
         raise AssertionError("encounter journal should not read detail mapID from legacy field")
-    require_contains(module_text, "selectedKind", "encounter journal quest tab uses selection state machine")
-    require_contains(module_text, "leftTree", "encounter journal quest tab has left tree container")
-    require_contains(module_text, "rightContent", "encounter journal quest tab has right content container")
+    require_contains(module_text, "selectedExpansionID", "encounter journal quest tab keeps selected expansion state")
+    require_contains(module_text, "selectedCategoryKey", "encounter journal quest tab keeps selected category state")
+    require_contains(module_text, "expansionButtons", "encounter journal quest tab has expansion navigation buttons")
+    require_contains(module_text, "categoryButtons", "encounter journal quest tab has category navigation buttons")
+    require_contains(module_text, "detailPopupFrame", "encounter journal quest tab uses popup for quest detail")
     require_contains(module_text, "EJ_QUESTLINE_TREE_LABEL", "encounter journal renders questline tab label")
     require_contains(module_text, "if journalFrame and type(journalFrame.Tabs) == \"table\" then", "encounter journal reads native root tabs from encounter journal tabs list")
     if "_G.EncounterJournalRaidTab" in module_text or "_G.EncounterJournalTutorialsTab" in module_text:
@@ -430,8 +436,6 @@ def validate_encounter_journal_questline_tree_feature() -> None:
     require_contains(module_text, "currentRootState == \"native\"", "encounter journal guards native restore by target state")
     require_contains(module_text, "UIPanelScrollFrameTemplate", "encounter journal quest tree uses scrollable container")
     require_contains(module_text, "self.scrollFrame:SetScrollChild(self.scrollChild)", "encounter journal quest tree binds scroll child")
-    if "collapseState[rowData.collapseKey]" not in module_text and "setTreeNodeCollapsed(" not in module_text:
-        raise AssertionError("encounter journal quest tree should update collapsed state on row click")
     if 'CreateFrame("Button", "ToolboxEJQuestlineTab", infoFrame, "UIPanelButtonTemplate")' in module_text:
         raise AssertionError("questline entry should be a tab template, not a plain panel button template")
 

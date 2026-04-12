@@ -17,6 +17,20 @@ describe("QuestlineProgress live data validation", function()
     rawset(_G, "Toolbox", {
       Data = {},
       Questlines = {},
+      L = {
+        EJ_QUEST_EXPANSION_UNKNOWN_FMT = "Expansion #%s",
+        EJ_QUEST_EXPANSION_0 = "Classic",
+        EJ_QUEST_EXPANSION_1 = "The Burning Crusade",
+        EJ_QUEST_EXPANSION_2 = "Wrath of the Lich King",
+        EJ_QUEST_EXPANSION_3 = "Cataclysm",
+        EJ_QUEST_EXPANSION_4 = "Mists of Pandaria",
+        EJ_QUEST_EXPANSION_5 = "Warlords of Draenor",
+        EJ_QUEST_EXPANSION_6 = "Legion",
+        EJ_QUEST_EXPANSION_7 = "Battle for Azeroth",
+        EJ_QUEST_EXPANSION_8 = "Shadowlands",
+        EJ_QUEST_EXPANSION_9 = "Dragonflight",
+        EJ_QUEST_EXPANSION_10 = "The War Within",
+      },
     })
     rawset(_G, "C_QuestLog", {
       GetTitleForQuestID = function(questID)
@@ -97,5 +111,33 @@ describe("QuestlineProgress live data validation", function()
         end
       end
     end
+  end)
+
+  it("quest_navigation_model_uses_live_expansion_ids", function()
+    local navigationModel, errorObject = Toolbox.Questlines.GetQuestNavigationModel() -- 资料片导航模型
+    if errorObject ~= nil then
+      local messageText = string.format(
+        "live navigation build failed: code=%s path=%s message=%s",
+        tostring(errorObject and errorObject.code),
+        tostring(errorObject and errorObject.path),
+        tostring(errorObject and errorObject.message)
+      )
+      error(messageText)
+    end
+
+    assert.is_truthy(type(navigationModel) == "table")
+    assert.is_truthy(type(navigationModel.expansionList) == "table")
+    assert.is_true(#navigationModel.expansionList > 0)
+    assert.is_truthy(type(navigationModel.expansionByID) == "table")
+
+    local firstExpansion = navigationModel.expansionList[1] -- 首个资料片入口
+    assert.is_truthy(type(firstExpansion) == "table")
+    assert.is_truthy(type(firstExpansion.id) == "number")
+    assert.is_truthy(type(firstExpansion.name) == "string" and firstExpansion.name ~= "")
+
+    local expansionEntry = navigationModel.expansionByID[firstExpansion.id] -- 首个资料片详情
+    assert.is_truthy(type(expansionEntry) == "table")
+    assert.is_truthy(type(expansionEntry.modes) == "table")
+    assert.is_truthy(type(expansionEntry.modeByKey) == "table")
   end)
 end)

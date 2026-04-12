@@ -119,7 +119,7 @@ flowchart TB
 | `Toolbox.Chat` | `Core/API/Chat.lua` | 面向玩家的默认聊天框输出（`PrintAddonMessage`）、插件 TOC 元数据（`GetAddOnMetadata`）。**模块内禁止**直接调用 `DEFAULT_CHAT_FRAME:AddMessage`；新增聊天类能力须先扩展本 API。 |
 | `Toolbox.Tooltip` | `Core/API/Tooltip.lua` | `InstallDefaultAnchorHook()`、`RefreshDriver()`；读取 `modules.tooltip_anchor`。**模块 tooltip_anchor** 仅负责 `RegisterModule` 与设置 UI，不直接 `hooksecurefunc` GameTooltip。 |
 | `Toolbox.EJ` | `Core/API/EncounterJournal.lua` | 冒险指南相关高层查询入口：当前页签语境、坐骑掉落集合、实例锁定、当前难度锁定、当前角色锁定摘要与 tooltip 行文本。业务模块禁止直接复制 `GetSavedInstanceInfo` / `EJ_*` 查询逻辑。 |
-| `Toolbox.Questlines` | `Core/API/QuestlineProgress.lua` | 任务线静态结构缓存、任务线显示名解析、运行时任务字段、当前任务日志、任务详情、任务线进度与三视图聚合。`InstanceQuestlines.questLines` 只保留稳定关系字段，任务线名称不再作为结构化运行时字段导出。任务页签 UI 通过本 API 获取模型，而不是直接拼装静态数据。 |
+| `Toolbox.Questlines` | `Core/API/QuestlineProgress.lua` | 任务线静态结构缓存、任务线显示名解析、运行时任务字段、任务导航模型、当前任务日志、任务详情与任务线进度。`InstanceQuestlines.questLines` 保留 `ID / UiMapID / ExpansionID` 等稳定关系字段，任务线名称不再作为结构化运行时字段导出。任务页签 UI 通过本 API 获取模型，而不是直接拼装静态数据。 |
 | `Toolbox.MinimapButton` | `Modules/MinimapButton.lua` | `RegisterFlyoutEntry(def)` 供其他模块向小地图按钮悬停菜单追加项；`def` 至少包含 `id` 与 `onClick`，可选 `titleKey`/`tooltipKey`/`icon`/`order`/`augmentTooltip`（用于在悬停提示中追加动态内容）。禁止直接操作 `flyoutRegistry` 或 `flyoutSlotIds`。 |
 
 **模块间协作原则**
@@ -170,7 +170,7 @@ sequenceDiagram
 | Tooltip 锚点 | `tooltip_anchor` | `modules.tooltip_anchor`（`enabled`/`debug`/`mode`/`offsetX`/`offsetY`） | 独立子页面：启用、调试、清理并重建、锚点模式与偏移 |
 | 小地图打开设置按钮 | `minimap_button` | `modules.minimap_button`（`enabled`/`debug`/`showMinimapButton`/`showCoordsOnMinimap`/`minimapCoordsAnchor`/`minimapPos`/`buttonShape`/`flyoutExpand`/`flyoutSlotIds`/`flyoutLauncherGap`/`flyoutPad`/`flyoutGap`） | 独立子页面：启用、调试、清理并重建、是否显示小地图按钮、坐标显示、恢复默认位置；款式（圆/方）、展开方式（纵向/横向）、悬停项顺序与功能池拖放、`flyoutSlotIds`；内置“冒险手册”飞出项会打开冒险指南，并在 tooltip 里追加当前副本锁定摘要。 |
 | 加载聊天提示 | `chat_notify` | `modules.chat_notify`（`enabled`/`debug`） | 独立子页面：启用、调试、清理并重建、说明文案 |
-| 冒险指南增强 | `encounter_journal` | `modules.encounter_journal`（`enabled`/`debug`/`mountFilterEnabled`/`lockoutOverlayEnabled`/`detailMountOnlyEnabled`/`questlineTreeEnabled`/`questlineTreeCollapsed`/`questlineTreeSelection`/`questViewMode`/`questViewSelected*`/`rootTabOrderIds`/`rootTabHiddenIds`）+ `Toolbox.Data.MountDrops` + `Toolbox.Data.InstanceMapIDs` + `Toolbox.Data.InstanceQuestlines` + `Toolbox.EJ` + `Toolbox.Questlines` + `C_QuestLog.GetQuestTagInfo` | 覆盖副本列表“仅坐骑”、列表锁定叠加、悬停锁定详情、详情页“仅坐骑”、详情页重置标签、任务页签三视图、主页页签顺序/显隐设置，以及 `EJMicroButton` tooltip 锁定摘要。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
+| 冒险指南增强 | `encounter_journal` | `modules.encounter_journal`（`enabled`/`debug`/`mountFilterEnabled`/`lockoutOverlayEnabled`/`detailMountOnlyEnabled`/`questlineTreeEnabled`/`questNavExpansionID`/`questNavModeKey`/`questNavSelectedMapID`/`questNavSelectedTypeKey`/`questNavExpandedQuestLineID`/`rootTabOrderIds`/`rootTabHiddenIds`）+ `Toolbox.Data.MountDrops` + `Toolbox.Data.InstanceMapIDs` + `Toolbox.Data.InstanceQuestlines` + `Toolbox.EJ` + `Toolbox.Questlines` + `C_QuestLog.GetQuestTagInfo` | 覆盖副本列表“仅坐骑”、列表锁定叠加、悬停锁定详情、详情页“仅坐骑”、详情页重置标签、任务页签左侧资料片树、资料片下 `地图任务线 / 任务类型` 双入口、地图主区任务线单展开列表、类型任务列表、任务 tooltip / 详情弹框与详情回跳、主页页签顺序/显隐设置，以及 `EJMicroButton` tooltip 锁定摘要。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
 | （核心不提供业务数据） | — | `global` 其余键 | 调试、开发者选项可放 `global` |
 
 新增功能时：**新增一行 + 新文件 + TOC 一条**，不必改核心契约。
@@ -201,13 +201,11 @@ ToolboxDB = {
       lockoutOverlayEnabled = true,
       detailMountOnlyEnabled = false,
       questlineTreeEnabled = true,
-      questlineTreeCollapsed = {},
-      questlineTreeSelection = {},
-      questViewMode = "status",
-      questViewSelectedMapID = 0,
-      questViewSelectedTypeID = 0,
-      questViewSelectedQuestLineID = 0,
-      questViewSelectedQuestID = 0,
+      questNavExpansionID = 0,
+      questNavModeKey = "map_questline",
+      questNavSelectedMapID = 0,
+      questNavSelectedTypeKey = "",
+      questNavExpandedQuestLineID = 0,
       rootTabOrderIds = {},
       rootTabHiddenIds = {},
     },
@@ -311,7 +309,7 @@ ToolboxDB = {
 | **领域对外 API** | `Toolbox.EJ` 负责锁定、坐骑掉落和锁定摘要；`Toolbox.Questlines` 负责任务线静态结构、运行时任务字段和三视图聚合。 |
 | **列表增强** | 提供“仅坐骑”筛选、列表行内 CD 叠加、悬停锁定详情。 |
 | **详情页增强** | 在掉落页提供“仅坐骑”筛选；在详情页标题区域显示当前难度的重置时间。 |
-| **任务页签** | 新增“任务”页签，支持 `状态 / 类型 / 地图` 三视图，记录视图模式、选中项和折叠状态；设置页可调整冒险指南根页签顺序与显隐。 |
+| **任务页签** | 新增“任务”页签，左侧第一层固定为资料片树；资料片下展开 `地图任务线 / 任务类型` 两个子入口。地图路径下主区采用任务线单展开列表，类型路径下主区直接显示任务列表，任务详情改为 tooltip + 点击弹框，并支持回跳到对应地图 / 任务线；设置页可调整冒险指南根页签顺序与显隐。 |
 | **外部入口** | 小地图飞出菜单中的“冒险手册”项和 `EJMicroButton` tooltip 都会显示当前副本锁定摘要。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
 
 ---
@@ -382,3 +380,5 @@ ToolboxDB = {
 | 2026-04-10 | 任务线链路对齐：`InstanceQuestlines` 升级并按 schema v3 使用；`QuestlineProgress` 增加 `SetDataOverride`（测试注入）与可恢复容错（坏引用不再导致整页签失效）；补充 `encounter_journal` 任务页签映射说明与离线逻辑测试规范链接 |
 | 2026-04-11 | 任务页签进入多视图阶段：`InstanceQuestlines` 切到 schema v4 DB-shape 文档结构；`Type / NpcIDs / NpcPos` 归入运行时字段层；`Toolbox.Questlines` 负责静态数据 + 动态数据的统一组装；`encounter_journal` 接入状态/类型/地图三视图与新选择状态键 |
 | 2026-04-12 | 按当前代码重写冒险指南相关架构：移除已下线的 `ej_mount_filter` / `dungeon_raid_directory` 表述，对齐 `encounter_journal`、`Toolbox.EJ`、`Toolbox.Questlines`、小地图飞出项与 TOC 实际结构；新增 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md) 作为冒险指南总设计 |
+| 2026-04-12 | 任务页签导航重构：`InstanceQuestlines.questLines` 新增 `ExpansionID`，任务页签改为资料片 / 分类顶部导航与统一任务线 / 任务列表，旧三视图状态迁移为 `questNav*` 键 |
+| 2026-04-13 | 任务页签导航二次重构：资料片固定为左侧一级树，资料片下收纳 `地图任务线 / 任务类型` 两个入口；新增 `questNavModeKey / questNavSelectedMapID / questNavSelectedTypeKey / questNavExpandedQuestLineID` 状态键 |

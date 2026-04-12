@@ -71,17 +71,16 @@ local defaults = {
       detailMountOnlyEnabled = false,
       -- 任务页签（与 EJ 副本 ID 解耦，仅作为展示容器）
       questlineTreeEnabled = true,
-      -- 折叠状态：key=true 表示该节点折叠（由任务树视图使用）
-      questlineTreeCollapsed = {},
-      -- 任务页签选中状态（左树 + 右内容区）
-      questlineTreeSelection = {},
-      -- 任务页签视图模式：status | type | map
-      questViewMode = "status",
-      -- 任务页签选择记忆（0 表示未选中）
-      questViewSelectedMapID = 0,
-      questViewSelectedTypeID = 0,
-      questViewSelectedQuestLineID = 0,
-      questViewSelectedQuestID = 0,
+      -- 左侧树：当前资料片（0 表示运行时自动选择首项）
+      questNavExpansionID = 0,
+      -- 左侧树：当前模式（map_questline | quest_type）
+      questNavModeKey = "map_questline",
+      -- 左侧树：当前地图（0 表示未选中）
+      questNavSelectedMapID = 0,
+      -- 左侧树：当前类型大类键（空字符串表示未选中）
+      questNavSelectedTypeKey = "",
+      -- 主区：当前展开的任务线（0 表示全部折叠）
+      questNavExpandedQuestLineID = 0,
       -- 根页签顺序（按页签 ID，自定义任务页签固定 ID=203）
       rootTabOrderIds = {},
       -- 根页签隐藏开关（按页签 ID）：[id]=true 表示隐藏对应页签
@@ -224,7 +223,7 @@ function Toolbox.Config.Init()
     ToolboxDB.version = 2
   end
 
-  -- encounter_journal：任务树字段迁移（幂等，不依赖全局 version）。
+  -- encounter_journal：任务树/导航字段迁移（幂等，不依赖全局 version）。
   local encounterJournalDb = ToolboxDB.modules and ToolboxDB.modules.encounter_journal
   if type(encounterJournalDb) == "table" then
     -- 旧字段 questlineTreeExpanded（true=展开）迁到 questlineTreeCollapsed（true=折叠）
@@ -237,29 +236,56 @@ function Toolbox.Config.Init()
       end
     end
     encounterJournalDb.questlineTreeExpanded = nil
-    if type(encounterJournalDb.questlineTreeSelection) ~= "table" then
-      encounterJournalDb.questlineTreeSelection = {}
+
+    if type(encounterJournalDb.questNavExpansionID) ~= "number" then
+      encounterJournalDb.questNavExpansionID = 0
     end
 
-    if type(encounterJournalDb.questViewMode) ~= "string" or encounterJournalDb.questViewMode == "" then
-      encounterJournalDb.questViewMode = "status"
+    local legacyViewMode = encounterJournalDb.questViewMode -- 旧版视图模式
+    local legacyCategoryKey = encounterJournalDb.questNavCategoryKey -- 上一轮顶部分类键
+    if legacyViewMode == "type" or legacyCategoryKey == "type" then
+      encounterJournalDb.questNavModeKey = "quest_type"
+    elseif encounterJournalDb.questNavModeKey ~= "map_questline" and encounterJournalDb.questNavModeKey ~= "quest_type" then
+      encounterJournalDb.questNavModeKey = "map_questline"
     end
 
-    if type(encounterJournalDb.questViewSelectedMapID) ~= "number" then
-      local legacyMapID = encounterJournalDb.questlineTreeSelection.selectedMapID -- 旧版地图选中 ID
-      encounterJournalDb.questViewSelectedMapID = type(legacyMapID) == "number" and legacyMapID or 0
+    local legacyMapID = encounterJournalDb.questViewSelectedMapID -- 旧版地图选中 ID
+    if type(legacyMapID) == "number" and legacyMapID > 0 then
+      encounterJournalDb.questNavSelectedMapID = legacyMapID
+    elseif type(encounterJournalDb.questNavSelectedMapID) ~= "number" then
+      encounterJournalDb.questNavSelectedMapID = 0
     end
-    if type(encounterJournalDb.questViewSelectedQuestLineID) ~= "number" then
-      local legacyQuestLineID = encounterJournalDb.questlineTreeSelection.selectedQuestLineID -- 旧版任务线选中 ID
-      encounterJournalDb.questViewSelectedQuestLineID = type(legacyQuestLineID) == "number" and legacyQuestLineID or 0
+
+    local legacyTypeID = encounterJournalDb.questViewSelectedTypeID -- 旧版类型 ID
+    if type(legacyTypeID) == "number" and legacyTypeID > 0 then
+      encounterJournalDb.questNavSelectedTypeKey = "type:" .. tostring(legacyTypeID)
+    elseif type(encounterJournalDb.questNavSelectedTypeKey) ~= "string" then
+      encounterJournalDb.questNavSelectedTypeKey = ""
     end
-    if type(encounterJournalDb.questViewSelectedQuestID) ~= "number" then
-      local legacyQuestID = encounterJournalDb.questlineTreeSelection.selectedQuestID -- 旧版任务选中 ID
-      encounterJournalDb.questViewSelectedQuestID = type(legacyQuestID) == "number" and legacyQuestID or 0
+
+    do
+      local legacySelectionTable = type(encounterJournalDb.questlineTreeSelection) == "table" and encounterJournalDb.questlineTreeSelection or nil -- 旧版选中状态表
+      local legacyQuestLineID = encounterJournalDb.questViewSelectedQuestLineID -- 旧版任务线选中 ID
+      if type(legacyQuestLineID) ~= "number" then
+        legacyQuestLineID = legacySelectionTable and legacySelectionTable.selectedQuestLineID or nil
+      end
+      if type(legacyQuestLineID) == "number" and legacyQuestLineID > 0 then
+        encounterJournalDb.questNavExpandedQuestLineID = legacyQuestLineID
+      elseif type(encounterJournalDb.questNavExpandedQuestLineID) ~= "number" then
+        encounterJournalDb.questNavExpandedQuestLineID = 0
+      end
     end
-    if type(encounterJournalDb.questViewSelectedTypeID) ~= "number" then
-      encounterJournalDb.questViewSelectedTypeID = 0
-    end
+
+    -- 旧版三视图状态与树折叠状态不再驱动新任务导航
+    encounterJournalDb.questNavCategoryKey = nil
+    encounterJournalDb.questNavSelectedQuestLineID = nil
+    encounterJournalDb.questViewMode = nil
+    encounterJournalDb.questViewSelectedMapID = nil
+    encounterJournalDb.questViewSelectedTypeID = nil
+    encounterJournalDb.questViewSelectedQuestLineID = nil
+    encounterJournalDb.questViewSelectedQuestID = nil
+    encounterJournalDb.questlineTreeCollapsed = nil
+    encounterJournalDb.questlineTreeSelection = nil
   end
 end
 

@@ -2682,6 +2682,2169 @@ function QuestlineTreeView:refresh()
 end
 
 -- ============================================================================
+-- 任务页签左树导航（资料片 -> 地图任务线/任务类型）
+-- ============================================================================
+
+local function normalizeQuestNavModeKey(modeKey)
+  if modeKey == "quest_type" then
+    return "quest_type"
+  end
+  return "map_questline"
+end
+
+function QuestlineTreeView:loadSelection()
+  local moduleDb = getModuleDb() -- 模块存档
+  self.selectedExpansionID = normalizeSelectionID(moduleDb.questNavExpansionID)
+  self.selectedModeKey = normalizeQuestNavModeKey(moduleDb.questNavModeKey)
+  self.selectedMapID = normalizeSelectionID(moduleDb.questNavSelectedMapID)
+  self.selectedTypeKey = type(moduleDb.questNavSelectedTypeKey) == "string" and moduleDb.questNavSelectedTypeKey or ""
+  self.expandedQuestLineID = normalizeSelectionID(moduleDb.questNavExpandedQuestLineID)
+  if self.selectedModeKey == "quest_type" then
+    self.expandedQuestLineID = nil
+  end
+  self.selectedQuestID = nil
+end
+
+function QuestlineTreeView:saveSelection()
+  local moduleDb = getModuleDb() -- 模块存档
+  moduleDb.questNavExpansionID = type(self.selectedExpansionID) == "number" and self.selectedExpansionID or 0
+  moduleDb.questNavModeKey = normalizeQuestNavModeKey(self.selectedModeKey)
+  moduleDb.questNavSelectedMapID = type(self.selectedMapID) == "number" and self.selectedMapID or 0
+  moduleDb.questNavSelectedTypeKey = type(self.selectedTypeKey) == "string" and self.selectedTypeKey or ""
+  moduleDb.questNavExpandedQuestLineID = type(self.expandedQuestLineID) == "number" and self.expandedQuestLineID or 0
+end
+
+function QuestlineTreeView:resolveNavigationDefaults(navigationModel)
+  local expansionList = navigationModel and navigationModel.expansionList or {} -- 资料片列表
+  local expansionByID = navigationModel and navigationModel.expansionByID or {} -- 资料片索引
+  if type(self.selectedExpansionID) ~= "number" or type(expansionByID[self.selectedExpansionID]) ~= "table" then
+    self.selectedExpansionID = expansionList[1] and expansionList[1].id or nil
+  end
+
+  self.selectedModeKey = normalizeQuestNavModeKey(self.selectedModeKey)
+  local expansionEntry = type(self.selectedExpansionID) == "number" and expansionByID[self.selectedExpansionID] or nil -- 当前资料片
+  if type(expansionEntry) ~= "table" then
+    self.selectedMapID = nil
+    self.selectedTypeKey = ""
+    self.expandedQuestLineID = nil
+    return nil
+  end
+
+  local modeByKey = expansionEntry.modeByKey or {} -- 模式索引
+  if type(modeByKey[self.selectedModeKey]) ~= "table" then
+    self.selectedModeKey = "map_questline"
+  end
+
+  if self.selectedModeKey == "map_questline" then
+    local modeEntry = modeByKey.map_questline -- 地图模式
+    local firstMapEntry = modeEntry and modeEntry.entries and modeEntry.entries[1] or nil -- 首个地图
+    local hasSelectedMap = false -- 当前地图是否存在
+    for _, mapEntry in ipairs(modeEntry and modeEntry.entries or {}) do
+      if mapEntry.id == self.selectedMapID then
+        hasSelectedMap = true
+        break
+      end
+    end
+    if not hasSelectedMap then
+      self.selectedMapID = firstMapEntry and firstMapEntry.id or nil
+    end
+    self.selectedTypeKey = ""
+  else
+    local modeEntry = modeByKey.quest_type -- 类型模式
+    local firstTypeEntry = modeEntry and modeEntry.entries and modeEntry.entries[1] or nil -- 首个类型
+    local hasSelectedType = false -- 当前类型是否存在
+    for _, typeEntry in ipairs(modeEntry and modeEntry.entries or {}) do
+      if tostring(typeEntry.id) == self.selectedTypeKey then
+        hasSelectedType = true
+        break
+      end
+    end
+    if not hasSelectedType then
+      self.selectedTypeKey = firstTypeEntry and tostring(firstTypeEntry.id) or ""
+    end
+    self.selectedMapID = nil
+    self.expandedQuestLineID = nil
+  end
+
+  return expansionEntry
+end
+
+function QuestlineTreeView:buildLeftTreeRows(navigationModel)
+  local rowDataList = {} -- 左侧树行数据
+  local expansionList = navigationModel and navigationModel.expansionList or {} -- 资料片列表
+  local expansionByID = navigationModel and navigationModel.expansionByID or {} -- 资料片索引
+
+  for _, expansionEntry in ipairs(expansionList) do
+    local expansionSelected = self.selectedExpansionID == expansionEntry.id -- 资料片是否选中
+    rowDataList[#rowDataList + 1] = {
+      kind = "expansion",
+      text = tostring(expansionEntry.name or ""),
+      selected = expansionSelected,
+      expansionID = expansionEntry.id,
+    }
+    if expansionSelected then
+      local fullExpansionEntry = expansionByID[expansionEntry.id] -- 完整资料片对象
+      for _, modeEntry in ipairs(fullExpansionEntry and fullExpansionEntry.modes or {}) do
+        local modeSelected = self.selectedModeKey == modeEntry.key -- 模式是否选中
+        rowDataList[#rowDataList + 1] = {
+          kind = "mode",
+          text = tostring(modeEntry.name or ""),
+          selected = modeSelected,
+          expansionID = expansionEntry.id,
+          modeKey = modeEntry.key,
+        }
+        if modeSelected then
+          for _, childEntry in ipairs(modeEntry.entries or {}) do
+            rowDataList[#rowDataList + 1] = {
+              kind = childEntry.kind,
+              text = tostring(childEntry.name or ""),
+              selected = (childEntry.kind == "map" and self.selectedMapID == childEntry.id)
+                or (childEntry.kind == "type_group" and self.selectedTypeKey == tostring(childEntry.id)),
+              expansionID = expansionEntry.id,
+              modeKey = modeEntry.key,
+              mapID = childEntry.kind == "map" and childEntry.id or nil,
+              typeKey = childEntry.kind == "type_group" and tostring(childEntry.id) or nil,
+            }
+          end
+        end
+      end
+    end
+  end
+  return rowDataList
+end
+
+function QuestlineTreeView:getOrCreateRowButton(rowIndex)
+  local rowButton = self.rowButtons[rowIndex] -- 左树行按钮
+  if rowButton then
+    return rowButton
+  end
+
+  rowButton = CreateFrame("Button", nil, self.scrollChild)
+  rowButton:SetHeight(self.rowHeight)
+  rowButton:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+  local highlightTexture = rowButton:GetHighlightTexture() -- 高亮贴图
+  if highlightTexture and highlightTexture.SetBlendMode then
+    highlightTexture:SetBlendMode("ADD")
+  end
+
+  local rowFont = rowButton:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+  rowFont:SetPoint("LEFT", rowButton, "LEFT", 2, 0)
+  rowFont:SetPoint("RIGHT", rowButton, "RIGHT", -6, 0)
+  rowFont:SetJustifyH("LEFT")
+  rowFont:SetJustifyV("MIDDLE")
+  rowButton.rowFont = rowFont
+
+  rowButton:SetScript("OnClick", function(button)
+    local rowData = button.rowData -- 当前左树行数据
+    if type(rowData) ~= "table" then
+      return
+    end
+    if rowData.kind == "expansion" and type(rowData.expansionID) == "number" then
+      self.selectedExpansionID = rowData.expansionID
+      self.selectedModeKey = "map_questline"
+      self.selectedMapID = nil
+      self.selectedTypeKey = ""
+      self.expandedQuestLineID = nil
+    elseif rowData.kind == "mode" and type(rowData.modeKey) == "string" then
+      self.selectedExpansionID = rowData.expansionID
+      self.selectedModeKey = normalizeQuestNavModeKey(rowData.modeKey)
+      self.expandedQuestLineID = nil
+    elseif rowData.kind == "map" and type(rowData.mapID) == "number" then
+      self.selectedExpansionID = rowData.expansionID
+      self.selectedModeKey = "map_questline"
+      self.selectedMapID = rowData.mapID
+      self.expandedQuestLineID = nil
+      self.selectedTypeKey = ""
+    elseif rowData.kind == "type_group" and type(rowData.typeKey) == "string" then
+      self.selectedExpansionID = rowData.expansionID
+      self.selectedModeKey = "quest_type"
+      self.selectedTypeKey = rowData.typeKey
+      self.selectedMapID = nil
+      self.expandedQuestLineID = nil
+    end
+    self:hideQuestDetailPopup()
+    self:saveSelection()
+    self:render()
+  end)
+
+  self.rowButtons[rowIndex] = rowButton
+  return rowButton
+end
+
+function QuestlineTreeView:getOrCreateRightRowButton(rowIndex)
+  local rowButton = self.rightRowButtons[rowIndex] -- 主区行按钮
+  if rowButton then
+    return rowButton
+  end
+
+  rowButton = CreateFrame("Button", nil, self.rightScrollChild)
+  rowButton:SetHeight(self.rowHeight)
+  rowButton:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+  local highlightTexture = rowButton:GetHighlightTexture() -- 高亮贴图
+  if highlightTexture and highlightTexture.SetBlendMode then
+    highlightTexture:SetBlendMode("ADD")
+  end
+
+  local rowFont = rowButton:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+  rowFont:SetPoint("LEFT", rowButton, "LEFT", 2, 0)
+  rowFont:SetPoint("RIGHT", rowButton, "RIGHT", -6, 0)
+  rowFont:SetJustifyH("LEFT")
+  rowFont:SetJustifyV("MIDDLE")
+  rowButton.rowFont = rowFont
+
+  rowButton:SetScript("OnEnter", function(button)
+    local rowData = button.rowData -- 当前主区行数据
+    if type(rowData) ~= "table" or rowData.kind ~= "quest" then
+      return
+    end
+    local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(rowData.questID) -- 当前任务详情
+    if not detailError then
+      buildQuestTooltip(detailObject, Toolbox.L or {})
+    end
+  end)
+  rowButton:SetScript("OnLeave", function(button)
+    local rowData = button.rowData -- 当前主区行数据
+    if type(rowData) == "table" and rowData.kind == "quest" and GameTooltip and GameTooltip.Hide then
+      GameTooltip:Hide()
+    end
+  end)
+  rowButton:SetScript("OnClick", function(button)
+    local rowData = button.rowData -- 当前主区行数据
+    if type(rowData) ~= "table" then
+      return
+    end
+    if rowData.kind == "questline" and type(rowData.questLineID) == "number" then
+      if self.expandedQuestLineID == rowData.questLineID then
+        self.expandedQuestLineID = nil
+      else
+        self.expandedQuestLineID = rowData.questLineID
+      end
+      self:hideQuestDetailPopup()
+      self:saveSelection()
+      self:render()
+      return
+    end
+    if rowData.kind == "quest" and type(rowData.questID) == "number" then
+      self.selectedQuestID = rowData.questID
+      self:showQuestDetailPopup(rowData.questID)
+    end
+  end)
+
+  self.rightRowButtons[rowIndex] = rowButton
+  return rowButton
+end
+
+function QuestlineTreeView:buildMainRowsForMap()
+  local rowDataList = {} -- 地图模式主区行
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local questLineList, errorObject = Toolbox.Questlines.GetQuestLinesForMap(self.selectedMapID) -- 当前地图任务线列表
+  if errorObject then
+    return {}, errorObject
+  end
+
+  for _, questLineEntry in ipairs(questLineList or {}) do
+    local progressInfo, progressError = Toolbox.Questlines.GetQuestLineProgress(questLineEntry.id) -- 当前任务线进度
+    local progressText = not progressError and formatProgressText(progressInfo, localeTable) or nil -- 任务线进度文本
+    local prefix = self.expandedQuestLineID == questLineEntry.id and "[-]" or "[+]" -- 展开前缀
+    local lineText = string.format("%s %s", prefix, resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(questLineEntry.id or "?")))
+    if type(progressText) == "string" then
+      lineText = string.format("%s  %s", lineText, progressText)
+    end
+    if type(questLineEntry.questCount) == "number" then
+      lineText = string.format("%s · %d个任务", lineText, questLineEntry.questCount)
+    end
+    rowDataList[#rowDataList + 1] = {
+      kind = "questline",
+      text = lineText,
+      questLineID = questLineEntry.id,
+      selected = self.expandedQuestLineID == questLineEntry.id,
+    }
+
+    if self.expandedQuestLineID == questLineEntry.id then
+      local questList, listError = Toolbox.Questlines.GetQuestListByQuestLineID(questLineEntry.id) -- 当前任务线任务列表
+      if listError then
+        return {}, listError
+      end
+      for _, questEntry in ipairs(questList or {}) do
+        rowDataList[#rowDataList + 1] = {
+          kind = "quest",
+          text = tostring(questEntry.name or ("Quest #" .. tostring(questEntry.id or "?"))),
+          questID = questEntry.id,
+          status = questEntry.status,
+        }
+      end
+    end
+  end
+  return rowDataList, nil
+end
+
+function QuestlineTreeView:buildMainRowsForType()
+  local rowDataList = {} -- 类型模式主区行
+  local questList, errorObject = Toolbox.Questlines.GetTasksForTypeGroup(self.selectedExpansionID, self.selectedTypeKey) -- 当前类型任务列表
+  if errorObject then
+    return {}, errorObject
+  end
+  for _, questEntry in ipairs(questList or {}) do
+    rowDataList[#rowDataList + 1] = {
+      kind = "quest",
+      text = tostring(questEntry.name or ("Quest #" .. tostring(questEntry.id or "?"))),
+      questID = questEntry.id,
+      status = questEntry.status,
+    }
+  end
+  return rowDataList, nil
+end
+
+function QuestlineTreeView:renderLeftRows(rowDataList)
+  local scrollWidth = self.scrollFrame:GetWidth() -- 左树滚动宽度
+  if type(scrollWidth) ~= "number" or scrollWidth <= 0 then
+    scrollWidth = 230
+  end
+  local rowWidth = math.max(140, scrollWidth - 24) -- 行宽
+  local rowOffsetY = 6 -- 顶部留白
+  local rowIndex = 0 -- 行索引
+
+  for _, rowData in ipairs(rowDataList or {}) do
+    rowIndex = rowIndex + 1
+    local rowButton = self:getOrCreateRowButton(rowIndex) -- 当前左树行按钮
+    rowButton.rowData = rowData
+    rowButton:ClearAllPoints()
+    rowButton:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 6, -((rowIndex - 1) * self.rowHeight + rowOffsetY))
+    rowButton:SetWidth(rowWidth)
+    rowButton:SetHeight(self.rowHeight)
+    local indentLevel = 0 -- 缩进层级
+    if rowData.kind == "mode" then
+      indentLevel = 1
+    elseif rowData.kind == "map" or rowData.kind == "type_group" then
+      indentLevel = 2
+    end
+    rowButton.rowFont:SetText(string.rep("  ", indentLevel) .. tostring(rowData.text or ""))
+    if rowData.selected == true then
+      rowButton.rowFont:SetTextColor(0.35, 0.85, 1)
+    else
+      rowButton.rowFont:SetTextColor(1, 1, 1)
+    end
+    rowButton:Show()
+  end
+  for hideIndex = rowIndex + 1, #self.rowButtons do
+    self.rowButtons[hideIndex]:Hide()
+  end
+
+  local contentHeight = rowIndex * self.rowHeight + rowOffsetY + 4 -- 内容高度
+  self.scrollChild:SetSize(rowWidth, math.max(contentHeight, 10))
+end
+
+function QuestlineTreeView:renderRightRows(rowDataList)
+  if not self.rightScrollFrame or not self.rightScrollChild then
+    return
+  end
+  local scrollWidth = self.rightScrollFrame:GetWidth() -- 主区滚动宽度
+  if type(scrollWidth) ~= "number" or scrollWidth <= 0 then
+    scrollWidth = 520
+  end
+  local rowWidth = math.max(180, scrollWidth - 24) -- 行宽
+  local rowOffsetY = 6 -- 顶部留白
+  local rowIndex = 0 -- 行索引
+
+  for _, rowData in ipairs(rowDataList or {}) do
+    rowIndex = rowIndex + 1
+    local rowButton = self:getOrCreateRightRowButton(rowIndex) -- 当前主区行按钮
+    rowButton.rowData = rowData
+    rowButton:ClearAllPoints()
+    rowButton:SetPoint("TOPLEFT", self.rightScrollChild, "TOPLEFT", 6, -((rowIndex - 1) * self.rowHeight + rowOffsetY))
+    rowButton:SetWidth(rowWidth)
+    rowButton:SetHeight(self.rowHeight)
+    local indentLevel = rowData.kind == "quest" and 1 or 0 -- 主区缩进层级
+    rowButton.rowFont:SetText(string.rep("  ", indentLevel) .. tostring(rowData.text or ""))
+    if rowData.selected == true then
+      rowButton.rowFont:SetTextColor(0.35, 0.85, 1)
+    elseif rowData.status == "completed" then
+      rowButton.rowFont:SetTextColor(0.2, 0.8, 0.2)
+    else
+      rowButton.rowFont:SetTextColor(1, 1, 1)
+    end
+    rowButton:Show()
+  end
+  for hideIndex = rowIndex + 1, #self.rightRowButtons do
+    self.rightRowButtons[hideIndex]:Hide()
+  end
+
+  local contentHeight = rowIndex * self.rowHeight + rowOffsetY + 4 -- 内容高度
+  self.rightScrollChild:SetSize(rowWidth, math.max(contentHeight, 10))
+  self.rightScrollFrame:SetShown(rowIndex > 0)
+end
+
+function QuestlineTreeView:hideQuestDetailPopup()
+  if self.detailPopupFrame then
+    self.detailPopupFrame:Hide()
+  end
+end
+
+function QuestlineTreeView:showQuestDetailPopup(questID)
+  local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(questID) -- 任务详情
+  if detailError or type(detailObject) ~= "table" then
+    return
+  end
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  if self.detailPopupTitle then
+    self.detailPopupTitle:SetText(localeTable.EJ_QUEST_DETAIL_TITLE or "任务详情")
+  end
+  if self.detailPopupText then
+    self.detailPopupText:SetText(table.concat(buildQuestDetailLines(detailObject, localeTable), "\n"))
+  end
+  if self.detailPopupJumpButton then
+    local canJump = type(detailObject.questLineID) == "number" and type(detailObject.UiMapID) == "number" -- 是否可回跳
+    self.detailPopupJumpButton.questLineID = detailObject.questLineID
+    self.detailPopupJumpButton.mapID = detailObject.UiMapID
+    self.detailPopupJumpButton:SetShown(canJump)
+    self.detailPopupJumpButton:SetText((localeTable.EJ_QUEST_JUMP_TO_QUESTLINE or "跳转到对应地图/任务线"))
+  end
+  if self.detailPopupFrame then
+    self.detailPopupFrame:Show()
+  end
+end
+
+function QuestlineTreeView:applyContentLayout()
+  if not self.panelFrame or not self.leftTree or not self.rightContent then
+    return
+  end
+  self.leftTree:ClearAllPoints()
+  self.leftTree:SetPoint("TOPLEFT", self.panelFrame, "TOPLEFT", 8, -8)
+  self.leftTree:SetPoint("BOTTOMLEFT", self.panelFrame, "BOTTOMLEFT", 8, 8)
+  self.leftTree:SetWidth(220)
+
+  self.scrollFrame:ClearAllPoints()
+  self.scrollFrame:SetPoint("TOPLEFT", self.leftTree, "TOPLEFT", 6, -6)
+  self.scrollFrame:SetPoint("BOTTOMRIGHT", self.leftTree, "BOTTOMRIGHT", -28, 6)
+
+  self.rightContent:ClearAllPoints()
+  self.rightContent:SetPoint("TOPLEFT", self.leftTree, "TOPRIGHT", 6, 0)
+  self.rightContent:SetPoint("BOTTOMRIGHT", self.panelFrame, "BOTTOMRIGHT", -8, 8)
+
+  if self.rightTitle then
+    self.rightTitle:ClearAllPoints()
+    self.rightTitle:SetPoint("TOPLEFT", self.rightContent, "TOPLEFT", 10, -10)
+    self.rightTitle:SetPoint("TOPRIGHT", self.rightContent, "TOPRIGHT", -10, -10)
+  end
+  if self.rightScrollFrame then
+    self.rightScrollFrame:ClearAllPoints()
+    self.rightScrollFrame:SetPoint("TOPLEFT", self.rightContent, "TOPLEFT", 10, -30)
+    self.rightScrollFrame:SetPoint("BOTTOMRIGHT", self.rightContent, "BOTTOMRIGHT", -26, 10)
+  end
+end
+
+function QuestlineTreeView:ensureWidgets()
+  local journalFrame = _G.EncounterJournal -- 冒险手册根面板
+  if not journalFrame then
+    return
+  end
+  self.hostJournalFrame = journalFrame
+
+  if self.tabButton
+    and self.panelFrame
+    and self.leftTree
+    and self.rightContent
+    and self.scrollFrame
+    and self.scrollChild
+    and self.rightScrollFrame
+    and self.rightScrollChild
+    and self.emptyText
+    and self.detailPopupFrame
+    and self.detailPopupJumpButton
+  then
+    self:loadSelection()
+    self:layoutRootTabs()
+    self:syncTabLabel()
+    self:applyContentLayout()
+    self:hookVanillaTabsOnce()
+    return
+  end
+
+  if not self.tabButton then
+    local tabButton = CreateFrame("Button", "ToolboxEJQuestlineTab", journalFrame, "PanelTabButtonTemplate")
+    tabButton:SetID(QUEST_ROOT_TAB_ID)
+    tabButton:SetScript("OnClick", function()
+      self:setSelected(true)
+    end)
+    self.tabButton = tabButton
+    self:layoutRootTabs()
+  end
+
+  if not self.panelFrame then
+    local panelFrame = CreateFrame("Frame", "ToolboxEJQuestlinePanel", journalFrame, "InsetFrameTemplate3")
+    local instanceSelect = journalFrame.instanceSelect -- 地下城/团队副本主内容区
+    if instanceSelect then
+      panelFrame:SetPoint("TOPLEFT", instanceSelect, "TOPLEFT", 0, 0)
+      panelFrame:SetPoint("BOTTOMRIGHT", instanceSelect, "BOTTOMRIGHT", 0, 0)
+    else
+      panelFrame:SetPoint("TOPLEFT", journalFrame, "TOPLEFT", 45, -83)
+      panelFrame:SetPoint("BOTTOMRIGHT", journalFrame, "BOTTOMRIGHT", -34, 36)
+    end
+    panelFrame:Hide()
+    self.panelFrame = panelFrame
+  end
+
+  if not self.leftTree then
+    local leftTree = CreateFrame("Frame", nil, self.panelFrame, "InsetFrameTemplate3")
+    self.leftTree = leftTree
+  end
+  if not self.rightContent then
+    local rightContent = CreateFrame("Frame", nil, self.panelFrame, "InsetFrameTemplate3")
+    self.rightContent = rightContent
+  end
+  if not self.scrollFrame then
+    self.scrollFrame = CreateFrame("ScrollFrame", "ToolboxEJQuestlineScrollFrame", self.leftTree, "UIPanelScrollFrameTemplate")
+  end
+  if not self.scrollChild then
+    local scrollChild = CreateFrame("Frame", "ToolboxEJQuestlineScrollChild", self.scrollFrame)
+    scrollChild:SetSize(180, 32)
+    self.scrollChild = scrollChild
+  end
+  if self.scrollFrame:GetScrollChild() ~= self.scrollChild then
+    self.scrollFrame:SetScrollChild(self.scrollChild)
+  end
+  if not self.rightTitle then
+    self.rightTitle = self.rightContent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+  end
+  if not self.rightScrollFrame then
+    self.rightScrollFrame = CreateFrame("ScrollFrame", nil, self.rightContent, "UIPanelScrollFrameTemplate")
+  end
+  if not self.rightScrollChild then
+    local rightScrollChild = CreateFrame("Frame", nil, self.rightScrollFrame)
+    rightScrollChild:SetSize(200, 32)
+    self.rightScrollChild = rightScrollChild
+  end
+  if self.rightScrollFrame:GetScrollChild() ~= self.rightScrollChild then
+    self.rightScrollFrame:SetScrollChild(self.rightScrollChild)
+  end
+  if not self.emptyText then
+    local emptyText = self.panelFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    emptyText:SetPoint("CENTER", self.panelFrame, "CENTER", 0, 0)
+    emptyText:SetWidth(360)
+    emptyText:SetJustifyH("CENTER")
+    emptyText:SetJustifyV("MIDDLE")
+    emptyText:SetWordWrap(true)
+    self.emptyText = emptyText
+  end
+
+  if not self.detailPopupFrame then
+    local popupFrame = CreateFrame("Frame", nil, self.panelFrame, "InsetFrameTemplate3")
+    popupFrame:SetPoint("CENTER", self.panelFrame, "CENTER", 0, 0)
+    popupFrame:SetSize(360, 220)
+    popupFrame:Hide()
+    self.detailPopupFrame = popupFrame
+  end
+  if not self.detailPopupTitle then
+    local popupTitle = self.detailPopupFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    popupTitle:SetPoint("TOPLEFT", self.detailPopupFrame, "TOPLEFT", 12, -12)
+    popupTitle:SetPoint("TOPRIGHT", self.detailPopupFrame, "TOPRIGHT", -12, -12)
+    popupTitle:SetJustifyH("LEFT")
+    self.detailPopupTitle = popupTitle
+  end
+  if not self.detailPopupText then
+    local popupText = self.detailPopupFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    popupText:SetPoint("TOPLEFT", self.detailPopupFrame, "TOPLEFT", 12, -38)
+    popupText:SetPoint("BOTTOMRIGHT", self.detailPopupFrame, "BOTTOMRIGHT", -12, 40)
+    popupText:SetJustifyH("LEFT")
+    popupText:SetJustifyV("TOP")
+    popupText:SetWordWrap(true)
+    self.detailPopupText = popupText
+  end
+  if not self.detailPopupJumpButton then
+    local jumpButton = CreateFrame("Button", nil, self.detailPopupFrame, "UIPanelButtonTemplate")
+    jumpButton:SetSize(180, 20)
+    jumpButton:SetPoint("BOTTOMLEFT", self.detailPopupFrame, "BOTTOMLEFT", 12, 12)
+    jumpButton:SetScript("OnClick", function(button)
+      if type(button.mapID) == "number" then
+        self.selectedModeKey = "map_questline"
+        self.selectedMapID = button.mapID
+      end
+      if type(button.questLineID) == "number" then
+        self.expandedQuestLineID = button.questLineID
+      end
+      self.selectedTypeKey = ""
+      self:hideQuestDetailPopup()
+      self:saveSelection()
+      self:render()
+    end)
+    jumpButton:Hide()
+    self.detailPopupJumpButton = jumpButton
+  end
+
+  self:loadSelection()
+  self:syncTabLabel()
+  self:applyContentLayout()
+  self:hookVanillaTabsOnce()
+end
+
+function QuestlineTreeView:render()
+  if not self.scrollFrame or not self.rightScrollFrame or not self.emptyText then
+    return
+  end
+
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local navigationModel, queryError = Toolbox.Questlines.GetQuestNavigationModel() -- 导航模型
+  if queryError then
+    self:hideAllRows()
+    self:hideAllRightRows()
+    self.rightScrollFrame:Hide()
+    self.emptyText:SetText(localeTable.EJ_QUEST_DATA_INVALID or "任务数据无效。")
+    self.emptyText:Show()
+    return
+  end
+
+  local expansionEntry = self:resolveNavigationDefaults(navigationModel or {}) -- 当前资料片对象
+  local leftRows = self:buildLeftTreeRows(navigationModel or {}) -- 左树行
+  local mainRows = {} -- 主区行
+  local mainError = nil -- 主区错误
+  if self.selectedModeKey == "quest_type" then
+    mainRows, mainError = self:buildMainRowsForType()
+  else
+    mainRows, mainError = self:buildMainRowsForMap()
+  end
+
+  if mainError then
+    self:hideAllRows()
+    self:hideAllRightRows()
+    self.rightScrollFrame:Hide()
+    self.emptyText:SetText(localeTable.EJ_QUEST_DATA_INVALID or "任务数据无效。")
+    self.emptyText:Show()
+    return
+  end
+
+  self.emptyText:SetShown(#leftRows == 0 and #mainRows == 0)
+  if self.emptyText:IsShown() then
+    self.emptyText:SetText(localeTable.EJ_QUESTLINE_TREE_EMPTY or "当前暂无任务线数据。")
+  end
+
+  self:renderLeftRows(leftRows)
+  self:renderRightRows(mainRows)
+  if self.rightTitle then
+    if self.selectedModeKey == "quest_type" then
+      self.rightTitle:SetText((expansionEntry and expansionEntry.name or "") .. " / " .. ((localeTable.EJ_QUEST_NAV_MODE_QUEST_TYPE or "任务类型")))
+    else
+      self.rightTitle:SetText((expansionEntry and expansionEntry.name or "") .. " / " .. ((localeTable.EJ_QUEST_NAV_MODE_MAP_QUESTLINE or "地图任务线")))
+    end
+  end
+end
+
+-- ============================================================================
+-- 任务页签导航重构（资料片 -> 分类 -> 任务线 -> 任务）
+-- ============================================================================
+
+local function normalizeQuestNavCategoryKey(categoryKey)
+  if categoryKey == "type" then
+    return "type"
+  end
+  return "map"
+end
+
+local function isQuestLinePresentInGroupList(groupList, questLineID)
+  if type(questLineID) ~= "number" then
+    return false
+  end
+  for _, groupEntry in ipairs(groupList or {}) do
+    for _, questLineEntry in ipairs(groupEntry.questLines or {}) do
+      if type(questLineEntry) == "table" and questLineEntry.id == questLineID then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+local function buildQuestTooltip(detailObject, localeTable)
+  if type(detailObject) ~= "table" or not GameTooltip then
+    return
+  end
+
+  GameTooltip:SetOwner(UIParent, "ANCHOR_RIGHT")
+  GameTooltip:ClearLines()
+  GameTooltip:SetText(tostring(detailObject.name or ("Quest #" .. tostring(detailObject.questID or "?"))))
+  if type(detailObject.questLineName) == "string" and detailObject.questLineName ~= "" then
+    GameTooltip:AddLine(tostring(detailObject.questLineName))
+  end
+  if type(detailObject.UiMapID) == "number" then
+    GameTooltip:AddLine(string.format("Map: %s", tostring(detailObject.UiMapID)))
+  end
+  if type(detailObject.status) == "string" then
+    GameTooltip:AddLine(string.format("Status: %s", tostring(detailObject.status)))
+  end
+  if type(detailObject.typeID) == "number" then
+    GameTooltip:AddLine(string.format("%s: %s", localeTable.EJ_QUEST_VIEW_TYPE or "类型", tostring(detailObject.typeID)))
+  end
+  GameTooltip:Show()
+end
+
+local function buildQuestDetailLines(detailObject, localeTable)
+  local detailLines = {} -- 弹框详情文本行
+  if type(detailObject) ~= "table" then
+    detailLines[#detailLines + 1] = localeTable.EJ_QUEST_DATA_INVALID or "任务数据无效。"
+    return detailLines
+  end
+
+  detailLines[#detailLines + 1] = string.format("ID: %s", tostring(detailObject.questID or ""))
+  detailLines[#detailLines + 1] = string.format("%s: %s", localeTable.EJ_QUESTLINE_TREE_LABEL or "任务", tostring(detailObject.name or ""))
+  if type(detailObject.questLineName) == "string" and detailObject.questLineName ~= "" then
+    detailLines[#detailLines + 1] = string.format("%s: %s", localeTable.EJ_QUESTLINE_LIST_TITLE or "任务线", detailObject.questLineName)
+  end
+  if type(detailObject.UiMapID) == "number" then
+    detailLines[#detailLines + 1] = string.format("Map: %s", tostring(detailObject.UiMapID))
+  end
+  if type(detailObject.typeID) == "number" then
+    detailLines[#detailLines + 1] = string.format("%s: %s", localeTable.EJ_QUEST_VIEW_TYPE or "类型", tostring(detailObject.typeID))
+  end
+  if type(detailObject.prerequisiteQuestIDs) == "table" and #detailObject.prerequisiteQuestIDs > 0 then
+    detailLines[#detailLines + 1] = "Prerequisite: " .. table.concat(detailObject.prerequisiteQuestIDs, ", ")
+  end
+  if type(detailObject.nextQuestIDs) == "table" and #detailObject.nextQuestIDs > 0 then
+    detailLines[#detailLines + 1] = "Next: " .. table.concat(detailObject.nextQuestIDs, ", ")
+  end
+  return detailLines
+end
+
+function QuestlineTreeView:loadSelection()
+  local moduleDb = getModuleDb() -- 模块存档
+  self.selectedExpansionID = normalizeSelectionID(moduleDb.questNavExpansionID)
+  self.selectedCategoryKey = normalizeQuestNavCategoryKey(moduleDb.questNavCategoryKey)
+  self.selectedQuestLineID = normalizeSelectionID(moduleDb.questNavSelectedQuestLineID)
+  self.selectedQuestID = nil
+end
+
+function QuestlineTreeView:saveSelection()
+  local moduleDb = getModuleDb() -- 模块存档
+  moduleDb.questNavExpansionID = type(self.selectedExpansionID) == "number" and self.selectedExpansionID or 0
+  moduleDb.questNavCategoryKey = normalizeQuestNavCategoryKey(self.selectedCategoryKey)
+  moduleDb.questNavSelectedQuestLineID = type(self.selectedQuestLineID) == "number" and self.selectedQuestLineID or 0
+end
+
+function QuestlineTreeView:setExpansionID(expansionID)
+  if type(expansionID) ~= "number" then
+    return
+  end
+  self.selectedExpansionID = expansionID
+  self.selectedQuestLineID = nil
+  self:hideQuestDetailPopup()
+  self:saveSelection()
+  self:render()
+end
+
+function QuestlineTreeView:setCategoryKey(categoryKey)
+  self.selectedCategoryKey = normalizeQuestNavCategoryKey(categoryKey)
+  self.selectedQuestLineID = nil
+  self:hideQuestDetailPopup()
+  self:saveSelection()
+  self:render()
+end
+
+function QuestlineTreeView:getActiveNavigationGroupList(navigationModel)
+  local expansionList = navigationModel and navigationModel.expansionList or nil -- 资料片列表
+  local expansionByID = navigationModel and navigationModel.expansionByID or nil -- 资料片索引
+  if type(expansionList) ~= "table" or #expansionList == 0 or type(expansionByID) ~= "table" then
+    self.selectedExpansionID = nil
+    self.selectedQuestLineID = nil
+    return nil, {}
+  end
+
+  if type(self.selectedExpansionID) ~= "number" or type(expansionByID[self.selectedExpansionID]) ~= "table" then
+    self.selectedExpansionID = expansionList[1] and expansionList[1].id or nil
+  end
+  self.selectedCategoryKey = normalizeQuestNavCategoryKey(self.selectedCategoryKey)
+
+  local expansionEntry = type(self.selectedExpansionID) == "number" and expansionByID[self.selectedExpansionID] or nil -- 当前资料片对象
+  if type(expansionEntry) ~= "table" then
+    self.selectedQuestLineID = nil
+    return nil, {}
+  end
+
+  local groupList = expansionEntry.categoryGroups and expansionEntry.categoryGroups[self.selectedCategoryKey] or {} -- 当前分类分组列表
+  if type(groupList) ~= "table" then
+    groupList = {}
+  end
+  if type(self.selectedQuestLineID) == "number" and not isQuestLinePresentInGroupList(groupList, self.selectedQuestLineID) then
+    self.selectedQuestLineID = nil
+  end
+  return expansionEntry, groupList
+end
+
+function QuestlineTreeView:syncExpansionButtons(navigationModel)
+  self.expansionButtons = self.expansionButtons or {}
+  local expansionList = navigationModel and navigationModel.expansionList or {} -- 资料片列表
+  local previousButton = nil -- 上一个按钮
+  for expansionIndex, expansionEntry in ipairs(expansionList) do
+    local buttonObject = self.expansionButtons[expansionIndex] -- 当前资料片按钮
+    if not buttonObject then
+      buttonObject = CreateFrame("Button", nil, self.expansionNavFrame, "UIPanelButtonTemplate")
+      buttonObject:SetSize(86, 20)
+      buttonObject:SetScript("OnClick", function(button)
+        local buttonExpansionID = button.expansionID -- 当前按钮资料片 ID
+        self:setExpansionID(buttonExpansionID)
+      end)
+      self.expansionButtons[expansionIndex] = buttonObject
+    end
+    buttonObject.expansionID = expansionEntry.id
+    buttonObject:SetText(expansionEntry.name or tostring(expansionEntry.id or ""))
+    buttonObject:ClearAllPoints()
+    if previousButton then
+      buttonObject:SetPoint("LEFT", previousButton, "RIGHT", 4, 0)
+    else
+      buttonObject:SetPoint("TOPLEFT", self.expansionNavFrame, "TOPLEFT", 0, 0)
+    end
+    buttonObject:SetShown(true)
+    previousButton = buttonObject
+  end
+
+  for hideIndex = #expansionList + 1, #self.expansionButtons do
+    self.expansionButtons[hideIndex]:Hide()
+  end
+end
+
+function QuestlineTreeView:syncCategoryButtons()
+  self.categoryButtons = self.categoryButtons or {}
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local buttonConfigList = {
+    { key = "map", text = localeTable.EJ_QUEST_VIEW_MAP or "地图", offsetX = 0 },
+    { key = "type", text = localeTable.EJ_QUEST_VIEW_TYPE or "类型", offsetX = 72 },
+  }
+  for _, configEntry in ipairs(buttonConfigList) do
+    local buttonObject = self.categoryButtons[configEntry.key] -- 分类按钮
+    if not buttonObject then
+      buttonObject = CreateFrame("Button", nil, self.categoryNavFrame, "UIPanelButtonTemplate")
+      buttonObject:SetSize(64, 20)
+      buttonObject:SetScript("OnClick", function()
+        self:setCategoryKey(configEntry.key)
+      end)
+      self.categoryButtons[configEntry.key] = buttonObject
+    end
+    buttonObject:SetText(configEntry.text)
+    buttonObject:ClearAllPoints()
+    buttonObject:SetPoint("TOPLEFT", self.categoryNavFrame, "TOPLEFT", configEntry.offsetX, 0)
+    buttonObject:SetShown(true)
+  end
+end
+
+function QuestlineTreeView:applyContentLayout()
+  if not self.panelFrame or not self.headerFrame or not self.scrollFrame then
+    return
+  end
+
+  self.headerFrame:ClearAllPoints()
+  self.headerFrame:SetPoint("TOPLEFT", self.panelFrame, "TOPLEFT", 8, -8)
+  self.headerFrame:SetPoint("TOPRIGHT", self.panelFrame, "TOPRIGHT", -8, -8)
+  self.headerFrame:SetHeight(48)
+
+  if self.expansionNavFrame then
+    self.expansionNavFrame:ClearAllPoints()
+    self.expansionNavFrame:SetPoint("TOPLEFT", self.headerFrame, "TOPLEFT", 0, 0)
+    self.expansionNavFrame:SetPoint("TOPRIGHT", self.headerFrame, "TOPRIGHT", 0, 0)
+    self.expansionNavFrame:SetHeight(20)
+  end
+  if self.categoryNavFrame then
+    self.categoryNavFrame:ClearAllPoints()
+    self.categoryNavFrame:SetPoint("TOPLEFT", self.headerFrame, "TOPLEFT", 0, -24)
+    self.categoryNavFrame:SetPoint("TOPRIGHT", self.headerFrame, "TOPRIGHT", 0, -24)
+    self.categoryNavFrame:SetHeight(20)
+  end
+
+  self.scrollFrame:ClearAllPoints()
+  self.scrollFrame:SetPoint("TOPLEFT", self.headerFrame, "BOTTOMLEFT", 0, -6)
+  self.scrollFrame:SetPoint("BOTTOMRIGHT", self.panelFrame, "BOTTOMRIGHT", -24, 8)
+end
+
+function QuestlineTreeView:getOrCreateRowButton(rowIndex)
+  local rowButton = self.rowButtons[rowIndex] -- 指定索引行按钮
+  if rowButton then
+    return rowButton
+  end
+
+  rowButton = CreateFrame("Button", nil, self.scrollChild)
+  rowButton:SetHeight(self.rowHeight)
+  rowButton:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+  local highlightTexture = rowButton:GetHighlightTexture() -- 高亮贴图
+  if highlightTexture and highlightTexture.SetBlendMode then
+    highlightTexture:SetBlendMode("ADD")
+  end
+
+  local rowFont = rowButton:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+  rowFont:SetPoint("LEFT", rowButton, "LEFT", 2, 0)
+  rowFont:SetPoint("RIGHT", rowButton, "RIGHT", -6, 0)
+  rowFont:SetJustifyH("LEFT")
+  rowFont:SetJustifyV("MIDDLE")
+  rowButton.rowFont = rowFont
+
+  rowButton:SetScript("OnEnter", function(button)
+    local rowData = button.rowData -- 当前行数据
+    if type(rowData) ~= "table" or rowData.kind ~= "quest" then
+      return
+    end
+    local detailObject = nil -- 当前任务详情对象
+    local detailError = nil -- 当前任务详情错误
+    if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestDetailByID) == "function" then
+      detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(rowData.questID)
+    end
+    if not detailError then
+      buildQuestTooltip(detailObject, Toolbox.L or {})
+    end
+  end)
+  rowButton:SetScript("OnLeave", function(button)
+    local rowData = button.rowData -- 当前行数据
+    if type(rowData) == "table" and rowData.kind == "quest" and GameTooltip and GameTooltip.Hide then
+      GameTooltip:Hide()
+    end
+  end)
+  rowButton:SetScript("OnClick", function(button)
+    local rowData = button.rowData -- 当前行数据
+    if type(rowData) ~= "table" then
+      return
+    end
+    if rowData.kind == "questline" and type(rowData.questLineID) == "number" then
+      self.selectedQuestLineID = rowData.questLineID
+      self:hideQuestDetailPopup()
+      self:saveSelection()
+      self:render()
+      return
+    end
+    if rowData.kind == "quest" and type(rowData.questID) == "number" then
+      self.selectedQuestID = rowData.questID
+      self:showQuestDetailPopup(rowData.questID)
+    end
+  end)
+
+  self.rowButtons[rowIndex] = rowButton
+  return rowButton
+end
+
+function QuestlineTreeView:buildQuestlineGroupRows(groupList)
+  local rowDataList = {} -- 主视图任务线行
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  for _, groupEntry in ipairs(groupList or {}) do
+    rowDataList[#rowDataList + 1] = {
+      kind = "group",
+      text = groupEntry.name or "",
+    }
+    for _, questLineEntry in ipairs(groupEntry.questLines or {}) do
+      local questLineName = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(questLineEntry.id or "?")) -- 当前任务线显示名
+      local questLineText = questLineName -- 当前任务线文本
+      if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestLineProgress) == "function" then
+        local progressInfo, progressError = Toolbox.Questlines.GetQuestLineProgress(questLineEntry.id) -- 任务线进度
+        if not progressError then
+          local progressText = formatProgressText(progressInfo, localeTable) -- 任务线进度文本
+          if type(progressText) == "string" then
+            questLineText = string.format("%s (%s)", questLineText, progressText)
+          end
+        end
+      end
+      rowDataList[#rowDataList + 1] = {
+        kind = "questline",
+        text = questLineText,
+        questLineID = questLineEntry.id,
+        selected = self.selectedQuestLineID == questLineEntry.id,
+      }
+    end
+  end
+  return rowDataList
+end
+
+function QuestlineTreeView:buildQuestRows()
+  local rowDataList = {} -- 任务列表行
+  if type(self.selectedQuestLineID) ~= "number" then
+    return rowDataList, nil
+  end
+
+  local questList = nil -- 当前任务线任务列表
+  local queryListError = nil -- 任务列表查询错误
+  if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestListByQuestLineID) == "function" then
+    questList, queryListError = Toolbox.Questlines.GetQuestListByQuestLineID(self.selectedQuestLineID)
+  end
+  if queryListError then
+    return rowDataList, queryListError
+  end
+
+  for _, questEntry in ipairs(questList or {}) do
+    rowDataList[#rowDataList + 1] = {
+      kind = "quest",
+      text = tostring(questEntry.name or ("Quest #" .. tostring(questEntry.id or "?"))),
+      questID = questEntry.id,
+      status = questEntry.status,
+    }
+  end
+  return rowDataList, nil
+end
+
+function QuestlineTreeView:renderRowList(rowDataList)
+  local scrollWidth = self.scrollFrame:GetWidth() -- 列表滚动宽度
+  if type(scrollWidth) ~= "number" or scrollWidth <= 0 then
+    scrollWidth = 520
+  end
+  local rowWidth = math.max(180, scrollWidth - 24) -- 行宽
+  local rowOffsetY = 6 -- 顶部留白
+  local rowIndex = 0 -- 行索引
+
+  for _, rowData in ipairs(rowDataList or {}) do
+    rowIndex = rowIndex + 1
+    local rowButton = self:getOrCreateRowButton(rowIndex) -- 当前行按钮
+    rowButton.rowData = rowData
+    rowButton:ClearAllPoints()
+    rowButton:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 6, -((rowIndex - 1) * self.rowHeight + rowOffsetY))
+    rowButton:SetWidth(rowWidth)
+    rowButton:SetHeight(self.rowHeight)
+    rowButton.rowFont:SetText(rowData.text or "")
+    if rowData.kind == "group" then
+      rowButton.rowFont:SetTextColor(1, 0.82, 0.2)
+    elseif rowData.selected == true then
+      rowButton.rowFont:SetTextColor(0.35, 0.85, 1)
+    elseif rowData.status == "completed" then
+      rowButton.rowFont:SetTextColor(0.2, 0.8, 0.2)
+    else
+      rowButton.rowFont:SetTextColor(1, 1, 1)
+    end
+    rowButton:EnableMouse(rowData.kind == "questline" or rowData.kind == "quest")
+    rowButton:Show()
+  end
+
+  for hideIndex = rowIndex + 1, #self.rowButtons do
+    self.rowButtons[hideIndex]:Hide()
+  end
+
+  local contentHeight = rowIndex * self.rowHeight + rowOffsetY + 4 -- 内容高度
+  local frameHeight = self.scrollFrame:GetHeight() -- 滚动框高度
+  if type(frameHeight) == "number" and frameHeight > 0 then
+    contentHeight = math.max(contentHeight, frameHeight + 2)
+  end
+  self.scrollChild:SetSize(rowWidth, contentHeight)
+end
+
+function QuestlineTreeView:hideQuestDetailPopup()
+  if self.detailPopupFrame then
+    self.detailPopupFrame:Hide()
+  end
+end
+
+function QuestlineTreeView:showQuestDetailPopup(questID)
+  local detailObject = nil -- 当前任务详情对象
+  local detailError = nil -- 当前任务详情错误
+  if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestDetailByID) == "function" then
+    detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(questID)
+  end
+  if detailError or type(detailObject) ~= "table" then
+    return
+  end
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  if self.detailPopupTitle then
+    self.detailPopupTitle:SetText(localeTable.EJ_QUEST_DETAIL_TITLE or "任务详情")
+  end
+  if self.detailPopupText then
+    self.detailPopupText:SetText(table.concat(buildQuestDetailLines(detailObject, localeTable), "\n"))
+  end
+  if self.detailPopupFrame then
+    self.detailPopupFrame:Show()
+  end
+end
+
+function QuestlineTreeView:render()
+  if not self.scrollFrame or not self.scrollChild or not self.emptyText then
+    return
+  end
+
+  local scrollOffset = readVerticalScrollOffset(self.scrollFrame) -- 当前滚动位置
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local navigationModel = nil -- 任务导航模型
+  local queryError = nil -- 导航查询错误
+  if Toolbox.Questlines and type(Toolbox.Questlines.GetQuestNavigationModel) == "function" then
+    navigationModel, queryError = Toolbox.Questlines.GetQuestNavigationModel()
+  end
+  if queryError then
+    self:hideAllRows()
+    self.scrollFrame:Hide()
+    self.emptyText:SetText(localeTable.EJ_QUEST_DATA_INVALID or "任务数据无效。")
+    self.emptyText:Show()
+    self:hideQuestDetailPopup()
+    return
+  end
+
+  local expansionEntry, groupList = self:getActiveNavigationGroupList(navigationModel or {}) -- 当前导航分组
+  self:syncExpansionButtons(navigationModel or { expansionList = {} })
+  self:syncCategoryButtons()
+  self:saveSelection()
+
+  local rowDataList = nil -- 主视图行数据
+  local rowError = nil -- 主视图错误
+  if type(self.selectedQuestLineID) == "number" then
+    rowDataList, rowError = self:buildQuestRows()
+  else
+    rowDataList = self:buildQuestlineGroupRows(groupList)
+  end
+
+  if rowError then
+    self:hideAllRows()
+    self.scrollFrame:Hide()
+    self.emptyText:SetText(localeTable.EJ_QUEST_DATA_INVALID or "任务数据无效。")
+    self.emptyText:Show()
+    self:hideQuestDetailPopup()
+    return
+  end
+
+  if type(rowDataList) ~= "table" or #rowDataList == 0 then
+    self:hideAllRows()
+    self.scrollFrame:Hide()
+    if type(self.selectedQuestLineID) == "number" then
+      self.emptyText:SetText(localeTable.EJ_QUEST_FILTER_EMPTY or "当前筛选下没有可显示的任务。")
+    elseif type(expansionEntry) ~= "table" then
+      self.emptyText:SetText(localeTable.EJ_QUESTLINE_TREE_EMPTY or "当前暂无任务线数据。")
+    else
+      self.emptyText:SetText(localeTable.EJ_QUESTLINE_TREE_EMPTY or "当前暂无任务线数据。")
+    end
+    self.emptyText:Show()
+    self:hideQuestDetailPopup()
+    return
+  end
+
+  self.emptyText:Hide()
+  self.scrollFrame:Show()
+  self:renderRowList(rowDataList)
+  restoreVerticalScrollOffset(self.scrollFrame, scrollOffset, self.scrollChild:GetHeight())
+end
+
+function QuestlineTreeView:ensureWidgets()
+  local journalFrame = _G.EncounterJournal -- 冒险手册根面板
+  if not journalFrame then
+    return
+  end
+  self.hostJournalFrame = journalFrame
+  self.expansionButtons = self.expansionButtons or {}
+  self.categoryButtons = self.categoryButtons or {}
+
+  if self.tabButton
+    and self.panelFrame
+    and self.headerFrame
+    and self.expansionNavFrame
+    and self.categoryNavFrame
+    and self.scrollFrame
+    and self.scrollChild
+    and self.emptyText
+    and self.detailPopupFrame
+    and self.detailPopupText
+  then
+    self:loadSelection()
+    self:layoutRootTabs()
+    self:syncTabLabel()
+    self:applyContentLayout()
+    self:hookVanillaTabsOnce()
+    return
+  end
+
+  if not self.tabButton then
+    local tabButton = CreateFrame("Button", "ToolboxEJQuestlineTab", journalFrame, "PanelTabButtonTemplate")
+    tabButton:SetID(QUEST_ROOT_TAB_ID)
+    tabButton:SetScript("OnClick", function()
+      self:setSelected(true)
+    end)
+    self.tabButton = tabButton
+    self:layoutRootTabs()
+  end
+
+  if not self.panelFrame then
+    local panelFrame = CreateFrame("Frame", "ToolboxEJQuestlinePanel", journalFrame, "InsetFrameTemplate3")
+    local instanceSelect = journalFrame.instanceSelect -- 地下城/团队副本主内容区
+    if instanceSelect then
+      panelFrame:SetPoint("TOPLEFT", instanceSelect, "TOPLEFT", 0, 0)
+      panelFrame:SetPoint("BOTTOMRIGHT", instanceSelect, "BOTTOMRIGHT", 0, 0)
+    else
+      panelFrame:SetPoint("TOPLEFT", journalFrame, "TOPLEFT", 45, -83)
+      panelFrame:SetPoint("BOTTOMRIGHT", journalFrame, "BOTTOMRIGHT", -34, 36)
+    end
+    panelFrame:Hide()
+    self.panelFrame = panelFrame
+  end
+
+  if not self.headerFrame then
+    self.headerFrame = CreateFrame("Frame", nil, self.panelFrame)
+  end
+  if not self.expansionNavFrame then
+    self.expansionNavFrame = CreateFrame("Frame", nil, self.headerFrame)
+  end
+  if not self.categoryNavFrame then
+    self.categoryNavFrame = CreateFrame("Frame", nil, self.headerFrame)
+  end
+
+  if not self.scrollFrame then
+    local scrollFrame = CreateFrame("ScrollFrame", "ToolboxEJQuestlineScrollFrame", self.panelFrame, "UIPanelScrollFrameTemplate")
+    self.scrollFrame = scrollFrame
+  end
+  if not self.scrollChild then
+    local scrollChild = CreateFrame("Frame", "ToolboxEJQuestlineScrollChild", self.scrollFrame)
+    scrollChild:SetSize(200, 32)
+    self.scrollChild = scrollChild
+  end
+  if self.scrollFrame and self.scrollChild and self.scrollFrame:GetScrollChild() ~= self.scrollChild then
+    self.scrollFrame:SetScrollChild(self.scrollChild)
+  end
+
+  if not self.emptyText then
+    local emptyText = self.panelFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    emptyText:SetPoint("CENTER", self.panelFrame, "CENTER", 0, 0)
+    emptyText:SetWidth(360)
+    emptyText:SetJustifyH("CENTER")
+    emptyText:SetJustifyV("MIDDLE")
+    emptyText:SetWordWrap(true)
+    self.emptyText = emptyText
+  end
+
+  if not self.detailPopupFrame then
+    local popupFrame = CreateFrame("Frame", nil, self.panelFrame, "InsetFrameTemplate3")
+    popupFrame:SetPoint("CENTER", self.panelFrame, "CENTER", 0, 0)
+    popupFrame:SetSize(360, 220)
+    popupFrame:Hide()
+    self.detailPopupFrame = popupFrame
+  end
+  if not self.detailPopupTitle then
+    local popupTitle = self.detailPopupFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    popupTitle:SetPoint("TOPLEFT", self.detailPopupFrame, "TOPLEFT", 12, -12)
+    popupTitle:SetPoint("TOPRIGHT", self.detailPopupFrame, "TOPRIGHT", -12, -12)
+    popupTitle:SetJustifyH("LEFT")
+    self.detailPopupTitle = popupTitle
+  end
+  if not self.detailPopupText then
+    local popupText = self.detailPopupFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    popupText:SetPoint("TOPLEFT", self.detailPopupFrame, "TOPLEFT", 12, -36)
+    popupText:SetPoint("BOTTOMRIGHT", self.detailPopupFrame, "BOTTOMRIGHT", -12, 12)
+    popupText:SetJustifyH("LEFT")
+    popupText:SetJustifyV("TOP")
+    popupText:SetWordWrap(true)
+    self.detailPopupText = popupText
+  end
+
+  self:loadSelection()
+  self:syncTabLabel()
+  self:applyContentLayout()
+  self:hookVanillaTabsOnce()
+end
+
+-- ============================================================================
+-- 任务页签最终覆盖定义（左侧资料片树 + 两个子入口）
+-- ============================================================================
+
+function QuestlineTreeView:loadSelection()
+  local moduleDb = getModuleDb() -- 模块存档
+  self.selectedExpansionID = normalizeSelectionID(moduleDb.questNavExpansionID)
+  self.selectedModeKey = normalizeQuestNavModeKey(moduleDb.questNavModeKey)
+  self.selectedMapID = normalizeSelectionID(moduleDb.questNavSelectedMapID)
+  self.selectedTypeKey = type(moduleDb.questNavSelectedTypeKey) == "string" and moduleDb.questNavSelectedTypeKey or ""
+  self.expandedQuestLineID = normalizeSelectionID(moduleDb.questNavExpandedQuestLineID)
+  if self.selectedModeKey == "quest_type" then
+    self.expandedQuestLineID = nil
+  end
+  self.selectedQuestID = nil
+end
+
+function QuestlineTreeView:saveSelection()
+  local moduleDb = getModuleDb() -- 模块存档
+  moduleDb.questNavExpansionID = type(self.selectedExpansionID) == "number" and self.selectedExpansionID or 0
+  moduleDb.questNavModeKey = normalizeQuestNavModeKey(self.selectedModeKey)
+  moduleDb.questNavSelectedMapID = type(self.selectedMapID) == "number" and self.selectedMapID or 0
+  moduleDb.questNavSelectedTypeKey = type(self.selectedTypeKey) == "string" and self.selectedTypeKey or ""
+  moduleDb.questNavExpandedQuestLineID = type(self.expandedQuestLineID) == "number" and self.expandedQuestLineID or 0
+end
+
+function QuestlineTreeView:resolveNavigationDefaults(navigationModel)
+  local expansionList = navigationModel and navigationModel.expansionList or {} -- 资料片列表
+  local expansionByID = navigationModel and navigationModel.expansionByID or {} -- 资料片索引
+  if type(self.selectedExpansionID) ~= "number" or type(expansionByID[self.selectedExpansionID]) ~= "table" then
+    self.selectedExpansionID = expansionList[1] and expansionList[1].id or nil
+  end
+
+  local expansionEntry = type(self.selectedExpansionID) == "number" and expansionByID[self.selectedExpansionID] or nil -- 当前资料片
+  if type(expansionEntry) ~= "table" then
+    self.selectedMapID = nil
+    self.selectedTypeKey = ""
+    self.expandedQuestLineID = nil
+    return nil
+  end
+
+  self.selectedModeKey = normalizeQuestNavModeKey(self.selectedModeKey)
+  local modeByKey = expansionEntry.modeByKey or {} -- 模式索引
+  if type(modeByKey[self.selectedModeKey]) ~= "table" then
+    self.selectedModeKey = "map_questline"
+  end
+
+  if self.selectedModeKey == "map_questline" then
+    local mapMode = modeByKey.map_questline -- 地图模式
+    local hasSelectedMap = false -- 当前地图是否存在
+    for _, mapEntry in ipairs(mapMode and mapMode.entries or {}) do
+      if mapEntry.id == self.selectedMapID then
+        hasSelectedMap = true
+        break
+      end
+    end
+    if not hasSelectedMap then
+      self.selectedMapID = mapMode and mapMode.entries and mapMode.entries[1] and mapMode.entries[1].id or nil
+    end
+    self.selectedTypeKey = ""
+  else
+    local typeMode = modeByKey.quest_type -- 类型模式
+    local hasSelectedType = false -- 当前类型是否存在
+    for _, typeEntry in ipairs(typeMode and typeMode.entries or {}) do
+      if tostring(typeEntry.id) == self.selectedTypeKey then
+        hasSelectedType = true
+        break
+      end
+    end
+    if not hasSelectedType then
+      self.selectedTypeKey = typeMode and typeMode.entries and typeMode.entries[1] and tostring(typeMode.entries[1].id) or ""
+    end
+    self.selectedMapID = nil
+    self.expandedQuestLineID = nil
+  end
+
+  return expansionEntry
+end
+
+function QuestlineTreeView:buildLeftTreeRows(navigationModel)
+  local rowDataList = {} -- 左侧树行
+  local expansionList = navigationModel and navigationModel.expansionList or {} -- 资料片列表
+  local expansionByID = navigationModel and navigationModel.expansionByID or {} -- 资料片索引
+  for _, expansionSummary in ipairs(expansionList) do
+    local expansionSelected = self.selectedExpansionID == expansionSummary.id -- 资料片是否选中
+    rowDataList[#rowDataList + 1] = {
+      kind = "expansion",
+      text = expansionSummary.name,
+      selected = expansionSelected,
+      expansionID = expansionSummary.id,
+    }
+    if expansionSelected then
+      local expansionEntry = expansionByID[expansionSummary.id] -- 当前资料片对象
+      for _, modeEntry in ipairs(expansionEntry and expansionEntry.modes or {}) do
+        local modeSelected = self.selectedModeKey == modeEntry.key -- 模式是否选中
+        rowDataList[#rowDataList + 1] = {
+          kind = "mode",
+          text = modeEntry.name,
+          selected = modeSelected,
+          expansionID = expansionSummary.id,
+          modeKey = modeEntry.key,
+        }
+        if modeSelected then
+          for _, childEntry in ipairs(modeEntry.entries or {}) do
+            rowDataList[#rowDataList + 1] = {
+              kind = childEntry.kind,
+              text = childEntry.name,
+              selected = (childEntry.kind == "map" and self.selectedMapID == childEntry.id)
+                or (childEntry.kind == "type_group" and self.selectedTypeKey == tostring(childEntry.id)),
+              expansionID = expansionSummary.id,
+              modeKey = modeEntry.key,
+              mapID = childEntry.kind == "map" and childEntry.id or nil,
+              typeKey = childEntry.kind == "type_group" and tostring(childEntry.id) or nil,
+            }
+          end
+        end
+      end
+    end
+  end
+  return rowDataList
+end
+
+function QuestlineTreeView:getOrCreateRowButton(rowIndex)
+  local rowButton = self.rowButtons[rowIndex] -- 左树行按钮
+  if rowButton then
+    return rowButton
+  end
+  rowButton = CreateFrame("Button", nil, self.scrollChild)
+  rowButton:SetHeight(self.rowHeight)
+  rowButton:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+  local highlightTexture = rowButton:GetHighlightTexture() -- 高亮贴图
+  if highlightTexture and highlightTexture.SetBlendMode then
+    highlightTexture:SetBlendMode("ADD")
+  end
+  local rowFont = rowButton:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+  rowFont:SetPoint("LEFT", rowButton, "LEFT", 2, 0)
+  rowFont:SetPoint("RIGHT", rowButton, "RIGHT", -6, 0)
+  rowFont:SetJustifyH("LEFT")
+  rowFont:SetJustifyV("MIDDLE")
+  rowButton.rowFont = rowFont
+  rowButton:SetScript("OnClick", function(button)
+    local rowData = button.rowData -- 当前行数据
+    if type(rowData) ~= "table" then
+      return
+    end
+    if rowData.kind == "expansion" and type(rowData.expansionID) == "number" then
+      self.selectedExpansionID = rowData.expansionID
+      self.selectedModeKey = "map_questline"
+      self.selectedMapID = nil
+      self.selectedTypeKey = ""
+      self.expandedQuestLineID = nil
+    elseif rowData.kind == "mode" and type(rowData.modeKey) == "string" then
+      self.selectedModeKey = normalizeQuestNavModeKey(rowData.modeKey)
+      self.selectedMapID = nil
+      self.selectedTypeKey = ""
+      self.expandedQuestLineID = nil
+    elseif rowData.kind == "map" and type(rowData.mapID) == "number" then
+      self.selectedModeKey = "map_questline"
+      self.selectedMapID = rowData.mapID
+      self.selectedTypeKey = ""
+      self.expandedQuestLineID = nil
+    elseif rowData.kind == "type_group" and type(rowData.typeKey) == "string" then
+      self.selectedModeKey = "quest_type"
+      self.selectedTypeKey = rowData.typeKey
+      self.selectedMapID = nil
+      self.expandedQuestLineID = nil
+    end
+    self:hideQuestDetailPopup()
+    self:saveSelection()
+    self:render()
+  end)
+  self.rowButtons[rowIndex] = rowButton
+  return rowButton
+end
+
+function QuestlineTreeView:getOrCreateRightRowButton(rowIndex)
+  local rowButton = self.rightRowButtons[rowIndex] -- 主区行按钮
+  if rowButton then
+    return rowButton
+  end
+  rowButton = CreateFrame("Button", nil, self.rightScrollChild)
+  rowButton:SetHeight(self.rowHeight)
+  rowButton:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+  local highlightTexture = rowButton:GetHighlightTexture() -- 高亮贴图
+  if highlightTexture and highlightTexture.SetBlendMode then
+    highlightTexture:SetBlendMode("ADD")
+  end
+  local rowFont = rowButton:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+  rowFont:SetPoint("LEFT", rowButton, "LEFT", 2, 0)
+  rowFont:SetPoint("RIGHT", rowButton, "RIGHT", -6, 0)
+  rowFont:SetJustifyH("LEFT")
+  rowFont:SetJustifyV("MIDDLE")
+  rowButton.rowFont = rowFont
+  rowButton:SetScript("OnEnter", function(button)
+    local rowData = button.rowData -- 当前行数据
+    if type(rowData) ~= "table" or rowData.kind ~= "quest" then
+      return
+    end
+    local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(rowData.questID) -- 任务详情
+    if not detailError then
+      buildQuestTooltip(detailObject, Toolbox.L or {})
+    end
+  end)
+  rowButton:SetScript("OnLeave", function(button)
+    local rowData = button.rowData -- 当前行数据
+    if type(rowData) == "table" and rowData.kind == "quest" and GameTooltip and GameTooltip.Hide then
+      GameTooltip:Hide()
+    end
+  end)
+  rowButton:SetScript("OnClick", function(button)
+    local rowData = button.rowData -- 当前行数据
+    if type(rowData) ~= "table" then
+      return
+    end
+    if rowData.kind == "questline" and type(rowData.questLineID) == "number" then
+      if self.expandedQuestLineID == rowData.questLineID then
+        self.expandedQuestLineID = nil
+      else
+        self.expandedQuestLineID = rowData.questLineID
+      end
+      self:hideQuestDetailPopup()
+      self:saveSelection()
+      self:render()
+      return
+    end
+    if rowData.kind == "quest" and type(rowData.questID) == "number" then
+      self.selectedQuestID = rowData.questID
+      self:showQuestDetailPopup(rowData.questID)
+    end
+  end)
+  self.rightRowButtons[rowIndex] = rowButton
+  return rowButton
+end
+
+function QuestlineTreeView:buildMainRowsForMap()
+  local rowDataList = {} -- 地图模式主区行
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local questLineList, errorObject = Toolbox.Questlines.GetQuestLinesForMap(self.selectedMapID) -- 地图下任务线
+  if errorObject then
+    return {}, errorObject
+  end
+  for _, questLineEntry in ipairs(questLineList or {}) do
+    local progressInfo, progressError = Toolbox.Questlines.GetQuestLineProgress(questLineEntry.id) -- 任务线进度
+    local progressText = not progressError and formatProgressText(progressInfo, localeTable) or nil -- 进度文本
+    local prefix = self.expandedQuestLineID == questLineEntry.id and "[-]" or "[+]" -- 展开前缀
+    local lineText = string.format("%s %s", prefix, resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(questLineEntry.id or "?")))
+    if type(progressText) == "string" then
+      lineText = string.format("%s  %s", lineText, progressText)
+    end
+    if type(questLineEntry.questCount) == "number" then
+      lineText = string.format("%s · %d个任务", lineText, questLineEntry.questCount)
+    end
+    rowDataList[#rowDataList + 1] = {
+      kind = "questline",
+      text = lineText,
+      questLineID = questLineEntry.id,
+      selected = self.expandedQuestLineID == questLineEntry.id,
+    }
+    if self.expandedQuestLineID == questLineEntry.id then
+      local questList, listError = Toolbox.Questlines.GetQuestListByQuestLineID(questLineEntry.id) -- 任务列表
+      if listError then
+        return {}, listError
+      end
+      for _, questEntry in ipairs(questList or {}) do
+        rowDataList[#rowDataList + 1] = {
+          kind = "quest",
+          text = tostring(questEntry.name or ("Quest #" .. tostring(questEntry.id or "?"))),
+          questID = questEntry.id,
+          status = questEntry.status,
+        }
+      end
+    end
+  end
+  return rowDataList, nil
+end
+
+function QuestlineTreeView:buildMainRowsForType()
+  local rowDataList = {} -- 类型模式主区行
+  local questList, errorObject = Toolbox.Questlines.GetTasksForTypeGroup(self.selectedExpansionID, self.selectedTypeKey) -- 类型任务列表
+  if errorObject then
+    return {}, errorObject
+  end
+  for _, questEntry in ipairs(questList or {}) do
+    rowDataList[#rowDataList + 1] = {
+      kind = "quest",
+      text = tostring(questEntry.name or ("Quest #" .. tostring(questEntry.id or "?"))),
+      questID = questEntry.id,
+      status = questEntry.status,
+    }
+  end
+  return rowDataList, nil
+end
+
+function QuestlineTreeView:renderLeftRows(rowDataList)
+  local scrollWidth = self.scrollFrame:GetWidth() -- 左树宽度
+  if type(scrollWidth) ~= "number" or scrollWidth <= 0 then
+    scrollWidth = 230
+  end
+  local rowWidth = math.max(140, scrollWidth - 24) -- 行宽
+  local rowOffsetY = 6 -- 顶部留白
+  local rowIndex = 0 -- 行索引
+  for _, rowData in ipairs(rowDataList or {}) do
+    rowIndex = rowIndex + 1
+    local rowButton = self:getOrCreateRowButton(rowIndex) -- 当前左树行按钮
+    rowButton.rowData = rowData
+    rowButton:ClearAllPoints()
+    rowButton:SetPoint("TOPLEFT", self.scrollChild, "TOPLEFT", 6, -((rowIndex - 1) * self.rowHeight + rowOffsetY))
+    rowButton:SetWidth(rowWidth)
+    rowButton:SetHeight(self.rowHeight)
+    local indentLevel = 0 -- 缩进层级
+    if rowData.kind == "mode" then
+      indentLevel = 1
+    elseif rowData.kind == "map" or rowData.kind == "type_group" then
+      indentLevel = 2
+    end
+    rowButton.rowFont:SetText(string.rep("  ", indentLevel) .. tostring(rowData.text or ""))
+    if rowData.selected == true then
+      rowButton.rowFont:SetTextColor(0.35, 0.85, 1)
+    else
+      rowButton.rowFont:SetTextColor(1, 1, 1)
+    end
+    rowButton:Show()
+  end
+  for hideIndex = rowIndex + 1, #self.rowButtons do
+    self.rowButtons[hideIndex]:Hide()
+  end
+  self.scrollChild:SetSize(rowWidth, math.max(rowIndex * self.rowHeight + rowOffsetY + 4, 10))
+end
+
+function QuestlineTreeView:renderRightRows(rowDataList)
+  local scrollWidth = self.rightScrollFrame:GetWidth() -- 主区宽度
+  if type(scrollWidth) ~= "number" or scrollWidth <= 0 then
+    scrollWidth = 520
+  end
+  local rowWidth = math.max(180, scrollWidth - 24) -- 行宽
+  local rowOffsetY = 6 -- 顶部留白
+  local rowIndex = 0 -- 行索引
+  for _, rowData in ipairs(rowDataList or {}) do
+    rowIndex = rowIndex + 1
+    local rowButton = self:getOrCreateRightRowButton(rowIndex) -- 当前主区行按钮
+    rowButton.rowData = rowData
+    rowButton:ClearAllPoints()
+    rowButton:SetPoint("TOPLEFT", self.rightScrollChild, "TOPLEFT", 6, -((rowIndex - 1) * self.rowHeight + rowOffsetY))
+    rowButton:SetWidth(rowWidth)
+    rowButton:SetHeight(self.rowHeight)
+    local indentLevel = rowData.kind == "quest" and 1 or 0 -- 任务缩进
+    rowButton.rowFont:SetText(string.rep("  ", indentLevel) .. tostring(rowData.text or ""))
+    if rowData.selected == true then
+      rowButton.rowFont:SetTextColor(0.35, 0.85, 1)
+    elseif rowData.status == "completed" then
+      rowButton.rowFont:SetTextColor(0.2, 0.8, 0.2)
+    else
+      rowButton.rowFont:SetTextColor(1, 1, 1)
+    end
+    rowButton:Show()
+  end
+  for hideIndex = rowIndex + 1, #self.rightRowButtons do
+    self.rightRowButtons[hideIndex]:Hide()
+  end
+  self.rightScrollChild:SetSize(rowWidth, math.max(rowIndex * self.rowHeight + rowOffsetY + 4, 10))
+  self.rightScrollFrame:SetShown(rowIndex > 0)
+end
+
+function QuestlineTreeView:hideQuestDetailPopup()
+  if self.detailPopupFrame then
+    self.detailPopupFrame:Hide()
+  end
+end
+
+function QuestlineTreeView:showQuestDetailPopup(questID)
+  local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(questID) -- 任务详情
+  if detailError or type(detailObject) ~= "table" then
+    return
+  end
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  if self.detailPopupTitle then
+    self.detailPopupTitle:SetText(localeTable.EJ_QUEST_DETAIL_TITLE or "任务详情")
+  end
+  if self.detailPopupText then
+    self.detailPopupText:SetText(table.concat(buildQuestDetailLines(detailObject, localeTable), "\n"))
+  end
+  if self.detailPopupJumpButton then
+    local canJump = type(detailObject.questLineID) == "number" and type(detailObject.UiMapID) == "number" -- 是否可回跳
+    self.detailPopupJumpButton.questLineID = detailObject.questLineID
+    self.detailPopupJumpButton.mapID = detailObject.UiMapID
+    self.detailPopupJumpButton:SetShown(canJump)
+    self.detailPopupJumpButton:SetText(localeTable.EJ_QUEST_JUMP_TO_QUESTLINE or "跳转到对应地图/任务线")
+  end
+  if self.detailPopupFrame then
+    self.detailPopupFrame:Show()
+  end
+end
+
+function QuestlineTreeView:applyContentLayout()
+  if not self.panelFrame or not self.leftTree or not self.rightContent then
+    return
+  end
+  self.leftTree:ClearAllPoints()
+  self.leftTree:SetPoint("TOPLEFT", self.panelFrame, "TOPLEFT", 8, -8)
+  self.leftTree:SetPoint("BOTTOMLEFT", self.panelFrame, "BOTTOMLEFT", 8, 8)
+  self.leftTree:SetWidth(220)
+  self.scrollFrame:ClearAllPoints()
+  self.scrollFrame:SetPoint("TOPLEFT", self.leftTree, "TOPLEFT", 6, -6)
+  self.scrollFrame:SetPoint("BOTTOMRIGHT", self.leftTree, "BOTTOMRIGHT", -28, 6)
+  self.rightContent:ClearAllPoints()
+  self.rightContent:SetPoint("TOPLEFT", self.leftTree, "TOPRIGHT", 6, 0)
+  self.rightContent:SetPoint("BOTTOMRIGHT", self.panelFrame, "BOTTOMRIGHT", -8, 8)
+  if self.rightTitle then
+    self.rightTitle:ClearAllPoints()
+    self.rightTitle:SetPoint("TOPLEFT", self.rightContent, "TOPLEFT", 10, -10)
+    self.rightTitle:SetPoint("TOPRIGHT", self.rightContent, "TOPRIGHT", -10, -10)
+  end
+  if self.rightScrollFrame then
+    self.rightScrollFrame:ClearAllPoints()
+    self.rightScrollFrame:SetPoint("TOPLEFT", self.rightContent, "TOPLEFT", 10, -30)
+    self.rightScrollFrame:SetPoint("BOTTOMRIGHT", self.rightContent, "BOTTOMRIGHT", -26, 10)
+  end
+end
+
+function QuestlineTreeView:render()
+  if not self.scrollFrame or not self.rightScrollFrame or not self.emptyText then
+    return
+  end
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local navigationModel, queryError = Toolbox.Questlines.GetQuestNavigationModel() -- 导航模型
+  if queryError then
+    self:hideAllRows()
+    self:hideAllRightRows()
+    self.rightScrollFrame:Hide()
+    self.emptyText:SetText(localeTable.EJ_QUEST_DATA_INVALID or "任务数据无效。")
+    self.emptyText:Show()
+    return
+  end
+  local expansionEntry = self:resolveNavigationDefaults(navigationModel or {}) -- 当前资料片
+  local leftRows = self:buildLeftTreeRows(navigationModel or {}) -- 左树行
+  local mainRows, mainError = self.selectedModeKey == "quest_type" and self:buildMainRowsForType() or self:buildMainRowsForMap() -- 主区行
+  if mainError then
+    self:hideAllRows()
+    self:hideAllRightRows()
+    self.rightScrollFrame:Hide()
+    self.emptyText:SetText(localeTable.EJ_QUEST_DATA_INVALID or "任务数据无效。")
+    self.emptyText:Show()
+    return
+  end
+  self:renderLeftRows(leftRows)
+  self:renderRightRows(mainRows)
+  self.emptyText:SetShown(#leftRows == 0 and #mainRows == 0)
+  if self.emptyText:IsShown() then
+    self.emptyText:SetText(localeTable.EJ_QUESTLINE_TREE_EMPTY or "当前暂无任务线数据。")
+  end
+  if self.rightTitle then
+    local modeText = self.selectedModeKey == "quest_type" and (localeTable.EJ_QUEST_NAV_MODE_QUEST_TYPE or "任务类型") or (localeTable.EJ_QUEST_NAV_MODE_MAP_QUESTLINE or "地图任务线")
+    self.rightTitle:SetText((expansionEntry and expansionEntry.name or "") .. " / " .. modeText)
+  end
+end
+
+function QuestlineTreeView:ensureWidgets()
+  local journalFrame = _G.EncounterJournal -- 冒险手册根面板
+  if not journalFrame then
+    return
+  end
+  self.hostJournalFrame = journalFrame
+  if self.tabButton
+    and self.panelFrame
+    and self.leftTree
+    and self.rightContent
+    and self.scrollFrame
+    and self.scrollChild
+    and self.rightScrollFrame
+    and self.rightScrollChild
+    and self.emptyText
+    and self.detailPopupFrame
+    and self.detailPopupJumpButton
+  then
+    self:loadSelection()
+    self:layoutRootTabs()
+    self:syncTabLabel()
+    self:applyContentLayout()
+    self:hookVanillaTabsOnce()
+    return
+  end
+  if not self.tabButton then
+    local tabButton = CreateFrame("Button", "ToolboxEJQuestlineTab", journalFrame, "PanelTabButtonTemplate")
+    tabButton:SetID(QUEST_ROOT_TAB_ID)
+    tabButton:SetScript("OnClick", function()
+      self:setSelected(true)
+    end)
+    self.tabButton = tabButton
+    self:layoutRootTabs()
+  end
+  if not self.panelFrame then
+    local panelFrame = CreateFrame("Frame", "ToolboxEJQuestlinePanel", journalFrame, "InsetFrameTemplate3")
+    local instanceSelect = journalFrame.instanceSelect -- 主内容区
+    if instanceSelect then
+      panelFrame:SetPoint("TOPLEFT", instanceSelect, "TOPLEFT", 0, 0)
+      panelFrame:SetPoint("BOTTOMRIGHT", instanceSelect, "BOTTOMRIGHT", 0, 0)
+    else
+      panelFrame:SetPoint("TOPLEFT", journalFrame, "TOPLEFT", 45, -83)
+      panelFrame:SetPoint("BOTTOMRIGHT", journalFrame, "BOTTOMRIGHT", -34, 36)
+    end
+    panelFrame:Hide()
+    self.panelFrame = panelFrame
+  end
+  if not self.leftTree then
+    self.leftTree = CreateFrame("Frame", nil, self.panelFrame, "InsetFrameTemplate3")
+  end
+  if not self.rightContent then
+    self.rightContent = CreateFrame("Frame", nil, self.panelFrame, "InsetFrameTemplate3")
+  end
+  if not self.scrollFrame then
+    self.scrollFrame = CreateFrame("ScrollFrame", "ToolboxEJQuestlineScrollFrame", self.leftTree, "UIPanelScrollFrameTemplate")
+  end
+  if not self.scrollChild then
+    local scrollChild = CreateFrame("Frame", "ToolboxEJQuestlineScrollChild", self.scrollFrame)
+    scrollChild:SetSize(180, 32)
+    self.scrollChild = scrollChild
+  end
+  if self.scrollFrame:GetScrollChild() ~= self.scrollChild then
+    self.scrollFrame:SetScrollChild(self.scrollChild)
+  end
+  if not self.rightTitle then
+    local rightTitle = self.rightContent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    rightTitle:SetJustifyH("LEFT")
+    self.rightTitle = rightTitle
+  end
+  if not self.rightScrollFrame then
+    self.rightScrollFrame = CreateFrame("ScrollFrame", nil, self.rightContent, "UIPanelScrollFrameTemplate")
+  end
+  if not self.rightScrollChild then
+    local rightScrollChild = CreateFrame("Frame", nil, self.rightScrollFrame)
+    rightScrollChild:SetSize(200, 32)
+    self.rightScrollChild = rightScrollChild
+  end
+  if self.rightScrollFrame:GetScrollChild() ~= self.rightScrollChild then
+    self.rightScrollFrame:SetScrollChild(self.rightScrollChild)
+  end
+  if not self.emptyText then
+    local emptyText = self.panelFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    emptyText:SetPoint("CENTER", self.panelFrame, "CENTER", 0, 0)
+    emptyText:SetWidth(360)
+    emptyText:SetJustifyH("CENTER")
+    emptyText:SetJustifyV("MIDDLE")
+    emptyText:SetWordWrap(true)
+    self.emptyText = emptyText
+  end
+  if not self.detailPopupFrame then
+    local popupFrame = CreateFrame("Frame", nil, self.panelFrame, "InsetFrameTemplate3")
+    popupFrame:SetPoint("CENTER", self.panelFrame, "CENTER", 0, 0)
+    popupFrame:SetSize(360, 220)
+    popupFrame:Hide()
+    self.detailPopupFrame = popupFrame
+  end
+  if not self.detailPopupTitle then
+    local popupTitle = self.detailPopupFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    popupTitle:SetPoint("TOPLEFT", self.detailPopupFrame, "TOPLEFT", 12, -12)
+    popupTitle:SetPoint("TOPRIGHT", self.detailPopupFrame, "TOPRIGHT", -12, -12)
+    popupTitle:SetJustifyH("LEFT")
+    self.detailPopupTitle = popupTitle
+  end
+  if not self.detailPopupText then
+    local popupText = self.detailPopupFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    popupText:SetPoint("TOPLEFT", self.detailPopupFrame, "TOPLEFT", 12, -38)
+    popupText:SetPoint("BOTTOMRIGHT", self.detailPopupFrame, "BOTTOMRIGHT", -12, 40)
+    popupText:SetJustifyH("LEFT")
+    popupText:SetJustifyV("TOP")
+    popupText:SetWordWrap(true)
+    self.detailPopupText = popupText
+  end
+  if not self.detailPopupJumpButton then
+    local jumpButton = CreateFrame("Button", nil, self.detailPopupFrame, "UIPanelButtonTemplate")
+    jumpButton:SetSize(180, 20)
+    jumpButton:SetPoint("BOTTOMLEFT", self.detailPopupFrame, "BOTTOMLEFT", 12, 12)
+    jumpButton:SetScript("OnClick", function(button)
+      if type(button.mapID) == "number" then
+        self.selectedModeKey = "map_questline"
+        self.selectedMapID = button.mapID
+      end
+      if type(button.questLineID) == "number" then
+        self.expandedQuestLineID = button.questLineID
+      end
+      self.selectedTypeKey = ""
+      self:hideQuestDetailPopup()
+      self:saveSelection()
+      self:render()
+    end)
+    jumpButton:Hide()
+    self.detailPopupJumpButton = jumpButton
+  end
+  self:loadSelection()
+  self:syncTabLabel()
+  self:applyContentLayout()
+  self:hookVanillaTabsOnce()
+end
+
+-- ============================================================================
+-- 任务页签 breadcrumb 最终覆盖定义
+-- ============================================================================
+
+function QuestlineTreeView:syncBreadcrumb(expansionEntry)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  self.breadcrumbButtons = self.breadcrumbButtons or {}
+  local breadcrumbList = {} -- 当前路径段
+
+  if type(expansionEntry) == "table" then
+    breadcrumbList[#breadcrumbList + 1] = {
+      text = tostring(expansionEntry.name or ""),
+      onClick = function()
+        self.expandedQuestLineID = nil
+        self:hideQuestDetailPopup()
+        self:saveSelection()
+        self:render()
+      end,
+    }
+  end
+
+  if self.selectedModeKey == "quest_type" then
+    breadcrumbList[#breadcrumbList + 1] = {
+      text = localeTable.EJ_QUEST_NAV_MODE_QUEST_TYPE or "任务类型",
+      onClick = function()
+        self.selectedTypeKey = ""
+        self:hideQuestDetailPopup()
+        self:saveSelection()
+        self:render()
+      end,
+    }
+    if type(self.selectedTypeKey) == "string" and self.selectedTypeKey ~= "" and type(expansionEntry) == "table" then
+      local typeMode = expansionEntry.modeByKey and expansionEntry.modeByKey.quest_type or nil -- 类型模式
+      for _, typeEntry in ipairs(typeMode and typeMode.entries or {}) do
+        if tostring(typeEntry.id) == self.selectedTypeKey then
+          breadcrumbList[#breadcrumbList + 1] = {
+            text = tostring(typeEntry.name or ""),
+          }
+          break
+        end
+      end
+    end
+  else
+    breadcrumbList[#breadcrumbList + 1] = {
+      text = localeTable.EJ_QUEST_NAV_MODE_MAP_QUESTLINE or "地图任务线",
+      onClick = function()
+        self.selectedMapID = nil
+        self.expandedQuestLineID = nil
+        self:hideQuestDetailPopup()
+        self:saveSelection()
+        self:render()
+      end,
+    }
+    if type(self.selectedMapID) == "number" and type(expansionEntry) == "table" then
+      local mapMode = expansionEntry.modeByKey and expansionEntry.modeByKey.map_questline or nil -- 地图模式
+      for _, mapEntry in ipairs(mapMode and mapMode.entries or {}) do
+        if mapEntry.id == self.selectedMapID then
+          breadcrumbList[#breadcrumbList + 1] = {
+            text = tostring(mapEntry.name or ""),
+            onClick = function()
+              self.expandedQuestLineID = nil
+              self:hideQuestDetailPopup()
+              self:saveSelection()
+              self:render()
+            end,
+          }
+          break
+        end
+      end
+    end
+    if type(self.expandedQuestLineID) == "number" and Toolbox.Questlines and type(Toolbox.Questlines.GetQuestTabModel) == "function" then
+      local questTabModel = select(1, Toolbox.Questlines.GetQuestTabModel()) -- 任务页签模型
+      local questLineEntry = questTabModel and questTabModel.questLineByID and questTabModel.questLineByID[self.expandedQuestLineID] or nil -- 当前任务线
+      if type(questLineEntry) ~= "table" and type(self.selectedMapID) == "number" and Toolbox.Questlines and type(Toolbox.Questlines.GetQuestLinesForMap) == "function" then
+        local questLineList = select(1, Toolbox.Questlines.GetQuestLinesForMap(self.selectedMapID)) -- 当前地图任务线列表
+        for _, currentQuestLineEntry in ipairs(questLineList or {}) do
+          if type(currentQuestLineEntry) == "table" and currentQuestLineEntry.id == self.expandedQuestLineID then
+            questLineEntry = currentQuestLineEntry
+            break
+          end
+        end
+      end
+      if type(questLineEntry) == "table" then
+        breadcrumbList[#breadcrumbList + 1] = {
+          text = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(self.expandedQuestLineID)),
+        }
+      end
+    end
+  end
+
+  local previousButton = nil -- 上一个 breadcrumb 按钮
+  for crumbIndex, crumbEntry in ipairs(breadcrumbList) do
+    local buttonObject = self.breadcrumbButtons[crumbIndex] -- 当前 breadcrumb 按钮
+    if not buttonObject then
+      buttonObject = CreateFrame("Button", nil, self.rightContent, "UIPanelButtonTemplate")
+      buttonObject:SetHeight(18)
+      self.breadcrumbButtons[crumbIndex] = buttonObject
+    end
+    buttonObject:SetText(tostring(crumbEntry.text or ""))
+    buttonObject:SetWidth(math.max(72, (buttonObject.GetText and #(buttonObject:GetText() or "") or 8) * 10))
+    buttonObject:ClearAllPoints()
+    if previousButton then
+      buttonObject:SetPoint("LEFT", previousButton, "RIGHT", 4, 0)
+    else
+      buttonObject:SetPoint("TOPLEFT", self.breadcrumbFrame, "TOPLEFT", 0, 0)
+    end
+    if type(crumbEntry.onClick) == "function" and crumbIndex < #breadcrumbList then
+      buttonObject:SetEnabled(true)
+      buttonObject:SetScript("OnClick", function()
+        crumbEntry.onClick()
+      end)
+    else
+      buttonObject:SetEnabled(false)
+      buttonObject:SetScript("OnClick", nil)
+    end
+    buttonObject:Show()
+    previousButton = buttonObject
+  end
+  for hideIndex = #breadcrumbList + 1, #self.breadcrumbButtons do
+    self.breadcrumbButtons[hideIndex]:Hide()
+  end
+end
+
+function QuestlineTreeView:applyContentLayout()
+  if not self.panelFrame or not self.leftTree or not self.rightContent then
+    return
+  end
+  self.leftTree:ClearAllPoints()
+  self.leftTree:SetPoint("TOPLEFT", self.panelFrame, "TOPLEFT", 8, -8)
+  self.leftTree:SetPoint("BOTTOMLEFT", self.panelFrame, "BOTTOMLEFT", 8, 8)
+  self.leftTree:SetWidth(220)
+  self.scrollFrame:ClearAllPoints()
+  self.scrollFrame:SetPoint("TOPLEFT", self.leftTree, "TOPLEFT", 6, -6)
+  self.scrollFrame:SetPoint("BOTTOMRIGHT", self.leftTree, "BOTTOMRIGHT", -28, 6)
+  self.rightContent:ClearAllPoints()
+  self.rightContent:SetPoint("TOPLEFT", self.leftTree, "TOPRIGHT", 6, 0)
+  self.rightContent:SetPoint("BOTTOMRIGHT", self.panelFrame, "BOTTOMRIGHT", -8, 8)
+  if self.breadcrumbFrame then
+    self.breadcrumbFrame:ClearAllPoints()
+    self.breadcrumbFrame:SetPoint("TOPLEFT", self.rightContent, "TOPLEFT", 10, -10)
+    self.breadcrumbFrame:SetPoint("TOPRIGHT", self.rightContent, "TOPRIGHT", -10, -10)
+    self.breadcrumbFrame:SetHeight(18)
+  end
+  if self.rightScrollFrame then
+    self.rightScrollFrame:ClearAllPoints()
+    self.rightScrollFrame:SetPoint("TOPLEFT", self.rightContent, "TOPLEFT", 10, -34)
+    self.rightScrollFrame:SetPoint("BOTTOMRIGHT", self.rightContent, "BOTTOMRIGHT", -26, 10)
+  end
+end
+
+function QuestlineTreeView:render()
+  if not self.scrollFrame or not self.rightScrollFrame or not self.emptyText then
+    return
+  end
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local navigationModel, queryError = Toolbox.Questlines.GetQuestNavigationModel() -- 导航模型
+  if queryError then
+    self:hideAllRows()
+    self:hideAllRightRows()
+    self.rightScrollFrame:Hide()
+    self.emptyText:SetText(localeTable.EJ_QUEST_DATA_INVALID or "任务数据无效。")
+    self.emptyText:Show()
+    return
+  end
+  local expansionEntry = self:resolveNavigationDefaults(navigationModel or {}) -- 当前资料片
+  local leftRows = self:buildLeftTreeRows(navigationModel or {}) -- 左树行
+  local mainRows, mainError = self.selectedModeKey == "quest_type" and self:buildMainRowsForType() or self:buildMainRowsForMap() -- 主区行
+  if mainError then
+    self:hideAllRows()
+    self:hideAllRightRows()
+    self.rightScrollFrame:Hide()
+    self.emptyText:SetText(localeTable.EJ_QUEST_DATA_INVALID or "任务数据无效。")
+    self.emptyText:Show()
+    return
+  end
+  self:renderLeftRows(leftRows)
+  self:renderRightRows(mainRows)
+  self:syncBreadcrumb(expansionEntry)
+  self.emptyText:SetShown(#leftRows == 0 and #mainRows == 0)
+  if self.emptyText:IsShown() then
+    self.emptyText:SetText(localeTable.EJ_QUESTLINE_TREE_EMPTY or "当前暂无任务线数据。")
+  end
+  if self.rightTitle then
+    self.rightTitle:SetText("")
+  end
+end
+
+function QuestlineTreeView:ensureWidgets()
+  local journalFrame = _G.EncounterJournal -- 冒险手册根面板
+  if not journalFrame then
+    return
+  end
+  self.hostJournalFrame = journalFrame
+  self.breadcrumbButtons = self.breadcrumbButtons or {}
+  if self.tabButton
+    and self.panelFrame
+    and self.leftTree
+    and self.rightContent
+    and self.scrollFrame
+    and self.scrollChild
+    and self.rightScrollFrame
+    and self.rightScrollChild
+    and self.emptyText
+    and self.detailPopupFrame
+    and self.detailPopupJumpButton
+    and self.breadcrumbFrame
+  then
+    self:loadSelection()
+    self:layoutRootTabs()
+    self:syncTabLabel()
+    self:applyContentLayout()
+    self:hookVanillaTabsOnce()
+    return
+  end
+  if not self.tabButton then
+    local tabButton = CreateFrame("Button", "ToolboxEJQuestlineTab", journalFrame, "PanelTabButtonTemplate")
+    tabButton:SetID(QUEST_ROOT_TAB_ID)
+    tabButton:SetScript("OnClick", function()
+      self:setSelected(true)
+    end)
+    self.tabButton = tabButton
+    self:layoutRootTabs()
+  end
+  if not self.panelFrame then
+    local panelFrame = CreateFrame("Frame", "ToolboxEJQuestlinePanel", journalFrame, "InsetFrameTemplate3")
+    local instanceSelect = journalFrame.instanceSelect -- 主内容区
+    if instanceSelect then
+      panelFrame:SetPoint("TOPLEFT", instanceSelect, "TOPLEFT", 0, 0)
+      panelFrame:SetPoint("BOTTOMRIGHT", instanceSelect, "BOTTOMRIGHT", 0, 0)
+    else
+      panelFrame:SetPoint("TOPLEFT", journalFrame, "TOPLEFT", 45, -83)
+      panelFrame:SetPoint("BOTTOMRIGHT", journalFrame, "BOTTOMRIGHT", -34, 36)
+    end
+    panelFrame:Hide()
+    self.panelFrame = panelFrame
+  end
+  if not self.leftTree then
+    self.leftTree = CreateFrame("Frame", nil, self.panelFrame, "InsetFrameTemplate3")
+  end
+  if not self.rightContent then
+    self.rightContent = CreateFrame("Frame", nil, self.panelFrame, "InsetFrameTemplate3")
+  end
+  if not self.scrollFrame then
+    self.scrollFrame = CreateFrame("ScrollFrame", "ToolboxEJQuestlineScrollFrame", self.leftTree, "UIPanelScrollFrameTemplate")
+  end
+  if not self.scrollChild then
+    local scrollChild = CreateFrame("Frame", "ToolboxEJQuestlineScrollChild", self.scrollFrame)
+    scrollChild:SetSize(180, 32)
+    self.scrollChild = scrollChild
+  end
+  if self.scrollFrame:GetScrollChild() ~= self.scrollChild then
+    self.scrollFrame:SetScrollChild(self.scrollChild)
+  end
+  if not self.rightTitle then
+    local rightTitle = self.rightContent:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    rightTitle:SetJustifyH("LEFT")
+    self.rightTitle = rightTitle
+  end
+  if not self.breadcrumbFrame then
+    self.breadcrumbFrame = CreateFrame("Frame", nil, self.rightContent)
+  end
+  if not self.rightScrollFrame then
+    self.rightScrollFrame = CreateFrame("ScrollFrame", nil, self.rightContent, "UIPanelScrollFrameTemplate")
+  end
+  if not self.rightScrollChild then
+    local rightScrollChild = CreateFrame("Frame", nil, self.rightScrollFrame)
+    rightScrollChild:SetSize(200, 32)
+    self.rightScrollChild = rightScrollChild
+  end
+  if self.rightScrollFrame:GetScrollChild() ~= self.rightScrollChild then
+    self.rightScrollFrame:SetScrollChild(self.rightScrollChild)
+  end
+  if not self.emptyText then
+    local emptyText = self.panelFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    emptyText:SetPoint("CENTER", self.panelFrame, "CENTER", 0, 0)
+    emptyText:SetWidth(360)
+    emptyText:SetJustifyH("CENTER")
+    emptyText:SetJustifyV("MIDDLE")
+    emptyText:SetWordWrap(true)
+    self.emptyText = emptyText
+  end
+  if not self.detailPopupFrame then
+    local popupFrame = CreateFrame("Frame", nil, self.panelFrame, "InsetFrameTemplate3")
+    popupFrame:SetPoint("CENTER", self.panelFrame, "CENTER", 0, 0)
+    popupFrame:SetSize(360, 220)
+    popupFrame:Hide()
+    self.detailPopupFrame = popupFrame
+  end
+  if not self.detailPopupTitle then
+    local popupTitle = self.detailPopupFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    popupTitle:SetPoint("TOPLEFT", self.detailPopupFrame, "TOPLEFT", 12, -12)
+    popupTitle:SetPoint("TOPRIGHT", self.detailPopupFrame, "TOPRIGHT", -12, -12)
+    popupTitle:SetJustifyH("LEFT")
+    self.detailPopupTitle = popupTitle
+  end
+  if not self.detailPopupText then
+    local popupText = self.detailPopupFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    popupText:SetPoint("TOPLEFT", self.detailPopupFrame, "TOPLEFT", 12, -38)
+    popupText:SetPoint("BOTTOMRIGHT", self.detailPopupFrame, "BOTTOMRIGHT", -12, 40)
+    popupText:SetJustifyH("LEFT")
+    popupText:SetJustifyV("TOP")
+    popupText:SetWordWrap(true)
+    self.detailPopupText = popupText
+  end
+  if not self.detailPopupJumpButton then
+    local jumpButton = CreateFrame("Button", nil, self.detailPopupFrame, "UIPanelButtonTemplate")
+    jumpButton:SetSize(180, 20)
+    jumpButton:SetPoint("BOTTOMLEFT", self.detailPopupFrame, "BOTTOMLEFT", 12, 12)
+    jumpButton:SetScript("OnClick", function(button)
+      if type(button.mapID) == "number" then
+        self.selectedModeKey = "map_questline"
+        self.selectedMapID = button.mapID
+      end
+      if type(button.questLineID) == "number" then
+        self.expandedQuestLineID = button.questLineID
+      end
+      self.selectedTypeKey = ""
+      self:hideQuestDetailPopup()
+      self:saveSelection()
+      self:render()
+    end)
+    jumpButton:Hide()
+    self.detailPopupJumpButton = jumpButton
+  end
+  self:loadSelection()
+  self:syncTabLabel()
+  self:applyContentLayout()
+  self:hookVanillaTabsOnce()
+end
+
+-- ============================================================================
 -- CD 叠加对象
 -- ============================================================================
 

@@ -12,6 +12,21 @@ local function deepCopyTable(sourceTable)
   return copiedTable
 end
 
+local function collectQuestLineIDs(groupList)
+  local resultList = {} -- 分组内任务线 ID 列表
+  for _, groupEntry in ipairs(groupList or {}) do
+    local questLineIDList = {} -- 当前分组任务线 ID 列表
+    for _, questLineEntry in ipairs(groupEntry.questLines or {}) do
+      questLineIDList[#questLineIDList + 1] = questLineEntry.id
+    end
+    resultList[#resultList + 1] = {
+      id = groupEntry.id,
+      questLineIDs = questLineIDList,
+    }
+  end
+  return resultList
+end
+
 describe("QuestlineProgress mock data injection", function()
   local originalToolbox = nil -- 原始 Toolbox 全局
   local originalCQuestLog = nil -- 原始 C_QuestLog 全局
@@ -50,6 +65,9 @@ describe("QuestlineProgress mock data injection", function()
         EJ_QUEST_TYPE_CAMPAIGN = "Campaign",
         EJ_QUEST_TYPE_SIDE_STORY = "Side Story",
         EJ_QUEST_TYPE_UNKNOWN_FMT = "Unknown Type (%s)",
+        EJ_QUEST_EXPANSION_9 = "Dragonflight",
+        EJ_QUEST_EXPANSION_10 = "The War Within",
+        EJ_QUEST_EXPANSION_UNKNOWN_FMT = "Expansion #%s",
       },
     })
 
@@ -343,6 +361,83 @@ describe("QuestlineProgress mock data injection", function()
     assert.same({ 9901 }, typeIndex.typeToQuestLineIDs[34])
     assert.same({ 2371 }, typeIndex.typeToMapIDs[12])
     assert.same({ 2371 }, typeIndex.typeToMapIDs[34])
+  end)
+
+  it("quest_navigation_model_groups_questlines_by_expansion_and_category", function()
+    local v5Data = {
+      schemaVersion = 5,
+      sourceMode = "mock",
+      generatedAt = "2026-04-12T00:00:00Z",
+      quests = {
+        [81001] = { ID = 81001, UiMapID = 2371 },
+        [81002] = { ID = 81002, UiMapID = 2371 },
+        [81003] = { ID = 81003, UiMapID = 2372 },
+        [81004] = { ID = 81004, UiMapID = 2373 },
+      },
+      questLines = {
+        [9901] = { ID = 9901, Name_lang = "Mock QuestLine Alpha", UiMapID = 2371, ExpansionID = 9 },
+        [9902] = { ID = 9902, Name_lang = "Mock QuestLine Beta", UiMapID = 2372, ExpansionID = 9 },
+        [9903] = { ID = 9903, Name_lang = "Mock QuestLine Gamma", UiMapID = 2373, ExpansionID = 10 },
+      },
+      questLineXQuest = {
+        [9901] = {
+          { QuestID = 81001, OrderIndex = 1 },
+          { QuestID = 81002, OrderIndex = 2 },
+        },
+        [9902] = {
+          { QuestID = 81003, OrderIndex = 1 },
+        },
+        [9903] = {
+          { QuestID = 81004, OrderIndex = 1 },
+        },
+      },
+    }
+
+    questTypeByID = {
+      [81001] = 12,
+      [81002] = 12,
+      [81003] = 34,
+      [81004] = 12,
+    }
+    rawset(_G, "C_Map", {
+      GetMapInfo = function(uiMapID)
+        local nameByMapID = {
+          [2371] = "Waking Shores",
+          [2372] = "Ohn'ahran Plains",
+          [2373] = "Isle of Dorn",
+        }
+        return { name = nameByMapID[uiMapID] or ("Map #" .. tostring(uiMapID)) }
+      end,
+    })
+
+    Toolbox.Questlines.SetDataOverride(v5Data)
+
+    local valid, validationError = Toolbox.Questlines.ValidateInstanceQuestlinesData(v5Data, true)
+    assert.is_true(valid)
+    assert.is_nil(validationError)
+
+    assert.is_function(Toolbox.Questlines.GetQuestNavigationModel)
+    local navigationModel, navigationError = Toolbox.Questlines.GetQuestNavigationModel()
+    assert.is_nil(navigationError)
+    assert.same({
+      { id = 9, name = "Dragonflight" },
+      { id = 10, name = "The War Within" },
+    }, navigationModel.expansionList)
+
+    assert.same({
+      { id = 2371, questLineIDs = { 9901 } },
+      { id = 2372, questLineIDs = { 9902 } },
+    }, collectQuestLineIDs(navigationModel.expansionByID[9].modeByKey.map_questline.entries))
+    assert.same({
+      { id = "type:12", questLineIDs = { 9901 } },
+      { id = "type:34", questLineIDs = { 9902 } },
+    }, collectQuestLineIDs(navigationModel.expansionByID[9].modeByKey.quest_type.entries))
+    assert.same({
+      { id = 2373, questLineIDs = { 9903 } },
+    }, collectQuestLineIDs(navigationModel.expansionByID[10].modeByKey.map_questline.entries))
+    assert.same({
+      { id = "type:12", questLineIDs = { 9903 } },
+    }, collectQuestLineIDs(navigationModel.expansionByID[10].modeByKey.quest_type.entries))
   end)
 
   it("quest_tab_model_uses_injected_mock_data", function()
