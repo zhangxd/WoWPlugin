@@ -31,6 +31,14 @@
       "order_by": [],
       "row_granularity": "占位查询"
     },
+    "supplemental_sources": [
+      {
+        "type": "questcompletist",
+        "dataset": "core_links",
+        "env_var": "WOW_QUESTCOMPLETIST_DIR",
+        "entry_file": "qcQuest.lua"
+      }
+    ],
     "datasets": {
       "core_links": {
         "sql": "WITH raw_links AS (\n  SELECT DISTINCT\n    CAST(ql.ID AS INTEGER) AS quest_line_id,\n    ql.Name_lang AS quest_line_name,\n    CAST(qlxq.QuestID AS INTEGER) AS quest_id,\n    CAST(qlxq.OrderIndex AS INTEGER) AS order_index\n  FROM questline ql\n  JOIN questlinexquest qlxq ON qlxq.QuestLineID = ql.ID\n  WHERE TRIM(ql.ID) <> ''\n    AND CAST(ql.ID AS INTEGER) > 0\n    AND CAST(qlxq.QuestID AS INTEGER) > 0\n),\nquest_map_votes AS (\n  SELECT\n    CAST(QuestID AS INTEGER) AS quest_id,\n    CAST(UiMapID AS INTEGER) AS quest_ui_map_id,\n    COUNT(*) AS vote_count\n  FROM questpoiblob\n  WHERE CAST(QuestID AS INTEGER) > 0\n    AND CAST(UiMapID AS INTEGER) > 0\n  GROUP BY CAST(QuestID AS INTEGER), CAST(UiMapID AS INTEGER)\n),\nquest_best_map AS (\n  SELECT quest_id, quest_ui_map_id\n  FROM (\n    SELECT\n      quest_id,\n      quest_ui_map_id,\n      vote_count,\n      ROW_NUMBER() OVER (PARTITION BY quest_id ORDER BY vote_count DESC, quest_ui_map_id ASC) AS rank_index\n    FROM quest_map_votes\n  ) ranked\n  WHERE rank_index = 1\n),\nquestline_map_votes AS (\n  SELECT\n    raw_links.quest_line_id,\n    CAST(qpb.UiMapID AS INTEGER) AS quest_line_ui_map_id,\n    COUNT(*) AS vote_count\n  FROM raw_links\n  JOIN questpoiblob qpb ON CAST(qpb.QuestID AS INTEGER) = raw_links.quest_id\n  WHERE CAST(qpb.UiMapID AS INTEGER) > 0\n  GROUP BY raw_links.quest_line_id, CAST(qpb.UiMapID AS INTEGER)\n),\nquestline_best_map AS (\n  SELECT quest_line_id, quest_line_ui_map_id\n  FROM (\n    SELECT\n      quest_line_id,\n      quest_line_ui_map_id,\n      vote_count,\n      ROW_NUMBER() OVER (PARTITION BY quest_line_id ORDER BY vote_count DESC, quest_line_ui_map_id ASC) AS rank_index\n    FROM questline_map_votes\n  ) ranked\n  WHERE rank_index = 1\n)\nSELECT\n  raw_links.quest_line_id,\n  raw_links.quest_line_name,\n  raw_links.quest_id,\n  raw_links.order_index,\n  quest_best_map.quest_ui_map_id,\n  questline_best_map.quest_line_ui_map_id\nFROM raw_links\nLEFT JOIN quest_best_map ON quest_best_map.quest_id = raw_links.quest_id\nLEFT JOIN questline_best_map ON questline_best_map.quest_line_id = raw_links.quest_line_id\nORDER BY raw_links.quest_line_id, raw_links.order_index, raw_links.quest_id",

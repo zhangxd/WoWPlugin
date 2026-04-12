@@ -115,6 +115,166 @@ describe("EncounterJournal quest navigation", function()
     assert.is_true(string.find(mainTexts[1], "觉醒海岸主线", 1, true) ~= nil)
   end)
 
+  it("renders_map_nodes_when_navigation_model_uses_group_entries_without_kind", function()
+    local journalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal") -- 冒险手册根框体
+    journalFrame:Show()
+    journalFrame.instanceSelect = harness.runtime.CreateFrame("Frame", nil, journalFrame)
+    journalFrame.Tabs = {}
+    journalFrame.selectedTab = 4
+    rawset(_G, "EncounterJournal", journalFrame)
+
+    Toolbox.Questlines.GetQuestNavigationModel = function()
+      return {
+        expansionList = {
+          { id = 9, name = "巨龙时代" },
+        },
+        expansionByID = {
+          [9] = {
+            id = 9,
+            name = "巨龙时代",
+            modes = {
+              {
+                key = "map_questline",
+                name = "地图任务线",
+                entries = {
+                  { id = 2371, name = "觉醒海岸", questLineIDs = { 101 } },
+                  { id = 2372, name = "欧恩哈拉平原", questLineIDs = { 102 } },
+                },
+              },
+              {
+                key = "quest_type",
+                name = "任务类型",
+                entries = {},
+              },
+            },
+            modeByKey = {
+              map_questline = {
+                key = "map_questline",
+                name = "地图任务线",
+                entries = {
+                  { id = 2371, name = "觉醒海岸", questLineIDs = { 101 } },
+                  { id = 2372, name = "欧恩哈拉平原", questLineIDs = { 102 } },
+                },
+              },
+              quest_type = {
+                key = "quest_type",
+                name = "任务类型",
+                entries = {},
+              },
+            },
+          },
+        },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestLinesForMap = function(mapID)
+      if mapID == 2371 then
+        return {
+          { id = 101, name = "觉醒海岸主线", UiMapID = 2371, questCount = 2 },
+        }, nil
+      end
+      return {
+        { id = 102, name = "欧恩哈拉支线", UiMapID = 2372, questCount = 1 },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestListByQuestLineID = function()
+      return {
+        { id = 1001, name = "任务一", status = "active", typeID = 12 },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestLineProgress = function()
+      return { completed = 1, total = 2 }, nil
+    end
+
+    local treeView = Toolbox.TestHooks.EncounterJournal:getQuestlineTreeView()
+    treeView:refresh()
+    treeView:setSelected(true)
+
+    local leftTexts = collectVisibleRowTexts(treeView.rowButtons)
+    assert.is_true(string.find(leftTexts[3], "觉醒海岸", 1, true) ~= nil)
+    assert.is_true(string.find(leftTexts[4], "欧恩哈拉平原", 1, true) ~= nil)
+  end)
+
+  it("clicking_grouped_map_entry_without_kind_switches_selected_map", function()
+    local journalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal") -- 冒险手册根框体
+    journalFrame:Show()
+    journalFrame.instanceSelect = harness.runtime.CreateFrame("Frame", nil, journalFrame)
+    journalFrame.Tabs = {}
+    journalFrame.selectedTab = 4
+    rawset(_G, "EncounterJournal", journalFrame)
+
+    Toolbox.Questlines.GetQuestNavigationModel = function()
+      return {
+        expansionList = {
+          { id = 9, name = "巨龙时代" },
+        },
+        expansionByID = {
+          [9] = {
+            id = 9,
+            name = "巨龙时代",
+            modes = {
+              {
+                key = "map_questline",
+                name = "地图任务线",
+                entries = {
+                  { id = 2371, name = "觉醒海岸", questLines = { { id = 101 } } },
+                  { id = 2372, name = "欧恩哈拉平原", questLines = { { id = 102 } } },
+                },
+              },
+              {
+                key = "quest_type",
+                name = "任务类型",
+                entries = {},
+              },
+            },
+            modeByKey = {
+              map_questline = {
+                key = "map_questline",
+                name = "地图任务线",
+                entries = {
+                  { id = 2371, name = "觉醒海岸", questLines = { { id = 101 } } },
+                  { id = 2372, name = "欧恩哈拉平原", questLines = { { id = 102 } } },
+                },
+              },
+              quest_type = {
+                key = "quest_type",
+                name = "任务类型",
+                entries = {},
+              },
+            },
+          },
+        },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestLinesForMap = function(mapID)
+      if mapID == 2371 then
+        return {
+          { id = 101, name = "觉醒海岸主线", UiMapID = 2371, questCount = 2 },
+        }, nil
+      end
+      return {
+        { id = 102, name = "欧恩哈拉支线", UiMapID = 2372, questCount = 1 },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestListByQuestLineID = function()
+      return {
+        { id = 1001, name = "任务一", status = "active", typeID = 12 },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestLineProgress = function()
+      return { completed = 1, total = 2 }, nil
+    end
+
+    local treeView = Toolbox.TestHooks.EncounterJournal:getQuestlineTreeView()
+    treeView:refresh()
+    treeView:setSelected(true)
+
+    treeView.rowButtons[4]:RunScript("OnClick")
+
+    assert.equals(2372, treeView.selectedMapID)
+    local mainTexts = collectVisibleRowTexts(treeView.rightRowButtons)
+    assert.is_true(string.find(mainTexts[1], "欧恩哈拉支线", 1, true) ~= nil)
+  end)
+
   it("clicking_questline_row_expands_then_collapses_task_list", function()
     local journalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal") -- 冒险手册根框体
     journalFrame:Show()

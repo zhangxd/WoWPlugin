@@ -70,6 +70,18 @@ describe("EncounterJournal micro button tooltip", function()
     }, lines)
   end)
 
+  it("micro_button_tooltip_does_not_store_state_on_game_tooltip", function()
+    setupHarness("zhCN")
+    harness:setLockoutTooltipData({
+      "副本一 · 史诗 · 2d 3h",
+    }, 0)
+    harness:triggerMicroButtonOnEnter()
+
+    local tooltipObject = rawget(_G, "GameTooltip") -- 暴雪 tooltip 替身
+    assert.is_nil(rawget(tooltipObject, "_toolboxEJMicroLockoutsAdded"))
+    assert.is_nil(rawget(tooltipObject, "_ToolboxSkipAnchorOverride"))
+  end)
+
   it("tooltip_lines_match_golden_for_known_dataset", function()
     setupHarness("zhCN")
     harness:setLockoutTooltipData({

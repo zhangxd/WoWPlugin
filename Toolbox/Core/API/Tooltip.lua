@@ -9,6 +9,7 @@ Toolbox.Tooltip = Toolbox.Tooltip or {}
 local MODULE_ID = "tooltip_anchor"
 
 local hooked
+local anchorOverrideSkipState = setmetatable({}, { __mode = "k" }) -- tooltip 私有跳过标记表
 
 local function getDb()
   Toolbox_NamespaceEnsure()
@@ -40,6 +41,27 @@ function Toolbox.Tooltip.RefreshDriver()
   end
 end
 
+--- 设置是否跳过默认锚点接管。
+---@param tooltip table|nil
+---@param shouldSkip boolean
+function Toolbox.Tooltip.SetSkipAnchorOverride(tooltip, shouldSkip)
+  if type(tooltip) ~= "table" then
+    return
+  end
+  if shouldSkip then
+    anchorOverrideSkipState[tooltip] = true
+  else
+    anchorOverrideSkipState[tooltip] = nil
+  end
+end
+
+--- 判断 tooltip 是否应跳过默认锚点接管。
+---@param tooltip table|nil
+---@return boolean
+function Toolbox.Tooltip.ShouldSkipAnchorOverride(tooltip)
+  return type(tooltip) == "table" and anchorOverrideSkipState[tooltip] == true or false
+end
+
 -- 仅调用一次：hooksecurefunc 注册 GameTooltip_SetDefaultAnchor
 function Toolbox.Tooltip.InstallDefaultAnchorHook()
   if hooked then
@@ -55,7 +77,7 @@ function Toolbox.Tooltip.InstallDefaultAnchorHook()
       return
     end
     -- 跳过标记为不接管的 tooltip（如 EJMountFilter 复选框，避免 ANCHOR_RIGHT 被覆盖）
-    if tooltip._ToolboxSkipAnchorOverride then
+    if Toolbox.Tooltip.ShouldSkipAnchorOverride(tooltip) then
       debugPrint("[SetDefaultAnchor] skip (marked)")
       return
     end

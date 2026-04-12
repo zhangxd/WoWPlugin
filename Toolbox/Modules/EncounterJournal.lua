@@ -14,6 +14,7 @@
 local MODULE_ID = "encounter_journal"
 local Runtime = Toolbox.Runtime -- 运行时适配入口
 local CreateFrame = Runtime.CreateFrame -- Frame 创建函数
+local microTooltipAppendState = setmetatable({}, { __mode = "k" }) -- tooltip 追加状态表
 
 -- ============================================================================
 -- 模块状态辅助
@@ -156,7 +157,9 @@ function MountFilter:createUI()
   end)
   checkBtn:SetScript("OnEnter", function(btn)
     local loc = Toolbox.L or {}
-    GameTooltip._ToolboxSkipAnchorOverride = true
+    if Toolbox.Tooltip and Toolbox.Tooltip.SetSkipAnchorOverride then
+      Toolbox.Tooltip.SetSkipAnchorOverride(GameTooltip, true)
+    end
     Runtime.TooltipSetOwner(GameTooltip, btn, "ANCHOR_RIGHT")
     Runtime.TooltipClear(GameTooltip)
     if not isModuleEnabled() then
@@ -168,7 +171,9 @@ function MountFilter:createUI()
     Runtime.TooltipShow(GameTooltip)
   end)
   checkBtn:SetScript("OnLeave", function()
-    GameTooltip._ToolboxSkipAnchorOverride = nil
+    if Toolbox.Tooltip and Toolbox.Tooltip.SetSkipAnchorOverride then
+      Toolbox.Tooltip.SetSkipAnchorOverride(GameTooltip, false)
+    end
     Runtime.TooltipHide(GameTooltip)
   end)
 
@@ -421,7 +426,9 @@ function DetailEnhancer:ensureMountOnlyCheck()
   end)
   check:SetScript("OnEnter", function(btn)
     local loc = Toolbox.L or {}
-    GameTooltip._ToolboxSkipAnchorOverride = true
+    if Toolbox.Tooltip and Toolbox.Tooltip.SetSkipAnchorOverride then
+      Toolbox.Tooltip.SetSkipAnchorOverride(GameTooltip, true)
+    end
     Runtime.TooltipSetOwner(GameTooltip, btn, "ANCHOR_RIGHT")
     Runtime.TooltipClear(GameTooltip)
     Runtime.TooltipSetText(GameTooltip, loc.EJ_DETAIL_MOUNT_ONLY_LABEL or "")
@@ -429,7 +436,9 @@ function DetailEnhancer:ensureMountOnlyCheck()
     Runtime.TooltipShow(GameTooltip)
   end)
   check:SetScript("OnLeave", function()
-    GameTooltip._ToolboxSkipAnchorOverride = nil
+    if Toolbox.Tooltip and Toolbox.Tooltip.SetSkipAnchorOverride then
+      Toolbox.Tooltip.SetSkipAnchorOverride(GameTooltip, false)
+    end
     Runtime.TooltipHide(GameTooltip)
   end)
 
@@ -4024,15 +4033,19 @@ function QuestlineTreeView:buildLeftTreeRows(navigationModel)
         }
         if modeSelected then
           for _, childEntry in ipairs(modeEntry.entries or {}) do
+            local childKind = childEntry.kind -- 导航子项类型
+            if type(childKind) ~= "string" or childKind == "" then
+              childKind = modeEntry.key == "quest_type" and "type_group" or "map"
+            end
             rowDataList[#rowDataList + 1] = {
-              kind = childEntry.kind,
+              kind = childKind,
               text = childEntry.name,
-              selected = (childEntry.kind == "map" and self.selectedMapID == childEntry.id)
-                or (childEntry.kind == "type_group" and self.selectedTypeKey == tostring(childEntry.id)),
+              selected = (childKind == "map" and self.selectedMapID == childEntry.id)
+                or (childKind == "type_group" and self.selectedTypeKey == tostring(childEntry.id)),
               expansionID = expansionSummary.id,
               modeKey = modeEntry.key,
-              mapID = childEntry.kind == "map" and childEntry.id or nil,
-              typeKey = childEntry.kind == "type_group" and tostring(childEntry.id) or nil,
+              mapID = childKind == "map" and childEntry.id or nil,
+              typeKey = childKind == "type_group" and tostring(childEntry.id) or nil,
             }
           end
         end
@@ -5041,10 +5054,10 @@ local function appendAdventureGuideMicroButtonLockoutLines()
   if not GameTooltip or not GameTooltip.AddLine then
     return
   end
-  if GameTooltip._toolboxEJMicroLockoutsAdded then
+  if microTooltipAppendState[GameTooltip] == true then
     return
   end
-  GameTooltip._toolboxEJMicroLockoutsAdded = true
+  microTooltipAppendState[GameTooltip] = true
 
   local localeTable = Toolbox.L or {} -- 本地化字符串表
   local sectionTitle = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_TITLE or "Current lockouts" -- 标题文案
@@ -5082,7 +5095,9 @@ local function refreshAdventureGuideMicroButtonTooltipIfOwned()
   if not GameTooltip or not GameTooltip.IsOwned or not GameTooltip:IsOwned(microButton) then
     return
   end
-  GameTooltip._toolboxEJMicroLockoutsAdded = nil
+  if GameTooltip then
+    microTooltipAppendState[GameTooltip] = nil
+  end
   local onEnterHandler = microButton.GetScript and microButton:GetScript("OnEnter") -- 微型按钮 OnEnter 脚本
   if type(onEnterHandler) == "function" then
     pcall(onEnterHandler, microButton)
@@ -5109,7 +5124,7 @@ local function hookAdventureGuideMicroButtonTooltip()
           pcall(RequestRaidInfo)
         end
         if GameTooltip then
-          GameTooltip._toolboxEJMicroLockoutsAdded = nil
+          microTooltipAppendState[GameTooltip] = nil
         end
         appendAdventureGuideMicroButtonLockoutLines()
         Runtime.TooltipShow(GameTooltip)
@@ -5117,7 +5132,7 @@ local function hookAdventureGuideMicroButtonTooltip()
     end)
     microButton:HookScript("OnLeave", function()
       if GameTooltip then
-        GameTooltip._toolboxEJMicroLockoutsAdded = nil
+        microTooltipAppendState[GameTooltip] = nil
       end
     end)
   end
