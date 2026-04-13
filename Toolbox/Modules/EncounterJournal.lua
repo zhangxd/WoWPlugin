@@ -373,10 +373,11 @@ local function registerIntegration()
   eventFrame = CreateFrame("Frame", "ToolboxEncounterJournalHost")
   eventFrame:RegisterEvent("ADDON_LOADED")
   eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+  eventFrame:RegisterEvent("QUEST_TURNED_IN")
   setLockoutUpdateEventEnabled(isModuleEnabled())
 
-  eventFrame:SetScript("OnEvent", function(self, event, name)
-    if event == "ADDON_LOADED" and name == "Blizzard_EncounterJournal" then
+  eventFrame:SetScript("OnEvent", function(self, event, eventArg1)
+    if event == "ADDON_LOADED" and eventArg1 == "Blizzard_EncounterJournal" then
       self:UnregisterEvent("ADDON_LOADED")
       initHooks()
       refreshAfterHookInit()
@@ -390,6 +391,11 @@ local function registerIntegration()
       self:UnregisterEvent("PLAYER_ENTERING_WORLD")
       RequestRaidInfo()
       hookAdventureGuideMicroButtonTooltip()
+    elseif event == "QUEST_TURNED_IN" then
+      local questID = type(eventArg1) == "number" and eventArg1 or nil -- 已完成任务 ID
+      if isModuleEnabled() and type(questID) == "number" and questID > 0 then
+        QuestlineTreeView:recordRecentlyCompletedQuest(questID)
+      end
     end
   end)
 
@@ -432,6 +438,7 @@ local function exposeTestHooksIfNeeded()
         eventFrame:UnregisterEvent("ADDON_LOADED")
         eventFrame:UnregisterEvent("PLAYER_ENTERING_WORLD")
         eventFrame:UnregisterEvent("UPDATE_INSTANCE_INFO")
+        eventFrame:UnregisterEvent("QUEST_TURNED_IN")
       end
       eventFrame = nil
       microButtonTooltipHooked = false
@@ -612,6 +619,88 @@ Toolbox.RegisterModule({
     skinPresetHint:SetJustifyH("LEFT")
     skinPresetHint:SetText(localeTable.EJ_QUEST_SKIN_STYLE_HINT or "仅影响 Toolbox 任务页签自定义界面。")
     yOffset = yOffset - math.max(24, math.ceil((skinPresetHint:GetStringHeight() or 14) + 8))
+
+    local function normalizeRecentCompletedMaxValue(value)
+      local normalizedValue = tonumber(value) or 10 -- 归一化后的最近完成上限
+      normalizedValue = math.floor(normalizedValue)
+      if normalizedValue < 1 then
+        normalizedValue = 1
+      elseif normalizedValue > 30 then
+        normalizedValue = 30
+      end
+      return normalizedValue
+    end
+
+    moduleDb.questRecentCompletedMax = normalizeRecentCompletedMaxValue(moduleDb.questRecentCompletedMax)
+
+    local recentCompletedLimitLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 最近完成数量标签
+    recentCompletedLimitLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
+    recentCompletedLimitLabel:SetText(localeTable.EJ_QUEST_RECENT_COMPLETED_LIMIT_LABEL or "最近完成任务保留条数")
+    yOffset = yOffset - 24
+
+    local recentCompletedLimitSlider = nil -- 最近完成数量滑条
+    local sliderCreated, sliderObject = pcall(CreateFrame, "Slider", nil, box, "OptionsSliderTemplate")
+    if sliderCreated and sliderObject then
+      recentCompletedLimitSlider = sliderObject
+    else
+      recentCompletedLimitSlider = CreateFrame("Slider", nil, box, "UISliderTemplate")
+    end
+    recentCompletedLimitSlider:SetPoint("TOPLEFT", box, "TOPLEFT", 24, yOffset)
+    recentCompletedLimitSlider:SetWidth(220)
+    recentCompletedLimitSlider:SetMinMaxValues(1, 30)
+    recentCompletedLimitSlider:SetValueStep(1)
+    if recentCompletedLimitSlider.SetObeyStepOnDrag then
+      recentCompletedLimitSlider:SetObeyStepOnDrag(true)
+    end
+    if recentCompletedLimitSlider.Low and recentCompletedLimitSlider.Low.SetText then
+      recentCompletedLimitSlider.Low:SetText("1")
+    end
+    if recentCompletedLimitSlider.High and recentCompletedLimitSlider.High.SetText then
+      recentCompletedLimitSlider.High:SetText("30")
+    end
+    if recentCompletedLimitSlider.Text and recentCompletedLimitSlider.Text.SetText then
+      recentCompletedLimitSlider.Text:SetText("")
+    end
+
+    local recentCompletedLimitValueText = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 最近完成数量值
+    recentCompletedLimitValueText:SetPoint("LEFT", recentCompletedLimitSlider, "RIGHT", 12, 0)
+    recentCompletedLimitValueText:SetJustifyH("LEFT")
+
+    local isSyncingRecentCompletedSlider = false -- 是否正在同步滑条值
+    local function refreshRecentCompletedLimitValueText()
+      recentCompletedLimitValueText:SetText(tostring(moduleDb.questRecentCompletedMax or 10))
+    end
+    recentCompletedLimitSlider:SetScript("OnValueChanged", function(slider, rawValue)
+      if isSyncingRecentCompletedSlider then
+        return
+      end
+      local normalizedValue = normalizeRecentCompletedMaxValue(rawValue) -- 归一化后的滑条值
+      if slider.GetValue and slider:GetValue() ~= normalizedValue then
+        isSyncingRecentCompletedSlider = true
+        slider:SetValue(normalizedValue)
+        isSyncingRecentCompletedSlider = false
+      end
+      if moduleDb.questRecentCompletedMax ~= normalizedValue then
+        moduleDb.questRecentCompletedMax = normalizedValue
+        QuestlineTreeView:trimRecentCompletedQuestRecords()
+        QuestlineTreeView:refresh()
+        RefreshScheduler:schedule("settings_change")
+      end
+      refreshRecentCompletedLimitValueText()
+    end)
+
+    isSyncingRecentCompletedSlider = true
+    recentCompletedLimitSlider:SetValue(moduleDb.questRecentCompletedMax)
+    isSyncingRecentCompletedSlider = false
+    refreshRecentCompletedLimitValueText()
+    yOffset = yOffset - 38
+
+    local recentCompletedLimitHint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 最近完成数量说明
+    recentCompletedLimitHint:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
+    recentCompletedLimitHint:SetWidth(560)
+    recentCompletedLimitHint:SetJustifyH("LEFT")
+    recentCompletedLimitHint:SetText(localeTable.EJ_QUEST_RECENT_COMPLETED_LIMIT_HINT or "最近完成任务列表仅记录插件启用后通过交任务事件采集的数据。")
+    yOffset = yOffset - math.max(24, math.ceil((recentCompletedLimitHint:GetStringHeight() or 14) + 8))
 
     yOffset = yOffset - 8
 

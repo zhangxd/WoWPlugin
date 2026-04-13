@@ -66,6 +66,38 @@ local function getQuestlineCollapsedTable()
   return moduleDb.questlineTreeCollapsed
 end
 
+local RECENT_COMPLETED_MIN = 1 -- 最近完成最小保留条数
+local RECENT_COMPLETED_MAX = 30 -- 最近完成最大保留条数
+local RECENT_COMPLETED_DEFAULT = 10 -- 最近完成默认保留条数
+
+local function normalizeRecentCompletedMaxValue(rawValue)
+  if type(rawValue) ~= "number" then
+    return RECENT_COMPLETED_DEFAULT
+  end
+  local normalizedValue = math.floor(rawValue) -- 归一化后的条数
+  if normalizedValue < RECENT_COMPLETED_MIN then
+    return RECENT_COMPLETED_MIN
+  end
+  if normalizedValue > RECENT_COMPLETED_MAX then
+    return RECENT_COMPLETED_MAX
+  end
+  return normalizedValue
+end
+
+local function getRecentCompletedQuestMaxValue()
+  local moduleDb = getModuleDb() -- 模块存档
+  moduleDb.questRecentCompletedMax = normalizeRecentCompletedMaxValue(moduleDb.questRecentCompletedMax)
+  return moduleDb.questRecentCompletedMax
+end
+
+local function getRecentCompletedQuestList()
+  local moduleDb = getModuleDb() -- 模块存档
+  if type(moduleDb.questRecentCompletedList) ~= "table" then
+    moduleDb.questRecentCompletedList = {}
+  end
+  return moduleDb.questRecentCompletedList
+end
+
 local QUEST_ROOT_TAB_ID = 203 -- 任务根页签 ID（自定义）
 local DUNGEON_ROOT_TAB_ID = 4 -- 地下城根页签 ID
 local RAID_ROOT_TAB_ID = 5 -- 团队副本根页签 ID
@@ -310,6 +342,20 @@ local function formatProgressText(progressInfo, localeTable)
     progressInfo.completed or 0,
     progressInfo.total or 0
   )
+end
+
+local function formatCompletedAtText(completedAt)
+  if type(completedAt) ~= "number" or completedAt <= 0 then
+    return ""
+  end
+  if type(date) ~= "function" then
+    return tostring(completedAt)
+  end
+  local formatSuccess, formattedText = pcall(date, "%m-%d %H:%M", completedAt) -- 完成时间显示文本
+  if formatSuccess and type(formattedText) == "string" and formattedText ~= "" then
+    return formattedText
+  end
+  return tostring(completedAt)
 end
 
 local function resolveQuestLineDisplayName(questLineEntry)
@@ -747,6 +793,7 @@ function QuestlineTreeView:loadSelection()
   if self.selectedModeKey == "quest_type" or self.selectedModeKey == "active_log" then
     self.expandedQuestLineID = nil
   end
+  self:trimRecentCompletedQuestRecords()
   self.selectedQuestID = nil
 end
 
@@ -758,6 +805,71 @@ function QuestlineTreeView:saveSelection()
   moduleDb.questNavSelectedTypeKey = type(self.selectedTypeKey) == "string" and self.selectedTypeKey or ""
   moduleDb.questNavSearchText = type(self.searchText) == "string" and self.searchText or ""
   moduleDb.questNavExpandedQuestLineID = type(self.expandedQuestLineID) == "number" and self.expandedQuestLineID or 0
+end
+
+function QuestlineTreeView:trimRecentCompletedQuestRecords()
+  local recentCompletedList = getRecentCompletedQuestList() -- 最近完成任务列表
+  local maxCount = getRecentCompletedQuestMaxValue() -- 当前最大保留条数
+  local uniqueQuestIdSet = {} -- 去重索引
+  local normalizedRecentList = {} -- 归一化后的列表
+  for _, recentEntry in ipairs(recentCompletedList) do
+    local questID = type(recentEntry) == "table" and recentEntry.questID or nil -- 当前任务 ID
+    if type(questID) == "number" and questID > 0 and uniqueQuestIdSet[questID] ~= true then
+      uniqueQuestIdSet[questID] = true
+      normalizedRecentList[#normalizedRecentList + 1] = {
+        questID = questID,
+        questName = type(recentEntry.questName) == "string" and recentEntry.questName or "",
+        completedAt = type(recentEntry.completedAt) == "number" and recentEntry.completedAt or 0,
+      }
+      if #normalizedRecentList >= maxCount then
+        break
+      end
+    end
+  end
+  local moduleDb = getModuleDb() -- 模块存档
+  moduleDb.questRecentCompletedList = normalizedRecentList
+end
+
+function QuestlineTreeView:recordRecentlyCompletedQuest(questID, completedAt)
+  if type(questID) ~= "number" or questID <= 0 then
+    return
+  end
+  local moduleDb = getModuleDb() -- 模块存档
+  moduleDb.questRecentCompletedMax = normalizeRecentCompletedMaxValue(moduleDb.questRecentCompletedMax)
+  local recentCompletedList = getRecentCompletedQuestList() -- 最近完成任务列表
+  local questName = nil -- 任务显示名
+  if C_QuestLog and type(C_QuestLog.GetTitleForQuestID) == "function" then
+    local questTitle = C_QuestLog.GetTitleForQuestID(questID) -- 任务标题
+    if type(questTitle) == "string" and questTitle ~= "" then
+      questName = questTitle
+    end
+  end
+  if type(questName) ~= "string" or questName == "" then
+    questName = "Quest #" .. tostring(questID)
+  end
+  local completedTimestamp = type(completedAt) == "number" and completedAt or 0 -- 完成时间戳
+  if completedTimestamp <= 0 then
+    if type(GetServerTime) == "function" then
+      completedTimestamp = GetServerTime()
+    elseif type(time) == "function" then
+      completedTimestamp = time()
+    end
+  end
+  for index = #recentCompletedList, 1, -1 do
+    local recentEntry = recentCompletedList[index] -- 当前遍历条目
+    if type(recentEntry) == "table" and recentEntry.questID == questID then
+      table.remove(recentCompletedList, index)
+    end
+  end
+  table.insert(recentCompletedList, 1, {
+    questID = questID,
+    questName = questName,
+    completedAt = completedTimestamp,
+  })
+  self:trimRecentCompletedQuestRecords()
+  if self.selected == true and self.selectedModeKey == "active_log" then
+    self:render()
+  end
 end
 
 function QuestlineTreeView:resolveNavigationDefaults(navigationModel)
@@ -823,6 +935,12 @@ function QuestlineTreeView:buildLeftTreeRows(navigationModel)
   local expansionByID = navigationModel and navigationModel.expansionByID or {} -- 资料片索引
   local collapseState = getQuestlineCollapsedTable() -- 左树折叠状态
   local localeTable = Toolbox.L or {} -- 本地化文案
+  rowDataList[#rowDataList + 1] = {
+    kind = "active_root",
+    text = localeTable.EJ_QUEST_NAV_MODE_ACTIVE or "Active Quests",
+    selected = self.selectedModeKey == "active_log",
+    modeKey = "active_log",
+  }
   for _, expansionSummary in ipairs(expansionList) do
     local expansionSelected = self.selectedExpansionID == expansionSummary.id -- 资料片是否选中
     local expansionCollapseKey = buildExpansionCollapseKey(expansionSummary.id) -- 资料片折叠键
@@ -837,25 +955,17 @@ function QuestlineTreeView:buildLeftTreeRows(navigationModel)
     }
     if expansionSelected and not expansionCollapsed then
       local expansionEntry = expansionByID[expansionSummary.id] -- 当前资料片对象
-      local modeEntryList = {} -- 当前资料片模式列表（附加“进行中任务”）
+      local modeEntryList = {} -- 当前资料片模式列表
       for _, modeEntry in ipairs(expansionEntry and expansionEntry.modes or {}) do
         modeEntryList[#modeEntryList + 1] = modeEntry
       end
-      modeEntryList[#modeEntryList + 1] = {
-        key = "active_log",
-        name = localeTable.EJ_QUEST_NAV_MODE_ACTIVE or "Active Quests",
-        entries = {},
-      }
-
       for _, modeEntry in ipairs(modeEntryList) do
         local modeKey = modeEntry.key -- 当前模式键
         local modeSelected = self.selectedModeKey == modeEntry.key -- 模式是否选中
         local modeCollapseKey = buildModeCollapseKey(expansionSummary.id, modeKey) -- 模式折叠键
-        local modeCollapsed = modeKey ~= "active_log" and isTreeNodeCollapsed(collapseState, modeCollapseKey) or false -- 模式是否折叠
+        local modeCollapsed = isTreeNodeCollapsed(collapseState, modeCollapseKey) -- 模式是否折叠
         local modeText = tostring(modeEntry.name or "") -- 模式显示文本
-        if modeKey ~= "active_log" then
-          modeText = string.format("%s %s", modeCollapsed and "[+]" or "[-]", modeText)
-        end
+        modeText = string.format("%s %s", modeCollapsed and "[+]" or "[-]", modeText)
 
         rowDataList[#rowDataList + 1] = {
           kind = "mode",
@@ -866,7 +976,7 @@ function QuestlineTreeView:buildLeftTreeRows(navigationModel)
           collapseKey = modeCollapseKey,
           collapsed = modeCollapsed,
         }
-        if modeSelected and modeKey ~= "active_log" and not modeCollapsed then
+        if modeSelected and not modeCollapsed then
           for _, childEntry in ipairs(modeEntry.entries or {}) do
             local childKind = childEntry.kind -- 导航子项类型
             if type(childKind) ~= "string" or childKind == "" then
@@ -923,7 +1033,12 @@ function QuestlineTreeView:getOrCreateRowButton(rowIndex)
     end
 
     local collapseState = getQuestlineCollapsedTable() -- 左树折叠状态
-    if rowData.kind == "expansion" and type(rowData.expansionID) == "number" then
+    if rowData.kind == "active_root" then
+      self.selectedModeKey = "active_log"
+      self.selectedMapID = nil
+      self.selectedTypeKey = ""
+      self.expandedQuestLineID = nil
+    elseif rowData.kind == "expansion" and type(rowData.expansionID) == "number" then
       local collapseKey = rowData.collapseKey -- 当前资料片折叠键
       if self.selectedExpansionID == rowData.expansionID and type(collapseKey) == "string" then
         setTreeNodeCollapsed(collapseState, collapseKey, not isTreeNodeCollapsed(collapseState, collapseKey))
@@ -1074,7 +1189,7 @@ function QuestlineTreeView:getOrCreateRightRowButton(rowIndex)
   rowButton.rowMetaFont = rowMetaFont
   rowButton:SetScript("OnEnter", function(button)
     local rowData = button.rowData -- 当前行数据
-    if type(rowData) ~= "table" or rowData.kind ~= "quest" then
+    if type(rowData) ~= "table" or (rowData.kind ~= "quest" and rowData.kind ~= "recent_quest") then
       return
     end
     local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(rowData.questID) -- 任务详情
@@ -1084,7 +1199,11 @@ function QuestlineTreeView:getOrCreateRightRowButton(rowIndex)
   end)
   rowButton:SetScript("OnLeave", function(button)
     local rowData = button.rowData -- 当前行数据
-    if type(rowData) == "table" and rowData.kind == "quest" and GameTooltip and GameTooltip.Hide then
+    if type(rowData) == "table"
+      and (rowData.kind == "quest" or rowData.kind == "recent_quest")
+      and GameTooltip
+      and GameTooltip.Hide
+    then
       GameTooltip:Hide()
     end
   end)
@@ -1104,7 +1223,7 @@ function QuestlineTreeView:getOrCreateRightRowButton(rowIndex)
       self:render()
       return
     end
-    if rowData.kind == "quest" and type(rowData.questID) == "number" then
+    if (rowData.kind == "quest" or rowData.kind == "recent_quest") and type(rowData.questID) == "number" then
       self.selectedQuestID = rowData.questID
       self:showQuestDetailPopup(rowData.questID)
     end
@@ -1264,15 +1383,48 @@ end
 function QuestlineTreeView:buildMainRowsForActive()
   local rowDataList = {} -- 进行中模式主区行
   local searchKeyword = normalizeSearchText(self.searchText) -- 搜索关键词
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local recentCompletedList = getRecentCompletedQuestList() -- 最近完成任务列表
+  local recentMatchCount = 0 -- 最近完成命中条数
+  rowDataList[#rowDataList + 1] = {
+    kind = "section_header",
+    text = string.format(
+      localeTable.EJ_QUEST_RECENT_COMPLETED_COUNT_FMT or "Recently Completed (%d)",
+      #recentCompletedList
+    ),
+  }
+  for _, recentEntry in ipairs(recentCompletedList) do
+    local recentQuestName = tostring(recentEntry.questName or ("Quest #" .. tostring(recentEntry.questID or "?"))) -- 最近完成任务显示名
+    if searchKeyword == "" or textContainsKeyword(recentQuestName, searchKeyword) then
+      recentMatchCount = recentMatchCount + 1
+      rowDataList[#rowDataList + 1] = {
+        kind = "recent_quest",
+        text = recentQuestName,
+        questID = recentEntry.questID,
+        status = "completed",
+        readyForTurnIn = false,
+        selected = self.selectedQuestID == recentEntry.questID,
+        metaText = formatCompletedAtText(recentEntry.completedAt),
+      }
+    end
+  end
+  if recentMatchCount == 0 then
+    rowDataList[#rowDataList + 1] = {
+      kind = "section_empty",
+      text = localeTable.EJ_QUEST_RECENT_COMPLETED_EMPTY or "No recently completed quests.",
+    }
+  end
+
   local questEntryList, errorObject = Toolbox.Questlines.GetCurrentQuestLogEntries() -- 当前任务日志条目
   if errorObject then
     return {}, errorObject
   end
 
+  local activeQuestRows = {} -- 当前任务行列表
   for _, questEntry in ipairs(questEntryList or {}) do
     local questName = tostring(questEntry.name or ("Quest #" .. tostring(questEntry.questID or "?"))) -- 任务显示名
     if searchKeyword == "" or textContainsKeyword(questName, searchKeyword) then
-      rowDataList[#rowDataList + 1] = {
+      activeQuestRows[#activeQuestRows + 1] = {
         kind = "quest",
         text = questName,
         questID = questEntry.questID,
@@ -1283,7 +1435,7 @@ function QuestlineTreeView:buildMainRowsForActive()
     end
   end
 
-  table.sort(rowDataList, function(leftRow, rightRow)
+  table.sort(activeQuestRows, function(leftRow, rightRow)
     local leftRank = getQuestStatusRank(leftRow.status) -- 左侧状态排序权重
     local rightRank = getQuestStatusRank(rightRow.status) -- 右侧状态排序权重
     if leftRank ~= rightRank then
@@ -1291,6 +1443,24 @@ function QuestlineTreeView:buildMainRowsForActive()
     end
     return tostring(leftRow.text or "") < tostring(rightRow.text or "")
   end)
+
+  rowDataList[#rowDataList + 1] = {
+    kind = "section_header",
+    text = string.format(
+      localeTable.EJ_QUEST_ACTIVE_SECTION_COUNT_FMT or "Current Quests (%d)",
+      #activeQuestRows
+    ),
+  }
+  if #activeQuestRows == 0 then
+    rowDataList[#rowDataList + 1] = {
+      kind = "section_empty",
+      text = localeTable.EJ_QUEST_ACTIVE_EMPTY or "No active quests in the quest log.",
+    }
+  else
+    for _, activeQuestRow in ipairs(activeQuestRows) do
+      rowDataList[#rowDataList + 1] = activeQuestRow
+    end
+  end
 
   return rowDataList, nil
 end
@@ -1368,15 +1538,25 @@ function QuestlineTreeView:renderRightRows(rowDataList)
     local rowHeight = rowData.kind == "questline" and (self.rowHeight + 1) or self.rowHeight -- 当前行高度
     rowButton:SetHeight(rowHeight)
 
-    local indentLevel = rowData.kind == "quest" and 1 or 0 -- 任务缩进
-    local statusPrefix = rowData.kind == "quest" and formatQuestStatusPrefix(rowData.status) or "" -- 任务状态前缀
+    local indentLevel = (rowData.kind == "quest" or rowData.kind == "recent_quest") and 1 or 0 -- 任务缩进
+    local statusPrefix = (rowData.kind == "quest" or rowData.kind == "recent_quest")
+      and formatQuestStatusPrefix(rowData.status)
+      or "" -- 任务状态前缀
     if statusPrefix ~= "" then
       rowButton.rowFont:SetText(string.rep("  ", indentLevel) .. statusPrefix .. " " .. tostring(rowData.text or ""))
     else
       rowButton.rowFont:SetText(string.rep("  ", indentLevel) .. tostring(rowData.text or ""))
     end
 
-    if rowData.selected == true then
+    if rowData.kind == "section_header" then
+      rowButton.rowFont:SetTextColor(1.0, 0.9, 0.68)
+      rowButton:SetBackdropBorderColor(0.5, 0.4, 0.22, 0.7)
+      rowButton:SetBackdropColor(0.15, 0.11, 0.07, 0.78)
+    elseif rowData.kind == "section_empty" then
+      rowButton.rowFont:SetTextColor(0.7, 0.7, 0.74)
+      rowButton:SetBackdropBorderColor(0.32, 0.32, 0.34, 0.46)
+      rowButton:SetBackdropColor(0.09, 0.09, 0.11, 0.62)
+    elseif rowData.selected == true then
       rowButton.rowFont:SetTextColor(0.35, 0.85, 1)
       rowButton:SetBackdropBorderColor(0.86, 0.68, 0.28, 0.95)
       rowButton:SetBackdropColor(0.2, 0.16, 0.1, 0.88)
@@ -1397,9 +1577,12 @@ function QuestlineTreeView:renderRightRows(rowDataList)
     end
 
     if rowButton.rowMetaFont then
-      rowButton.rowMetaFont:SetText(tostring(rowData.metaText or ""))
+      local metaText = rowData.kind == "section_header" and "" or tostring(rowData.metaText or "")
+      rowButton.rowMetaFont:SetText(metaText)
       if rowData.kind == "questline" then
         rowButton.rowMetaFont:SetTextColor(0.95, 0.88, 0.6)
+      elseif rowData.kind == "recent_quest" then
+        rowButton.rowMetaFont:SetTextColor(0.88, 0.82, 0.65)
       else
         rowButton.rowMetaFont:SetTextColor(0.72, 0.72, 0.76)
       end
@@ -1478,7 +1661,7 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
   self.breadcrumbButtons = self.breadcrumbButtons or {}
   local breadcrumbList = {} -- 当前路径段
 
-  if type(expansionEntry) == "table" then
+  if self.selectedModeKey ~= "active_log" and type(expansionEntry) == "table" then
     breadcrumbList[#breadcrumbList + 1] = {
       text = tostring(expansionEntry.name or ""),
       onClick = function()
@@ -1699,14 +1882,21 @@ function QuestlineTreeView:render()
   end
   if self.rightTitle then
     local titleText = nil -- 主区标题文本
+    local titleCount = #mainRows -- 标题计数
     if self.selectedModeKey == "map_questline" then
       titleText = localeTable.EJ_QUESTLINE_LIST_TITLE or "Questlines"
     elseif self.selectedModeKey == "quest_type" then
       titleText = localeTable.EJ_QUEST_TASK_LIST_TITLE or "Quests"
     else
       titleText = localeTable.EJ_QUEST_NAV_MODE_ACTIVE or "Active Quests"
+      titleCount = 0
+      for _, rowData in ipairs(mainRows) do
+        if type(rowData) == "table" and rowData.kind == "quest" then
+          titleCount = titleCount + 1
+        end
+      end
     end
-    self.rightTitle:SetText(string.format("%s (%d)", titleText, #mainRows))
+    self.rightTitle:SetText(string.format("%s (%d)", titleText, titleCount))
   end
 end
 

@@ -83,6 +83,10 @@ local defaults = {
       questNavSearchText = "",
       -- 任务页签皮肤模式（default | archive | contrast）
       questNavSkinPreset = "archive",
+      -- 最近完成任务记录（按时间倒序）
+      questRecentCompletedList = {},
+      -- 最近完成任务保留上限（1-30）
+      questRecentCompletedMax = 10,
       -- 主区：当前展开的任务线（0 表示全部折叠）
       questNavExpandedQuestLineID = 0,
       -- 左侧树折叠状态（key=true 表示折叠）
@@ -280,6 +284,30 @@ function Toolbox.Config.Init()
       and encounterJournalDb.questNavSkinPreset ~= "contrast"
     then
       encounterJournalDb.questNavSkinPreset = "archive"
+    end
+    if type(encounterJournalDb.questRecentCompletedMax) ~= "number" then
+      encounterJournalDb.questRecentCompletedMax = 10
+    end
+    encounterJournalDb.questRecentCompletedMax = math.floor(encounterJournalDb.questRecentCompletedMax)
+    if encounterJournalDb.questRecentCompletedMax < 1 then
+      encounterJournalDb.questRecentCompletedMax = 1
+    elseif encounterJournalDb.questRecentCompletedMax > 30 then
+      encounterJournalDb.questRecentCompletedMax = 30
+    end
+    if type(encounterJournalDb.questRecentCompletedList) ~= "table" then
+      encounterJournalDb.questRecentCompletedList = {}
+    else
+      local normalizedRecentList = {} -- 归一化后的最近完成列表
+      for _, entry in ipairs(encounterJournalDb.questRecentCompletedList) do
+        if type(entry) == "table" and type(entry.questID) == "number" and entry.questID > 0 then
+          normalizedRecentList[#normalizedRecentList + 1] = {
+            questID = entry.questID,
+            questName = type(entry.questName) == "string" and entry.questName or "",
+            completedAt = type(entry.completedAt) == "number" and entry.completedAt or 0,
+          }
+        end
+      end
+      encounterJournalDb.questRecentCompletedList = normalizedRecentList
     end
 
     do
