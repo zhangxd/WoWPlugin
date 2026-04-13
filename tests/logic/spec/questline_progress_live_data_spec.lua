@@ -90,26 +90,29 @@ describe("QuestlineProgress live data validation", function()
     assert.is_truthy(type(model.maps) == "table")
   end)
 
-  it("db_shape_live_data_keeps_poi_blocks_within_exported_quest_range", function()
+  it("db_shape_live_data_uses_schema_v6_core_blocks", function()
     local dataTable = Toolbox.Data and Toolbox.Data.InstanceQuestlines -- live 根数据
     assert.is_truthy(type(dataTable) == "table")
 
-    local questExistsByID = {} -- live quest 集合
-    for questID in pairs(dataTable.quests or {}) do
-      questExistsByID[questID] = true
+    assert.equals(6, dataTable.schemaVersion)
+    assert.is_truthy(type(dataTable.quests) == "table")
+    assert.is_truthy(type(dataTable.questLines) == "table")
+    assert.is_truthy(type(dataTable.expansions) == "table")
+    assert.is_nil(dataTable.questLineXQuest)
+    assert.is_nil(dataTable.questPOIBlobs)
+    assert.is_nil(dataTable.questPOIPoints)
+
+    for _, questEntry in pairs(dataTable.quests or {}) do
+      assert.is_truthy(type(questEntry) == "table")
+      assert.is_truthy(type(questEntry.ID) == "number")
+      assert.is_nil(questEntry.UiMapID)
     end
 
-    for questID, blobList in pairs(dataTable.questPOIBlobs or {}) do
-      assert.is_true(questExistsByID[questID] == true)
-      assert.is_truthy(type(blobList) == "table")
-      for _, blobObject in ipairs(blobList) do
-        assert.is_truthy(type(blobObject) == "table")
-        assert.is_truthy(type(blobObject.BlobID) == "number")
-        local pointList = dataTable.questPOIPoints and dataTable.questPOIPoints[blobObject.BlobID] or nil -- 对应点位列表
-        if pointList ~= nil then
-          assert.is_truthy(type(pointList) == "table")
-        end
-      end
+    for _, questLineEntry in pairs(dataTable.questLines or {}) do
+      assert.is_truthy(type(questLineEntry) == "table")
+      assert.is_truthy(type(questLineEntry.ID) == "number")
+      assert.is_truthy(type(questLineEntry.UiMapID) == "number")
+      assert.is_truthy(type(questLineEntry.QuestIDs) == "table")
     end
   end)
 

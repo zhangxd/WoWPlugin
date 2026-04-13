@@ -380,15 +380,16 @@ def validate_encounter_journal_questline_tree_feature() -> None:
         raise AssertionError("questline api should not keep legacy GetExpansionTree compatibility")
     if "function Toolbox.Questlines.GetInstanceTree(" in questline_api_text:
         raise AssertionError("questline api should not keep legacy GetInstanceTree compatibility")
-    if "schemaVersion = 3" not in data_text and "schemaVersion = 4" not in data_text and "schemaVersion = 5" not in data_text:
-        raise AssertionError("missing questline data schema version: expected schemaVersion = 3, 4 or 5")
+    if "schemaVersion = 3" not in data_text and "schemaVersion = 4" not in data_text and "schemaVersion = 5" not in data_text and "schemaVersion = 6" not in data_text:
+        raise AssertionError("missing questline data schema version: expected schemaVersion = 3, 4, 5 or 6")
     require_contains(data_text, 'sourceMode = "live"', "questline data source mode")
     require_contains(data_text, "generatedAt = ", "questline data generated timestamp")
     require_contains(data_text, "quests = {", "questline data quests table")
     require_contains(data_text, "questLines = {", "questline data questlines table")
-    if "questLineQuestIDs = {" not in data_text and "questLineXQuest = {" not in data_text:
+    if "questLineQuestIDs = {" not in data_text and "questLineXQuest = {" not in data_text and "QuestIDs = {" not in data_text:
         raise AssertionError("missing questline data questline relation block")
-    require_contains(data_text, "ExpansionID =", "questline data expansion id field")
+    if "ExpansionID =" not in data_text and "expansions = {" not in data_text:
+        raise AssertionError("missing questline expansion grouping field")
     require_contains(questline_api_text, "function Toolbox.Questlines.SetDataOverride(", "questline mock data override api")
 
     require_contains(module_text, "QuestlineTreeView", "encounter journal questline tree view")

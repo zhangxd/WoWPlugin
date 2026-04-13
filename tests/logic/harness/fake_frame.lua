@@ -104,11 +104,19 @@ function FakeFrame:SetShown(shouldShow)
 end
 
 function FakeFrame:Show()
+  local wasShown = self._isShown == true -- 显示前状态
   self._isShown = true
+  if not wasShown then
+    self:RunScript("OnShow")
+  end
 end
 
 function FakeFrame:Hide()
+  local wasShown = self._isShown == true -- 隐藏前状态
   self._isShown = false
+  if wasShown then
+    self:RunScript("OnHide")
+  end
 end
 
 function FakeFrame:IsShown()
@@ -121,6 +129,29 @@ end
 
 function FakeFrame:GetText()
   return self._text
+end
+function FakeFrame:SetAutoFocus(value)
+  self._autoFocus = value == true
+end
+function FakeFrame:SetMaxLetters(value)
+  self._maxLetters = tonumber(value) or 0
+end
+function FakeFrame:SetTextInsets(leftValue, rightValue, topValue, bottomValue)
+  self._textInsets = {
+    tonumber(leftValue) or 0,
+    tonumber(rightValue) or 0,
+    tonumber(topValue) or 0,
+    tonumber(bottomValue) or 0,
+  }
+end
+function FakeFrame:HasFocus()
+  return self._hasFocus == true
+end
+function FakeFrame:ClearFocus()
+  self._hasFocus = false
+end
+function FakeFrame:SetFocus()
+  self._hasFocus = true
 end
 
 function FakeFrame:SetChecked(value)
@@ -236,6 +267,25 @@ function FakeFrame:CreateFontString()
     traceList = self.traceList,
   })
   return fontString
+end
+
+function FakeFrame:CreateTexture()
+  local textureObject = FakeFrame.new({
+    frameType = "Texture",
+    frameName = nil,
+    parentFrame = self,
+    traceList = self.traceList,
+  })
+  return textureObject
+end
+
+function FakeFrame:SetColorTexture(redValue, greenValue, blueValue, alphaValue)
+  self._colorTexture = {
+    tonumber(redValue) or 0,
+    tonumber(greenValue) or 0,
+    tonumber(blueValue) or 0,
+    tonumber(alphaValue) or 0,
+  }
 end
 
 return FakeFrame

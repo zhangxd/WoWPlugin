@@ -50,8 +50,18 @@ local isQuestCompletedFn = C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted or 
 local isQuestReadyForTurnInFn = C_QuestLog and C_QuestLog.ReadyForTurnIn or nil -- 任务可交付状态函数
 local getQuestTypeFn = C_QuestLog and C_QuestLog.GetQuestType or nil -- 任务类型函数
 local getQuestTagInfoFn = C_QuestLog and C_QuestLog.GetQuestTagInfo or nil -- 任务类型标签函数
+local getQuestObjectivesFn = C_QuestLog and C_QuestLog.GetQuestObjectives or nil -- 任务目标查询函数
+local requestLoadQuestByIDFn = C_QuestLog and C_QuestLog.RequestLoadQuestByID or nil -- 任务缓存请求函数
 local getNumQuestLogEntriesFn = C_QuestLog and C_QuestLog.GetNumQuestLogEntries or nil -- Quest Log 条目总数函数
 local getQuestLogInfoFn = C_QuestLog and C_QuestLog.GetInfo or nil -- Quest Log 条目详情函数
+local getQuestLogQuestTextFn = GetQuestLogQuestText -- Quest Log 描述文本函数
+local asyncQuestDumpState = { -- 任务详情异步输出状态
+  eventFrame = nil,
+  callbackListByQuestID = {},
+  pendingRequestByQuestID = {},
+  lastDumpAtByQuestID = {},
+}
+local getQuestZoneIDFn = C_TaskQuest and C_TaskQuest.GetQuestZoneID or nil -- 任务地图查询函数
 
 --- 清空任务线运行时缓存，确保后续按当前数据源重新构建模型。
 local function resetRuntimeCache()
@@ -263,6 +273,202 @@ local function getExpansionLabel(expansionID)
   return string.format(fallbackFormat, tostring(expansionID or "?"))
 end
 
+--- 获取当前时间（秒），供节流和异步请求去重使用。
+---@return number
+local function getCurrentTimeSeconds()
+  if type(GetTime) == "function" then
+    local success, currentTime = pcall(GetTime) -- 当前运行时秒数
+    if success and type(currentTime) == "number" then
+      return currentTime
+    end
+  end
+  return 0
+end
+
+--- 安全读取任务日志索引。
+---@param questID number
+---@return number|nil
+local function getSafeQuestLogIndex(questID)
+  if type(questID) ~= "number" or type(getLogIndexForQuestID) ~= "function" then
+    return nil
+  end
+
+  local success, logIndex = pcall(getLogIndexForQuestID, questID) -- 当前任务日志索引
+  if success and type(logIndex) == "number" and logIndex > 0 then
+    return logIndex
+  end
+  return nil
+end
+
+--- 安全读取任务描述与目标文本。
+---@param questLogIndex number|nil
+---@return string|nil
+---@return string|nil
+local function getQuestTextByLogIndex(questLogIndex)
+  local liveGetQuestLogQuestTextFn = type(GetQuestLogQuestText) == "function" and GetQuestLogQuestText or getQuestLogQuestTextFn -- 当前任务文本函数
+  if type(questLogIndex) ~= "number" or type(liveGetQuestLogQuestTextFn) ~= "function" then
+    return nil, nil
+  end
+
+  local success, descriptionText, objectiveText = pcall(liveGetQuestLogQuestTextFn, questLogIndex) -- 任务描述与目标文本
+  if not success then
+    return nil, nil
+  end
+  return descriptionText, objectiveText
+end
+
+--- 安全读取任务目标列表。
+---@param questID number
+---@return table[]
+local function getQuestObjectivesByID(questID)
+  local liveGetQuestObjectivesFn = type(C_QuestLog) == "table" and C_QuestLog.GetQuestObjectives or getQuestObjectivesFn -- 当前任务目标查询函数
+  if type(questID) ~= "number" or type(liveGetQuestObjectivesFn) ~= "function" then
+    return {}
+  end
+
+  local success, objectiveList = pcall(liveGetQuestObjectivesFn, questID) -- 任务目标列表
+  if success and type(objectiveList) == "table" then
+    return objectiveList
+  end
+  return {}
+end
+
+--- 安全读取任务标签信息。
+---@param questID number
+---@return table|nil
+local function getQuestTagInfoByID(questID)
+  local liveGetQuestTagInfoFn = type(C_QuestLog) == "table" and C_QuestLog.GetQuestTagInfo or getQuestTagInfoFn -- 当前任务标签函数
+  if type(questID) ~= "number" or type(liveGetQuestTagInfoFn) ~= "function" then
+    return nil
+  end
+
+  local success, tagInfo = pcall(liveGetQuestTagInfoFn, questID) -- 任务标签信息
+  if success and type(tagInfo) == "table" then
+    return tagInfo
+  end
+  return nil
+end
+
+--- 安全读取任务所在地图 ID。
+---@param questID number
+---@return number|nil
+local function getQuestZoneMapID(questID)
+  local liveGetQuestZoneIDFn = type(C_TaskQuest) == "table" and C_TaskQuest.GetQuestZoneID or getQuestZoneIDFn -- 当前任务地图查询函数
+  if type(questID) ~= "number" or type(liveGetQuestZoneIDFn) ~= "function" then
+    return nil
+  end
+
+  local success, uiMapID = pcall(liveGetQuestZoneIDFn, questID) -- 任务所在地图 ID
+  if success and type(uiMapID) == "number" and uiMapID > 0 then
+    return uiMapID
+  end
+  return nil
+end
+
+--- 安全读取地图原始信息。
+---@param uiMapID number|nil
+---@return table|nil
+local function getRawMapInfoByID(uiMapID)
+  if type(uiMapID) ~= "number" or uiMapID <= 0 or type(C_Map) ~= "table" or type(C_Map.GetMapInfo) ~= "function" then
+    return nil
+  end
+
+  local success, mapInfo = pcall(C_Map.GetMapInfo, uiMapID) -- 地图原始信息
+  if success and type(mapInfo) == "table" then
+    return mapInfo
+  end
+  return nil
+end
+
+--- 读取地图父链与大陆层级信息。
+---@param uiMapID number|nil
+---@return table
+local function buildMapChainSnapshot(uiMapID)
+  local resultObject = {
+    zoneMapID = uiMapID,
+    zoneMapName = nil,
+    parentMapList = {},
+    continentMapID = nil,
+    continentMapName = nil,
+  }
+  if type(uiMapID) ~= "number" or uiMapID <= 0 then
+    return resultObject
+  end
+
+  local currentMapID = uiMapID -- 当前遍历地图 ID
+  local guardCount = 0 -- 父链保护计数
+  while type(currentMapID) == "number" and currentMapID > 0 and guardCount < 20 do
+    guardCount = guardCount + 1
+    local mapInfo = getRawMapInfoByID(currentMapID) -- 当前地图原始信息
+    if type(mapInfo) ~= "table" then
+      break
+    end
+
+    if currentMapID == uiMapID then
+      resultObject.zoneMapName = type(mapInfo.name) == "string" and mapInfo.name or nil
+    else
+      resultObject.parentMapList[#resultObject.parentMapList + 1] = {
+        mapID = currentMapID,
+        name = type(mapInfo.name) == "string" and mapInfo.name or nil,
+        mapType = mapInfo.mapType,
+      }
+    end
+
+    if mapInfo.mapType == Enum.UIMapType.Continent then
+      resultObject.continentMapID = currentMapID
+      resultObject.continentMapName = type(mapInfo.name) == "string" and mapInfo.name or nil
+      break
+    end
+
+    if type(mapInfo.parentMapID) ~= "number" or mapInfo.parentMapID <= 0 then
+      break
+    end
+    currentMapID = mapInfo.parentMapID
+  end
+
+  return resultObject
+end
+
+--- 安全读取任务线原始 API 信息。
+---@param questID number
+---@param uiMapID number|nil
+---@return table|nil
+local function getQuestLineApiInfo(questID, uiMapID)
+  if type(questID) ~= "number" or type(C_QuestLine) ~= "table" or type(C_QuestLine.GetQuestLineInfo) ~= "function" then
+    return nil
+  end
+
+  local success, questLineInfo = pcall(C_QuestLine.GetQuestLineInfo, questID, uiMapID, false) -- 任务线原始 API 信息
+  if success and type(questLineInfo) == "table" then
+    return questLineInfo
+  end
+  return nil
+end
+
+--- 统一输出聊天调试文本。
+---@param messageText string|nil
+local function printQuestDumpLine(messageText)
+  if type(messageText) ~= "string" or messageText == "" then
+    return
+  end
+  if Toolbox.Chat and type(Toolbox.Chat.PrintAddonMessage) == "function" then
+    Toolbox.Chat.PrintAddonMessage(messageText)
+  end
+end
+
+--- 读取任务详情输出的本地化文案。
+---@param keyName string
+---@param fallbackText string
+---@return string
+local function getQuestDumpLocaleText(keyName, fallbackText)
+  local localeTable = Toolbox.L or {} -- 本地化字符串表
+  local localizedText = localeTable[keyName] -- 当前键的文案
+  if type(localizedText) == "string" and localizedText ~= "" then
+    return localizedText
+  end
+  return fallbackText
+end
+
 --- 对外暴露任务类型展示名查询。
 ---@param typeID number|nil
 ---@return string
@@ -449,7 +655,7 @@ function Toolbox.Questlines.SetDataOverride(dataTable)
   resetRuntimeCache()
 end
 
---- strict 校验 schema v3 数据。
+--- strict 校验任务线静态数据。
 ---@param dataTable table|nil 数据根对象
 ---@param strictMode boolean|nil strict 开关
 ---@return boolean ok
@@ -468,7 +674,9 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     "quests",
     "questLines",
   }
-  if dataTable.schemaVersion >= 4 then
+  if dataTable.schemaVersion >= 6 then
+    requiredRootFields[#requiredRootFields + 1] = "expansions"
+  elseif dataTable.schemaVersion >= 4 then
     requiredRootFields[#requiredRootFields + 1] = "questLineXQuest"
   else
     requiredRootFields[#requiredRootFields + 1] = "questLineQuestIDs"
@@ -479,8 +687,8 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     end
   end
 
-  if strictEnabled and dataTable.schemaVersion ~= 3 and dataTable.schemaVersion ~= 4 and dataTable.schemaVersion ~= 5 then
-    return false, buildValidationError("E_INVALID_SCHEMA", "schemaVersion", "schemaVersion must be 3, 4 or 5")
+  if strictEnabled and dataTable.schemaVersion ~= 3 and dataTable.schemaVersion ~= 4 and dataTable.schemaVersion ~= 5 and dataTable.schemaVersion ~= 6 then
+    return false, buildValidationError("E_INVALID_SCHEMA", "schemaVersion", "schemaVersion must be 3, 4, 5 or 6")
   end
 
   if type(dataTable.sourceMode) ~= "string" then
@@ -500,7 +708,10 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
   if type(dataTable.questLines) ~= "table" then
     return false, buildValidationError("E_TYPE_MISMATCH", "questLines", "table expected")
   end
-  if dataTable.schemaVersion >= 4 and type(dataTable.questLineXQuest) ~= "table" then
+  if dataTable.schemaVersion >= 6 and type(dataTable.expansions) ~= "table" then
+    return false, buildValidationError("E_TYPE_MISMATCH", "expansions", "table expected")
+  end
+  if dataTable.schemaVersion >= 4 and dataTable.schemaVersion < 6 and type(dataTable.questLineXQuest) ~= "table" then
     return false, buildValidationError("E_TYPE_MISMATCH", "questLineXQuest", "table expected")
   end
   if dataTable.schemaVersion < 4 and type(dataTable.questLineQuestIDs) ~= "table" then
@@ -522,7 +733,7 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     if questEntry.ID ~= questID then
       return false, buildValidationError("E_KEY_VALUE_MISMATCH", "quests[" .. tostring(questID) .. "].ID", "ID must match key")
     end
-    if type(questEntry.UiMapID) ~= "number" or questEntry.UiMapID <= 0 then
+    if dataTable.schemaVersion < 6 and (type(questEntry.UiMapID) ~= "number" or questEntry.UiMapID <= 0) then
       return false, buildValidationError("E_TYPE_MISMATCH", "quests[" .. tostring(questID) .. "].UiMapID", "positive number expected")
     end
     questExistsByID[questID] = true
@@ -549,53 +760,99 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     if type(questLineEntry.UiMapID) ~= "number" or questLineEntry.UiMapID <= 0 then
       return false, buildValidationError("E_MISSING_FIELD", "questLines[" .. tostring(questLineID) .. "].UiMapID", "positive number expected")
     end
-    if dataTable.schemaVersion >= 5 and (type(questLineEntry.ExpansionID) ~= "number" or questLineEntry.ExpansionID < 0) then
+    if dataTable.schemaVersion >= 5 and dataTable.schemaVersion < 6 and (type(questLineEntry.ExpansionID) ~= "number" or questLineEntry.ExpansionID < 0) then
       return false, buildValidationError("E_MISSING_FIELD", "questLines[" .. tostring(questLineID) .. "].ExpansionID", "non-negative number expected")
+    end
+    if dataTable.schemaVersion >= 6 then
+      local questListOk, questListError = validateNumberArray(
+        questLineEntry.QuestIDs,
+        strictEnabled,
+        "questLines[" .. tostring(questLineID) .. "].QuestIDs"
+      )
+      if not questListOk then
+        return false, questListError
+      end
     end
     questLineExistsByID[questLineID] = true
   end
 
   local questOwnerByID = {} -- questID -> questLineID
-  local questLinkRoot = dataTable.schemaVersion >= 4 and dataTable.questLineXQuest or dataTable.questLineQuestIDs -- 任务线链接根表
-  local questLinkPath = dataTable.schemaVersion >= 4 and "questLineXQuest" or "questLineQuestIDs" -- 任务线链接字段路径
-  for questLineKey, questLinkList in pairs(questLinkRoot) do
-    local questLineID = tonumber(questLineKey) -- 规范化 questLineID
-    if type(questLineID) ~= "number" then
-      return false, buildValidationError("E_TYPE_MISMATCH", questLinkPath .. "[" .. tostring(questLineKey) .. "]", "numeric key required")
-    end
-    if questLineExistsByID[questLineID] ~= true then
-      return false, buildValidationError("E_BAD_REF", questLinkPath .. "[" .. tostring(questLineID) .. "]", "questLineID not found in questLines")
-    end
-
-    local questListOk = nil -- 任务链接数组校验结果
-    local questListError = nil -- 任务链接数组校验错误
-    if dataTable.schemaVersion >= 4 then
-      questListOk, questListError = validateQuestLinkArray(
-        questLinkList,
-        strictEnabled,
-        questLinkPath .. "[" .. tostring(questLineID) .. "]"
-      )
-    else
-      questListOk, questListError = validateNumberArray(
-        questLinkList,
-        strictEnabled,
-        questLinkPath .. "[" .. tostring(questLineID) .. "]"
-      )
-    end
-    if not questListOk then
-      return false, questListError
-    end
-
-    if type(questLinkList) == "table" then
-      for questIndex, questLinkObject in ipairs(questLinkList) do
-        local questID = dataTable.schemaVersion >= 4 and questLinkObject.QuestID or questLinkObject -- 当前任务 ID
+  if dataTable.schemaVersion >= 6 then
+    for questLineKey, questLineEntry in pairs(dataTable.questLines) do
+      local questLineID = tonumber(questLineKey) -- 规范化 questLineID
+      local questIDList = type(questLineEntry) == "table" and questLineEntry.QuestIDs or nil -- 当前任务线任务列表
+      for questIndex, questID in ipairs(questIDList or {}) do
         if questExistsByID[questID] ~= true then
-          return false, buildValidationError("E_BAD_REF", questLinkPath .. "[" .. tostring(questLineID) .. "][" .. tostring(questIndex) .. "]", "questID not found in quests")
+          return false, buildValidationError("E_BAD_REF", "questLines[" .. tostring(questLineID) .. "].QuestIDs[" .. tostring(questIndex) .. "]", "questID not found in quests")
         end
         if questOwnerByID[questID] ~= nil and questOwnerByID[questID] ~= questLineID then
-          return false, buildValidationError("E_DUPLICATE_REF", questLinkPath .. "[" .. tostring(questLineID) .. "][" .. tostring(questIndex) .. "]", "questID bound to multiple questLines")
+          return false, buildValidationError("E_DUPLICATE_REF", "questLines[" .. tostring(questLineID) .. "].QuestIDs[" .. tostring(questIndex) .. "]", "questID bound to multiple questLines")
         end
         questOwnerByID[questID] = questLineID
+      end
+    end
+
+    for expansionKey, questLineIDList in pairs(dataTable.expansions) do
+      local expansionID = tonumber(expansionKey) -- 规范化资料片 ID
+      if type(expansionID) ~= "number" or expansionID < 0 then
+        return false, buildValidationError("E_TYPE_MISMATCH", "expansions[" .. tostring(expansionKey) .. "]", "non-negative numeric key required")
+      end
+      local validList, listError = validateNumberArray(
+        questLineIDList,
+        strictEnabled,
+        "expansions[" .. tostring(expansionID) .. "]"
+      )
+      if not validList then
+        return false, listError
+      end
+      for listIndex, questLineID in ipairs(questLineIDList or {}) do
+        if questLineExistsByID[questLineID] ~= true then
+          return false, buildValidationError("E_BAD_REF", "expansions[" .. tostring(expansionID) .. "][" .. tostring(listIndex) .. "]", "questLineID not found in questLines")
+        end
+      end
+    end
+  else
+    local questLinkRoot = dataTable.schemaVersion >= 4 and dataTable.questLineXQuest or dataTable.questLineQuestIDs -- 任务线链接根表
+    local questLinkPath = dataTable.schemaVersion >= 4 and "questLineXQuest" or "questLineQuestIDs" -- 任务线链接字段路径
+    for questLineKey, questLinkList in pairs(questLinkRoot) do
+      local questLineID = tonumber(questLineKey) -- 规范化 questLineID
+      if type(questLineID) ~= "number" then
+        return false, buildValidationError("E_TYPE_MISMATCH", questLinkPath .. "[" .. tostring(questLineKey) .. "]", "numeric key required")
+      end
+      if questLineExistsByID[questLineID] ~= true then
+        return false, buildValidationError("E_BAD_REF", questLinkPath .. "[" .. tostring(questLineID) .. "]", "questLineID not found in questLines")
+      end
+
+      local questListOk = nil -- 任务链接数组校验结果
+      local questListError = nil -- 任务链接数组校验错误
+      if dataTable.schemaVersion >= 4 then
+        questListOk, questListError = validateQuestLinkArray(
+          questLinkList,
+          strictEnabled,
+          questLinkPath .. "[" .. tostring(questLineID) .. "]"
+        )
+      else
+        questListOk, questListError = validateNumberArray(
+          questLinkList,
+          strictEnabled,
+          questLinkPath .. "[" .. tostring(questLineID) .. "]"
+        )
+      end
+      if not questListOk then
+        return false, questListError
+      end
+
+      if type(questLinkList) == "table" then
+        for questIndex, questLinkObject in ipairs(questLinkList) do
+          local questID = dataTable.schemaVersion >= 4 and questLinkObject.QuestID or questLinkObject -- 当前任务 ID
+          if questExistsByID[questID] ~= true then
+            return false, buildValidationError("E_BAD_REF", questLinkPath .. "[" .. tostring(questLineID) .. "][" .. tostring(questIndex) .. "]", "questID not found in quests")
+          end
+          if questOwnerByID[questID] ~= nil and questOwnerByID[questID] ~= questLineID then
+            return false, buildValidationError("E_DUPLICATE_REF", questLinkPath .. "[" .. tostring(questLineID) .. "][" .. tostring(questIndex) .. "]", "questID bound to multiple questLines")
+          end
+          questOwnerByID[questID] = questLineID
+        end
       end
     end
   end
@@ -670,6 +927,9 @@ end
 ---@param questRecord table 任务静态记录
 ---@return table|nil
 local function resolveQuestMapPos(dataTable, questID, questRecord)
+  if type(dataTable) == "table" and type(dataTable.schemaVersion) == "number" and dataTable.schemaVersion >= 6 then
+    return nil
+  end
   local mapPos = type(questRecord) == "table" and questRecord.MapPos or nil -- 任务主点位
   if type(mapPos) ~= "table" and type(dataTable.questPOIBlobs) == "table" and type(dataTable.questPOIPoints) == "table" then
     local blobList = dataTable.questPOIBlobs[questID] -- 当前任务 blob 列表
@@ -688,6 +948,10 @@ end
 ---@param questLineID number 任务线 ID
 ---@return table|nil
 local function getQuestLinkList(dataTable, questLineID)
+  if type(dataTable) == "table" and type(dataTable.schemaVersion) == "number" and dataTable.schemaVersion >= 6 then
+    local questLineEntry = dataTable.questLines and dataTable.questLines[questLineID] or nil -- 当前任务线对象
+    return type(questLineEntry) == "table" and questLineEntry.QuestIDs or nil
+  end
   return dataTable.questLineXQuest and dataTable.questLineXQuest[questLineID]
     or dataTable.questLineQuestIDs and dataTable.questLineQuestIDs[questLineID]
     or nil
@@ -731,7 +995,7 @@ local function buildQuestEntryByID(dataTable, questID)
     name = runtimeState.name,
     status = runtimeState.status,
     readyForTurnIn = runtimeState.readyForTurnIn,
-    UiMapID = questRecord.UiMapID,
+    UiMapID = type(questRecord.UiMapID) == "number" and questRecord.UiMapID or nil,
     typeID = runtimeState.typeID,
     mapPos = resolveQuestMapPos(dataTable, questID, questRecord),
     npcIDs = runtimeState.npcIDs,
@@ -1000,6 +1264,7 @@ local function buildQuestNavigationModel()
     expansionList = {},
     expansionByID = {},
   }
+  local dataTable = getQuestlineDataTable() -- 根数据表
 
   local function ensureExpansionEntry(expansionID)
     local expansionEntry = navigationModel.expansionByID[expansionID] -- 已存在资料片分组
@@ -1037,40 +1302,92 @@ local function buildQuestNavigationModel()
     return expansionEntry
   end
 
-  for _, mapEntry in ipairs(questTabModel.maps or {}) do
-    for _, questLineEntry in ipairs(mapEntry.questLines or {}) do
-      local expansionID = questLineEntry.ExpansionID -- 当前任务线资料片 ID
+  if type(dataTable) == "table" and type(dataTable.schemaVersion) == "number" and dataTable.schemaVersion >= 6 then
+    for expansionID, questLineIDList in pairs(dataTable.expansions or {}) do
       if type(expansionID) == "number" and expansionID >= 0 then
         local expansionEntry = ensureExpansionEntry(expansionID) -- 资料片分组
-        local mapGroup = ensureCategoryGroup(
-          expansionEntry.modeByKey.map_questline.entries,
-          expansionEntry._mapEntryByID,
-          mapEntry.id,
-          mapEntry.name or getMapNameByID(mapEntry.id)
-        )
-        appendQuestLineToGroup(mapGroup, questLineEntry)
+        for _, questLineID in ipairs(questLineIDList or {}) do
+          local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
+          local mapEntry = type(questLineEntry) == "table" and questTabModel.mapByID and questTabModel.mapByID[questLineEntry.UiMapID] or nil -- 当前地图
+          if type(questLineEntry) == "table" and type(mapEntry) == "table" then
+            local mapGroup = ensureCategoryGroup(
+              expansionEntry.modeByKey.map_questline.entries,
+              expansionEntry._mapEntryByID,
+              mapEntry.id,
+              mapEntry.name or getMapNameByID(mapEntry.id)
+            )
+            appendQuestLineToGroup(mapGroup, questLineEntry)
+          end
+        end
       end
     end
-  end
-
-  for _, typeEntry in ipairs(typeIndexModel.typeList or {}) do
-    local typeID = type(typeEntry) == "table" and typeEntry.id or nil -- 当前类型 ID
-    if type(typeID) == "number" then
-      local questLineIDList = typeIndexModel.typeToQuestLineIDs and typeIndexModel.typeToQuestLineIDs[typeID] or nil -- 类型下任务线列表
-      for _, questLineID in ipairs(questLineIDList or {}) do
-        local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
-        local expansionID = type(questLineEntry) == "table" and questLineEntry.ExpansionID or nil -- 当前任务线资料片 ID
-        if type(expansionID) == "number" and expansionID >= 0 and type(questLineEntry) == "table" then
+    for _, typeEntry in ipairs(typeIndexModel.typeList or {}) do
+      local typeID = type(typeEntry) == "table" and typeEntry.id or nil -- 当前类型 ID
+      if type(typeID) == "number" then
+        local questLineIDList = typeIndexModel.typeToQuestLineIDs and typeIndexModel.typeToQuestLineIDs[typeID] or nil -- 类型下任务线列表
+        for expansionID, expansionQuestLineIDList in pairs(dataTable.expansions or {}) do
+          if type(expansionID) == "number" and expansionID >= 0 then
+            local expansionEntry = ensureExpansionEntry(expansionID) -- 资料片分组
+            local expansionQuestLineSet = {} -- 当前资料片任务线集合
+            for _, expansionQuestLineID in ipairs(expansionQuestLineIDList or {}) do
+              expansionQuestLineSet[expansionQuestLineID] = true
+            end
+            for _, questLineID in ipairs(questLineIDList or {}) do
+              if expansionQuestLineSet[questLineID] == true then
+                local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
+                if type(questLineEntry) == "table" then
+                  local representativeQuestID = questLineEntry.questIDs and questLineEntry.questIDs[1] or nil -- 代表任务 ID
+                  local typeGroupKey, typeGroupName = getQuestTypeGroupInfo(representativeQuestID, typeID) -- 类型分组信息
+                  local typeGroup = ensureCategoryGroup(
+                    expansionEntry.modeByKey.quest_type.entries,
+                    expansionEntry._typeEntryByKey,
+                    typeGroupKey,
+                    typeGroupName
+                  )
+                  appendQuestLineToGroup(typeGroup, questLineEntry)
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  else
+    for _, mapEntry in ipairs(questTabModel.maps or {}) do
+      for _, questLineEntry in ipairs(mapEntry.questLines or {}) do
+        local expansionID = questLineEntry.ExpansionID -- 当前任务线资料片 ID
+        if type(expansionID) == "number" and expansionID >= 0 then
           local expansionEntry = ensureExpansionEntry(expansionID) -- 资料片分组
-          local representativeQuestID = questLineEntry.questIDs and questLineEntry.questIDs[1] or nil -- 代表任务 ID
-          local typeGroupKey, typeGroupName = getQuestTypeGroupInfo(representativeQuestID, typeID) -- 类型分组信息
-          local typeGroup = ensureCategoryGroup(
-            expansionEntry.modeByKey.quest_type.entries,
-            expansionEntry._typeEntryByKey,
-            typeGroupKey,
-            typeGroupName
+          local mapGroup = ensureCategoryGroup(
+            expansionEntry.modeByKey.map_questline.entries,
+            expansionEntry._mapEntryByID,
+            mapEntry.id,
+            mapEntry.name or getMapNameByID(mapEntry.id)
           )
-          appendQuestLineToGroup(typeGroup, questLineEntry)
+          appendQuestLineToGroup(mapGroup, questLineEntry)
+        end
+      end
+    end
+
+    for _, typeEntry in ipairs(typeIndexModel.typeList or {}) do
+      local typeID = type(typeEntry) == "table" and typeEntry.id or nil -- 当前类型 ID
+      if type(typeID) == "number" then
+        local questLineIDList = typeIndexModel.typeToQuestLineIDs and typeIndexModel.typeToQuestLineIDs[typeID] or nil -- 类型下任务线列表
+        for _, questLineID in ipairs(questLineIDList or {}) do
+          local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
+          local expansionID = type(questLineEntry) == "table" and questLineEntry.ExpansionID or nil -- 当前任务线资料片 ID
+          if type(expansionID) == "number" and expansionID >= 0 and type(questLineEntry) == "table" then
+            local expansionEntry = ensureExpansionEntry(expansionID) -- 资料片分组
+            local representativeQuestID = questLineEntry.questIDs and questLineEntry.questIDs[1] or nil -- 代表任务 ID
+            local typeGroupKey, typeGroupName = getQuestTypeGroupInfo(representativeQuestID, typeID) -- 类型分组信息
+            local typeGroup = ensureCategoryGroup(
+              expansionEntry.modeByKey.quest_type.entries,
+              expansionEntry._typeEntryByKey,
+              typeGroupKey,
+              typeGroupName
+            )
+            appendQuestLineToGroup(typeGroup, questLineEntry)
+          end
         end
       end
     end
@@ -1645,4 +1962,318 @@ function Toolbox.Questlines.GetQuestDetailByID(questID)
     questLineName = questLineEntry and questLineEntry.name or nil,
     runtime = runtimeState,
   }, nil
+end
+
+--- 构建任务详情调试快照，供异步输出使用。
+---@param questID number
+---@return table|nil snapshotObject
+---@return table|nil errorObject
+local function buildQuestDebugSnapshot(questID)
+  if type(questID) ~= "number" then
+    return nil, nil
+  end
+
+  local questLogIndex = getSafeQuestLogIndex(questID) -- 当前任务日志索引
+  local descriptionText, objectiveText = getQuestTextByLogIndex(questLogIndex) -- 任务描述与目标摘要
+  local objectiveList = getQuestObjectivesByID(questID) -- 任务目标列表
+  local tagInfo = getQuestTagInfoByID(questID) -- 任务标签信息
+  local uiMapID = getQuestZoneMapID(questID) -- API 返回的任务地图 ID
+  local mapChainObject = buildMapChainSnapshot(uiMapID) -- 地图父链快照
+  local questLineInfo = getQuestLineApiInfo(questID, uiMapID) -- 任务线原始 API 信息
+  local runtimeState = getCachedQuestRuntimeState(questID) -- 任务运行时状态
+  local titleText = getQuestNameByID(questID) or runtimeState.name -- 任务标题
+  if type(titleText) ~= "string" or titleText == "" then
+    titleText = "Quest #" .. tostring(questID)
+  end
+
+  return {
+    questID = questID,
+    title = titleText,
+    logIndex = questLogIndex,
+    inQuestLog = type(questLogIndex) == "number",
+    status = runtimeState.status,
+    readyForTurnIn = runtimeState.readyForTurnIn == true,
+    mapID = uiMapID,
+    mapName = mapChainObject.zoneMapName or getMapNameByID(uiMapID),
+    parentMapList = mapChainObject.parentMapList,
+    continentMapID = mapChainObject.continentMapID,
+    continentMapName = mapChainObject.continentMapName,
+    questLineInfo = questLineInfo,
+    typeID = runtimeState.typeID,
+    typeLabel = getQuestTypeLabel(runtimeState.typeID),
+    tagID = type(tagInfo) == "table" and tagInfo.tagID or nil,
+    tagName = type(tagInfo) == "table" and tagInfo.tagName or nil,
+    worldQuestType = type(tagInfo) == "table" and tagInfo.worldQuestType or nil,
+    description = descriptionText,
+    objectiveText = objectiveText,
+    objectiveList = objectiveList,
+  }, nil
+end
+
+--- 将任务调试快照转成聊天输出文本。
+---@param snapshotObject table
+---@param loadStateText string
+---@return string[]
+local function buildQuestDumpLines(snapshotObject, loadStateText)
+  local lineList = {} -- 聊天输出文本列表
+  local objectiveList = type(snapshotObject.objectiveList) == "table" and snapshotObject.objectiveList or {} -- 任务目标列表
+  local titleFormat = getQuestDumpLocaleText("EJ_QUEST_DEBUG_HEADER_FMT", "Quest Debug | id=%s | %s") -- 标题格式
+  local loadLabel = getQuestDumpLocaleText("EJ_QUEST_DEBUG_LOAD_STATE", "Load") -- 加载状态标签
+  local questLogLabel = getQuestDumpLocaleText("EJ_QUEST_DEBUG_IN_LOG", "In Log") -- 任务日志标签
+  local mapLabel = getQuestDumpLocaleText("EJ_QUEST_DEBUG_MAP", "Map") -- 地图标签
+  local parentMapLabel = getQuestDumpLocaleText("EJ_QUEST_DEBUG_PARENT_MAPS", "Parent Maps") -- 父地图标签
+  local continentMapLabel = getQuestDumpLocaleText("EJ_QUEST_DEBUG_CONTINENT_MAP", "Continent Map") -- 大陆地图标签
+  local questLineLabel = getQuestDumpLocaleText("EJ_QUEST_DEBUG_QUESTLINE_API", "QuestLine API") -- 任务线 API 标签
+  local typeLabel = getQuestDumpLocaleText("EJ_QUEST_DEBUG_TYPE", "Type") -- 类型标签
+  local tagLabel = getQuestDumpLocaleText("EJ_QUEST_DEBUG_TAG", "Tag") -- 标签标签
+  local descriptionLabel = getQuestDumpLocaleText("EJ_QUEST_DEBUG_DESCRIPTION", "Description") -- 描述标签
+  local objectiveTextLabel = getQuestDumpLocaleText("EJ_QUEST_DEBUG_OBJECTIVE_TEXT", "Objective Text") -- 目标摘要标签
+  local objectiveHeaderLabel = getQuestDumpLocaleText("EJ_QUEST_DEBUG_OBJECTIVES", "Objectives") -- 目标列表标签
+  local unavailableText = getQuestDumpLocaleText("EJ_QUEST_DEBUG_UNAVAILABLE", "unavailable") -- 缺失字段文本
+
+  lineList[#lineList + 1] = string.format(titleFormat, tostring(snapshotObject.questID), tostring(snapshotObject.title))
+  lineList[#lineList + 1] = string.format(
+    "status=%s | ready=%s | logIndex=%s | %s=%s | %s=%s",
+    tostring(snapshotObject.status or unavailableText),
+    tostring(snapshotObject.readyForTurnIn == true),
+    tostring(snapshotObject.logIndex or unavailableText),
+    loadLabel,
+    tostring(loadStateText or unavailableText),
+    questLogLabel,
+    tostring(snapshotObject.inQuestLog == true)
+  )
+  lineList[#lineList + 1] = string.format(
+    "%s=%s(%s) | %s=%s(%s) | %s=%s(%s)",
+    mapLabel,
+    tostring(snapshotObject.mapName or unavailableText),
+    tostring(snapshotObject.mapID or unavailableText),
+    continentMapLabel,
+    tostring(snapshotObject.continentMapName or unavailableText),
+    tostring(snapshotObject.continentMapID or unavailableText),
+    typeLabel,
+    tostring(snapshotObject.typeLabel or unavailableText),
+    tostring(snapshotObject.typeID or unavailableText)
+  )
+  lineList[#lineList + 1] = string.format(
+    "%s=%s(%s) | worldQuestType=%s",
+    tagLabel,
+    tostring(snapshotObject.tagName or unavailableText),
+    tostring(snapshotObject.tagID or unavailableText),
+    tostring(snapshotObject.worldQuestType or unavailableText)
+  )
+  if type(snapshotObject.parentMapList) == "table" and #snapshotObject.parentMapList > 0 then
+    local parentTextList = {} -- 父地图文本列表
+    for _, parentEntry in ipairs(snapshotObject.parentMapList) do
+      parentTextList[#parentTextList + 1] = string.format(
+        "%s(%s)",
+        tostring(parentEntry.name or unavailableText),
+        tostring(parentEntry.mapID or unavailableText)
+      )
+    end
+    lineList[#lineList + 1] = string.format("%s: %s", parentMapLabel, table.concat(parentTextList, " -> "))
+  end
+  if type(snapshotObject.questLineInfo) == "table" then
+    lineList[#lineList + 1] = string.format(
+      "%s: questLineID=%s | questLineName=%s | campaignID=%s",
+      questLineLabel,
+      tostring(snapshotObject.questLineInfo.questLineID or unavailableText),
+      tostring(snapshotObject.questLineInfo.questLineName or unavailableText),
+      tostring(snapshotObject.questLineInfo.campaignID or unavailableText)
+    )
+  end
+
+  if type(snapshotObject.description) == "string" and snapshotObject.description ~= "" then
+    lineList[#lineList + 1] = string.format("%s: %s", descriptionLabel, snapshotObject.description)
+  end
+  if type(snapshotObject.objectiveText) == "string" and snapshotObject.objectiveText ~= "" then
+    lineList[#lineList + 1] = string.format("%s: %s", objectiveTextLabel, snapshotObject.objectiveText)
+  end
+
+  if #objectiveList > 0 then
+    lineList[#lineList + 1] = objectiveHeaderLabel .. ":"
+    for objectiveIndex, objectiveObject in ipairs(objectiveList) do
+      local progressText = string.format(
+        "%s/%s",
+        tostring(objectiveObject.numFulfilled or 0),
+        tostring(objectiveObject.numRequired or 0)
+      )
+      lineList[#lineList + 1] = string.format(
+        "  %d. %s | type=%s | finished=%s | progress=%s",
+        objectiveIndex,
+        tostring(objectiveObject.text or unavailableText),
+        tostring(objectiveObject.type or unavailableText),
+        tostring(objectiveObject.finished == true),
+        progressText
+      )
+    end
+  end
+
+  return lineList
+end
+
+--- 记录本次任务详情输出时间，供后续同任务节流。
+---@param questID number
+local function markQuestDumpPrinted(questID)
+  if type(questID) ~= "number" then
+    return
+  end
+  asyncQuestDumpState.lastDumpAtByQuestID[questID] = getCurrentTimeSeconds()
+end
+
+--- 判断是否应跳过过于频繁的同任务输出。
+---@param questID number
+---@param forcePrint boolean|nil
+---@return boolean
+local function shouldThrottleQuestDump(questID, forcePrint)
+  if forcePrint == true or type(questID) ~= "number" then
+    return false
+  end
+
+  local lastDumpAt = asyncQuestDumpState.lastDumpAtByQuestID[questID] -- 上次输出时间
+  if type(lastDumpAt) ~= "number" then
+    return false
+  end
+  return (getCurrentTimeSeconds() - lastDumpAt) < 1.5
+end
+
+--- 执行任务详情聊天输出。
+---@param questID number
+---@param loadStateText string
+---@param forcePrint boolean|nil
+local function dumpQuestDetailsToChat(questID, loadStateText, forcePrint)
+  if shouldThrottleQuestDump(questID, forcePrint) then
+    return
+  end
+
+  local snapshotObject, errorObject = buildQuestDebugSnapshot(questID) -- 任务调试快照
+  if errorObject or type(snapshotObject) ~= "table" then
+    local failureFormat = getQuestDumpLocaleText("EJ_QUEST_DEBUG_FAILED_FMT", "Quest Debug failed for %s") -- 失败提示格式
+    printQuestDumpLine(string.format(failureFormat, tostring(questID)))
+    markQuestDumpPrinted(questID)
+    return
+  end
+
+  local lineList = buildQuestDumpLines(snapshotObject, loadStateText) -- 聊天输出文本列表
+  for _, messageText in ipairs(lineList) do
+    printQuestDumpLine(messageText)
+  end
+  markQuestDumpPrinted(questID)
+end
+
+--- 分发任务缓存加载回调。
+---@param questID number
+---@param success boolean
+local function dispatchQuestLoadCallbacks(questID, success)
+  local callbackList = asyncQuestDumpState.callbackListByQuestID[questID] -- 当前任务挂起回调列表
+  asyncQuestDumpState.callbackListByQuestID[questID] = nil
+  asyncQuestDumpState.pendingRequestByQuestID[questID] = nil
+  if type(callbackList) ~= "table" then
+    return
+  end
+
+  for _, callbackFunction in ipairs(callbackList) do
+    if type(callbackFunction) == "function" then
+      pcall(callbackFunction, questID, success == true)
+    end
+  end
+end
+
+--- 确保任务缓存加载事件框体已创建。
+---@return table|nil
+local function ensureQuestDumpEventFrame()
+  if asyncQuestDumpState.eventFrame then
+    return asyncQuestDumpState.eventFrame
+  end
+
+  local runtimeTable = Toolbox and Toolbox.Runtime or nil -- 运行时适配表
+  local createFrameFn = runtimeTable and runtimeTable.CreateFrame or CreateFrame -- Frame 创建函数
+  if type(createFrameFn) ~= "function" then
+    return nil
+  end
+
+  local eventFrame = createFrameFn("Frame", "ToolboxQuestDetailLoaderFrame", UIParent) -- 任务加载事件框体
+  if not eventFrame then
+    return nil
+  end
+  eventFrame:RegisterEvent("QUEST_DATA_LOAD_RESULT")
+  eventFrame:SetScript("OnEvent", function(_, eventName, loadedQuestID, success)
+    if eventName == "QUEST_DATA_LOAD_RESULT" and type(loadedQuestID) == "number" then
+      dispatchQuestLoadCallbacks(loadedQuestID, success == true)
+    end
+  end)
+  asyncQuestDumpState.eventFrame = eventFrame
+  return eventFrame
+end
+
+--- 请求任务缓存并在加载结果返回后执行回调。
+---@param questID number
+---@param callbackFunction function
+---@return boolean accepted
+---@return string stateText
+local function requestQuestDataAsync(questID, callbackFunction)
+  local liveRequestLoadQuestByIDFn = type(C_QuestLog) == "table" and C_QuestLog.RequestLoadQuestByID or requestLoadQuestByIDFn -- 当前任务缓存请求函数
+  if type(questID) ~= "number" or type(callbackFunction) ~= "function" then
+    return false, "invalid"
+  end
+
+  if type(liveRequestLoadQuestByIDFn) ~= "function" then
+    callbackFunction(questID, false)
+    return false, "unsupported"
+  end
+
+  if not ensureQuestDumpEventFrame() then
+    callbackFunction(questID, false)
+    return false, "no_frame"
+  end
+
+  local callbackList = asyncQuestDumpState.callbackListByQuestID[questID] -- 当前任务挂起回调列表
+  if type(callbackList) ~= "table" then
+    callbackList = {}
+    asyncQuestDumpState.callbackListByQuestID[questID] = callbackList
+  end
+  callbackList[#callbackList + 1] = callbackFunction
+
+  if asyncQuestDumpState.pendingRequestByQuestID[questID] == true then
+    return true, "pending"
+  end
+
+  asyncQuestDumpState.pendingRequestByQuestID[questID] = true
+  local requestSuccess = pcall(liveRequestLoadQuestByIDFn, questID) -- 请求任务缓存
+  if not requestSuccess then
+    dispatchQuestLoadCallbacks(questID, false)
+    return false, "request_failed"
+  end
+  return true, "pending"
+end
+
+--- 异步请求任务缓存，并将当前可解析到的任务详情输出到聊天框。
+---@param questID number 任务 ID
+---@param options table|nil 可选项：`force` 为 true 时跳过短时间节流
+---@return boolean accepted 是否已接受本次请求
+---@return string stateText `ready`|`pending`|`throttled` 等状态
+function Toolbox.Questlines.RequestAndDumpQuestDetailsToChat(questID, options)
+  local requestOptions = type(options) == "table" and options or {} -- 调用选项
+  if type(questID) ~= "number" or questID <= 0 then
+    return false, "invalid_quest_id"
+  end
+  if shouldThrottleQuestDump(questID, requestOptions.force) then
+    return true, "throttled"
+  end
+
+  if getSafeQuestLogIndex(questID) ~= nil then
+    dumpQuestDetailsToChat(questID, "ready", requestOptions.force)
+    return true, "ready"
+  end
+
+  local questTitle = getQuestNameByID(questID) -- 当前已缓存的任务标题
+  local liveRequestLoadQuestByIDFn = type(C_QuestLog) == "table" and C_QuestLog.RequestLoadQuestByID or requestLoadQuestByIDFn -- 当前任务缓存请求函数
+  if type(questTitle) == "string" and questTitle ~= "" and type(liveRequestLoadQuestByIDFn) ~= "function" then
+    dumpQuestDetailsToChat(questID, "ready", requestOptions.force)
+    return true, "ready"
+  end
+
+  return requestQuestDataAsync(questID, function(loadedQuestID, success)
+    local loadStateText = success == true and "loaded" or "failed" -- 加载结果文本
+    dumpQuestDetailsToChat(loadedQuestID, loadStateText, true)
+  end)
 end

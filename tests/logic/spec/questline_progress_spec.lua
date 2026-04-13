@@ -35,6 +35,10 @@ describe("QuestlineProgress mock data injection", function()
   local originalQuestUtilsGetQuestName = nil -- 原始 QuestUtils_GetQuestName 全局
   local originalGetQuestLogIndexByID = nil -- 原始 GetQuestLogIndexByID 全局
   local originalIsQuestFlaggedCompleted = nil -- 原始 IsQuestFlaggedCompleted 全局
+  local originalGetQuestLogQuestText = nil -- 原始 GetQuestLogQuestText 全局
+  local originalCreateFrame = nil -- 原始 CreateFrame 全局
+  local originalCTaskQuest = nil -- 原始 C_TaskQuest 全局
+  local originalEnum = nil -- 原始 Enum 全局
   local injectedMockData = nil -- 当前用例注入的 mock 数据
   local questLogInfoList = nil -- Quest Log 条目列表
   local questActiveByID = nil -- 进行中任务集合
@@ -42,6 +46,8 @@ describe("QuestlineProgress mock data injection", function()
   local questReadyByID = nil -- 可交付任务集合
   local questTypeByID = nil -- 任务类型集合
   local questTitleByID = nil -- 任务标题集合
+  local chatMessageList = nil -- 聊天输出记录
+  local eventFrameList = nil -- 事件框体记录
 
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
@@ -51,7 +57,13 @@ describe("QuestlineProgress mock data injection", function()
     originalQuestUtilsGetQuestName = rawget(_G, "QuestUtils_GetQuestName")
     originalGetQuestLogIndexByID = rawget(_G, "GetQuestLogIndexByID")
     originalIsQuestFlaggedCompleted = rawget(_G, "IsQuestFlaggedCompleted")
+    originalGetQuestLogQuestText = rawget(_G, "GetQuestLogQuestText")
+    originalCreateFrame = rawget(_G, "CreateFrame")
+    originalCTaskQuest = rawget(_G, "C_TaskQuest")
+    originalEnum = rawget(_G, "Enum")
 
+    chatMessageList = {}
+    eventFrameList = {}
     rawset(_G, "Toolbox", {
       Data = {
         InstanceQuestlines = nil,
@@ -61,6 +73,11 @@ describe("QuestlineProgress mock data injection", function()
         },
       },
       Questlines = {},
+      Chat = {
+        PrintAddonMessage = function(messageText)
+          chatMessageList[#chatMessageList + 1] = tostring(messageText or "")
+        end,
+      },
       L = {
         EJ_QUEST_TYPE_CAMPAIGN = "Campaign",
         EJ_QUEST_TYPE_SIDE_STORY = "Side Story",
@@ -127,17 +144,55 @@ describe("QuestlineProgress mock data injection", function()
         return questLogInfoList[index]
       end,
     })
+    rawset(_G, "GetQuestLogQuestText", function(logIndex)
+      return "Quest description #" .. tostring(logIndex), "Quest objective text #" .. tostring(logIndex)
+    end)
     rawset(_G, "C_Map", {
       GetMapInfo = function(uiMapID)
-        return { name = "Map #" .. tostring(uiMapID) }
+        if uiMapID == 2022 then
+          return { mapID = 2022, name = "Quest Zone", parentMapID = 2023, mapType = 3 }
+        end
+        if uiMapID == 2023 then
+          return { mapID = 2023, name = "Quest Parent", parentMapID = 2024, mapType = 3 }
+        end
+        if uiMapID == 2024 then
+          return { mapID = 2024, name = "Quest Continent", parentMapID = 0, mapType = Enum and Enum.UIMapType and Enum.UIMapType.Continent or 2 }
+        end
+        return { mapID = uiMapID, name = "Map #" .. tostring(uiMapID), parentMapID = 0, mapType = 3 }
       end,
     })
+    rawset(_G, "C_TaskQuest", {
+      GetQuestZoneID = function(questID)
+        if questID == 99901 then
+          return 2022
+        end
+        return nil
+      end,
+    })
+    rawset(_G, "Enum", rawget(_G, "Enum") or { UIMapType = { Continent = 2 } })
     rawset(_G, "QuestUtils_GetQuestName", nil)
     rawset(_G, "GetQuestLogIndexByID", function()
       return 0
     end)
     rawset(_G, "IsQuestFlaggedCompleted", function()
       return false
+    end)
+    rawset(_G, "CreateFrame", function()
+      local frameObject = {
+        registeredEvents = {},
+        scriptMap = {},
+      }
+      function frameObject:RegisterEvent(eventName)
+        self.registeredEvents[eventName] = true
+      end
+      function frameObject:UnregisterEvent(eventName)
+        self.registeredEvents[eventName] = nil
+      end
+      function frameObject:SetScript(scriptName, handler)
+        self.scriptMap[scriptName] = handler
+      end
+      eventFrameList[#eventFrameList + 1] = frameObject
+      return frameObject
     end)
 
     local moduleChunk = assert(loadfile("Toolbox/Core/API/QuestlineProgress.lua")) -- 任务线 API chunk
@@ -162,6 +217,10 @@ describe("QuestlineProgress mock data injection", function()
     rawset(_G, "QuestUtils_GetQuestName", originalQuestUtilsGetQuestName)
     rawset(_G, "GetQuestLogIndexByID", originalGetQuestLogIndexByID)
     rawset(_G, "IsQuestFlaggedCompleted", originalIsQuestFlaggedCompleted)
+    rawset(_G, "GetQuestLogQuestText", originalGetQuestLogQuestText)
+    rawset(_G, "CreateFrame", originalCreateFrame)
+    rawset(_G, "C_TaskQuest", originalCTaskQuest)
+    rawset(_G, "Enum", originalEnum)
   end)
 
   it("strict_validation_accepts_mock_fixture", function()
@@ -217,33 +276,30 @@ describe("QuestlineProgress mock data injection", function()
 
     local displayName, errorObject = Toolbox.Questlines.GetQuestLineDisplayName(9901)
     assert.is_nil(errorObject)
-    assert.equals("Mock QuestLine Alpha", displayName)
+    assert.equals("QuestLine #9901", displayName)
   end)
 
-  it("supports_v4_without_questline_name_field_and_falls_back_to_id_label", function()
-    local v4Data = {
-      schemaVersion = 4,
+  it("supports_v6_without_questline_name_field_and_falls_back_to_id_label", function()
+    local v6Data = {
+      schemaVersion = 6,
       sourceMode = "mock",
       generatedAt = "2026-01-03T00:00:00Z",
       quests = {
-        [81001] = { ID = 81001, UiMapID = 2371 },
-        [81002] = { ID = 81002, UiMapID = 2371 },
+        [81001] = { ID = 81001 },
+        [81002] = { ID = 81002 },
       },
       questLines = {
-        [9901] = { ID = 9901, UiMapID = 2371 },
+        [9901] = { ID = 9901, UiMapID = 2371, QuestIDs = { 81001, 81002 } },
       },
-      questLineXQuest = {
-        [9901] = {
-          { QuestID = 81001, OrderIndex = 1 },
-          { QuestID = 81002, OrderIndex = 2 },
-        },
+      expansions = {
+        [0] = { 9901 },
       },
     }
 
     rawset(_G, "C_QuestLine", nil)
-    Toolbox.Questlines.SetDataOverride(v4Data)
+    Toolbox.Questlines.SetDataOverride(v6Data)
 
-    local valid, errorObject = Toolbox.Questlines.ValidateInstanceQuestlinesData(v4Data, true)
+    local valid, errorObject = Toolbox.Questlines.ValidateInstanceQuestlinesData(v6Data, true)
     assert.is_true(valid)
     assert.is_nil(errorObject)
 
@@ -274,7 +330,7 @@ describe("QuestlineProgress mock data injection", function()
 
     assert.equals(81002, questEntryList[1].questID)
     assert.equals(9901, questEntryList[1].questLineID)
-    assert.equals(2371, questEntryList[1].UiMapID)
+    assert.is_nil(questEntryList[1].UiMapID)
 
     assert.equals(99901, questEntryList[2].questID)
     assert.equals("Live Quest #99901", questEntryList[2].name)
@@ -291,6 +347,98 @@ describe("QuestlineProgress mock data injection", function()
 
     assert.equals(81003, questEntryList[3].questID)
     assert.equals(true, questEntryList[3].readyForTurnIn)
+  end)
+
+  it("request_and_dump_quest_details_to_chat_waits_for_async_load_result", function()
+    local requestQuestIDList = {} -- 已请求加载的任务 ID 列表
+
+    questActiveByID = {}
+    questTitleByID[99901] = nil
+    rawset(_G, "C_QuestLog", {
+      GetTitleForQuestID = function(questID)
+        return questTitleByID[questID]
+      end,
+      GetLogIndexForQuestID = function(questID)
+        if questID == 99901 then
+          return 0
+        end
+        return questActiveByID[questID] == true and 1 or 0
+      end,
+      IsQuestFlaggedCompleted = function(questID)
+        return questCompletedByID[questID] == true
+      end,
+      ReadyForTurnIn = function(questID)
+        return questReadyByID[questID] == true
+      end,
+      GetQuestType = function(questID)
+        return questTypeByID[questID]
+      end,
+      GetQuestTagInfo = function()
+        return {
+          tagID = 77,
+          tagName = "World Quest",
+          worldQuestType = 3,
+        }
+      end,
+      GetQuestObjectives = function(questID)
+        if questID ~= 99901 then
+          return nil
+        end
+        return {
+          {
+            text = "Collect 5 fragments",
+            type = "monster",
+            finished = false,
+            numFulfilled = 2,
+            numRequired = 5,
+          },
+        }
+      end,
+      RequestLoadQuestByID = function(questID)
+        requestQuestIDList[#requestQuestIDList + 1] = questID
+        return true
+      end,
+      GetNumQuestLogEntries = function()
+        return 0, 0
+      end,
+      GetInfo = function()
+        return nil
+      end,
+    })
+    rawset(_G, "C_QuestLine", {
+      GetQuestLineInfo = function(questID, uiMapID)
+        if questID == 99901 and uiMapID == 2022 then
+          return {
+            questLineID = 7001,
+            questLineName = "Async API QuestLine",
+            campaignID = 55,
+          }
+        end
+        return nil
+      end,
+    })
+
+    assert.is_function(Toolbox.Questlines.RequestAndDumpQuestDetailsToChat)
+    local accepted, requestState = Toolbox.Questlines.RequestAndDumpQuestDetailsToChat(99901)
+    assert.is_true(accepted)
+    assert.equals("pending", requestState)
+    assert.same({ 99901 }, requestQuestIDList)
+    assert.equals(0, #chatMessageList)
+    assert.equals(1, #eventFrameList)
+    assert.is_true(eventFrameList[1].registeredEvents.QUEST_DATA_LOAD_RESULT == true)
+
+    questTitleByID[99901] = "Async Quest #99901"
+    local onEventHandler = eventFrameList[1].scriptMap.OnEvent -- 异步事件处理器
+    assert.is_function(onEventHandler)
+    onEventHandler(eventFrameList[1], "QUEST_DATA_LOAD_RESULT", 99901, true)
+
+    assert.is_true(#chatMessageList >= 3)
+    local outputText = table.concat(chatMessageList, "\n") -- 汇总聊天输出
+    assert.is_true(string.find(outputText, "Async Quest #99901", 1, true) ~= nil)
+    assert.is_true(string.find(outputText, "Collect 5 fragments", 1, true) ~= nil)
+    assert.is_true(string.find(outputText, "Quest Zone(2022)", 1, true) ~= nil)
+    assert.is_true(string.find(outputText, "Quest Continent(2024)", 1, true) ~= nil)
+    assert.is_true(string.find(outputText, "Async API QuestLine", 1, true) ~= nil)
   end)
 
   it("quest_type_label_uses_mapping_and_fallback", function()
@@ -364,32 +512,24 @@ describe("QuestlineProgress mock data injection", function()
   end)
 
   it("quest_navigation_model_groups_questlines_by_expansion_and_category", function()
-    local v5Data = {
-      schemaVersion = 5,
+    local v6Data = {
+      schemaVersion = 6,
       sourceMode = "mock",
       generatedAt = "2026-04-12T00:00:00Z",
       quests = {
-        [81001] = { ID = 81001, UiMapID = 2371 },
-        [81002] = { ID = 81002, UiMapID = 2371 },
-        [81003] = { ID = 81003, UiMapID = 2372 },
-        [81004] = { ID = 81004, UiMapID = 2373 },
+        [81001] = { ID = 81001 },
+        [81002] = { ID = 81002 },
+        [81003] = { ID = 81003 },
+        [81004] = { ID = 81004 },
       },
       questLines = {
-        [9901] = { ID = 9901, Name_lang = "Mock QuestLine Alpha", UiMapID = 2371, ExpansionID = 9 },
-        [9902] = { ID = 9902, Name_lang = "Mock QuestLine Beta", UiMapID = 2372, ExpansionID = 9 },
-        [9903] = { ID = 9903, Name_lang = "Mock QuestLine Gamma", UiMapID = 2373, ExpansionID = 10 },
+        [9901] = { ID = 9901, UiMapID = 2371, QuestIDs = { 81001, 81002 } },
+        [9902] = { ID = 9902, UiMapID = 2372, QuestIDs = { 81003 } },
+        [9903] = { ID = 9903, UiMapID = 2373, QuestIDs = { 81004 } },
       },
-      questLineXQuest = {
-        [9901] = {
-          { QuestID = 81001, OrderIndex = 1 },
-          { QuestID = 81002, OrderIndex = 2 },
-        },
-        [9902] = {
-          { QuestID = 81003, OrderIndex = 1 },
-        },
-        [9903] = {
-          { QuestID = 81004, OrderIndex = 1 },
-        },
+      expansions = {
+        [9] = { 9901, 9902 },
+        [10] = { 9903 },
       },
     }
 
@@ -410,9 +550,9 @@ describe("QuestlineProgress mock data injection", function()
       end,
     })
 
-    Toolbox.Questlines.SetDataOverride(v5Data)
+    Toolbox.Questlines.SetDataOverride(v6Data)
 
-    local valid, validationError = Toolbox.Questlines.ValidateInstanceQuestlinesData(v5Data, true)
+    local valid, validationError = Toolbox.Questlines.ValidateInstanceQuestlinesData(v6Data, true)
     assert.is_true(valid)
     assert.is_nil(validationError)
 
@@ -459,9 +599,9 @@ describe("QuestlineProgress mock data injection", function()
     local liveData = deepCopyTable(mockFixtureData) -- live 数据样本
     liveData.sourceMode = "live"
     liveData.generatedAt = "2026-01-02T00:00:00Z"
-    liveData.quests[81010] = { ID = 81010, UiMapID = 2371 }
-    liveData.questLines[9910] = { ID = 9910, Name_lang = "Live QuestLine Beta", UiMapID = 2371 }
-    liveData.questLineQuestIDs[9910] = { 81010 }
+    liveData.quests[81010] = { ID = 81010 }
+    liveData.questLines[9910] = { ID = 9910, UiMapID = 2371, QuestIDs = { 81010 } }
+    liveData.expansions[0][#liveData.expansions[0] + 1] = 9910
     Toolbox.Data.InstanceQuestlines = liveData
 
     Toolbox.Questlines.SetDataOverride(nil)
@@ -470,38 +610,25 @@ describe("QuestlineProgress mock data injection", function()
     assert.is_truthy(model.questLineByID[9910])
   end)
 
-  it("supports_db_shape_static_data_v4", function()
-    local v4Data = {
-      schemaVersion = 4,
+  it("supports_db_shape_static_data_v6", function()
+    local v6Data = {
+      schemaVersion = 6,
       sourceMode = "mock",
       generatedAt = "2026-01-03T00:00:00Z",
       quests = {
-        [81001] = { ID = 81001, UiMapID = 2371 },
-        [81002] = { ID = 81002, UiMapID = 2371 },
+        [81001] = { ID = 81001 },
+        [81002] = { ID = 81002 },
       },
       questLines = {
-        [9901] = { ID = 9901, Name_lang = "Mock QuestLine Alpha", UiMapID = 2371 },
+        [9901] = { ID = 9901, UiMapID = 2371, QuestIDs = { 81001, 81002 } },
       },
-      questLineXQuest = {
-        [9901] = {
-          { QuestID = 81001, OrderIndex = 1 },
-          { QuestID = 81002, OrderIndex = 2 },
-        },
-      },
-      questPOIBlobs = {
-        [81001] = {
-          { BlobID = 7001, UiMapID = 2371, ObjectiveID = 17 },
-        },
-      },
-      questPOIPoints = {
-        [7001] = {
-          { x = 0.11, y = 0.22, z = 0 },
-        },
+      expansions = {
+        [0] = { 9901 },
       },
     }
 
-    Toolbox.Questlines.SetDataOverride(v4Data)
-    local valid, errorObject = Toolbox.Questlines.ValidateInstanceQuestlinesData(v4Data, true)
+    Toolbox.Questlines.SetDataOverride(v6Data)
+    local valid, errorObject = Toolbox.Questlines.ValidateInstanceQuestlinesData(v6Data, true)
     assert.is_true(valid)
     assert.is_nil(errorObject)
 
@@ -512,6 +639,6 @@ describe("QuestlineProgress mock data injection", function()
 
     local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(81001)
     assert.is_nil(detailError)
-    assert.same({ x = 0.11, y = 0.22, z = 0 }, detailObject.mapPos)
+    assert.is_nil(detailObject.mapPos)
   end)
 end)

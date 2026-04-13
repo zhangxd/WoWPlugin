@@ -119,7 +119,7 @@ flowchart TB
 | `Toolbox.Chat` | `Core/API/Chat.lua` | 面向玩家的默认聊天框输出（`PrintAddonMessage`）、插件 TOC 元数据（`GetAddOnMetadata`）。**模块内禁止**直接调用 `DEFAULT_CHAT_FRAME:AddMessage`；新增聊天类能力须先扩展本 API。 |
 | `Toolbox.Tooltip` | `Core/API/Tooltip.lua` | `InstallDefaultAnchorHook()`、`RefreshDriver()`；读取 `modules.tooltip_anchor`。**模块 tooltip_anchor** 仅负责 `RegisterModule` 与设置 UI，不直接 `hooksecurefunc` GameTooltip。 |
 | `Toolbox.EJ` | `Core/API/EncounterJournal.lua` | 冒险指南相关高层查询入口：当前页签语境、坐骑掉落集合、实例锁定、当前难度锁定、当前角色锁定摘要与 tooltip 行文本。业务模块禁止直接复制 `GetSavedInstanceInfo` / `EJ_*` 查询逻辑。 |
-| `Toolbox.Questlines` | `Core/API/QuestlineProgress.lua` | 任务线静态结构缓存、任务线显示名解析、运行时任务字段、任务导航模型、当前任务日志、任务详情与任务线进度。`InstanceQuestlines.questLines` 保留 `ID / UiMapID / ExpansionID` 等稳定关系字段，任务线名称不再作为结构化运行时字段导出。任务页签 UI 通过本 API 获取模型，而不是直接拼装静态数据。 |
+| `Toolbox.Questlines` | `Core/API/QuestlineProgress.lua` | 任务线静态结构缓存、任务线显示名解析、运行时任务字段、任务导航模型、当前任务日志、任务详情与任务线进度。`InstanceQuestlines` 在 schema v6 下收敛为 `quests / questLines / expansions` 三块：`questLines` 保留 `ID / UiMapID / QuestIDs`，资料片归属通过顶层 `expansions[expansionID]` 提供；任务线名称不再作为结构化运行时字段导出。任务页签 UI 通过本 API 获取模型，而不是直接拼装静态数据。 |
 | `Toolbox.MinimapButton` | `Modules/MinimapButton.lua` | `RegisterFlyoutEntry(def)` 供其他模块向小地图按钮悬停菜单追加项；`def` 至少包含 `id` 与 `onClick`，可选 `titleKey`/`tooltipKey`/`icon`/`order`/`augmentTooltip`（用于在悬停提示中追加动态内容）。禁止直接操作 `flyoutRegistry` 或 `flyoutSlotIds`。 |
 
 **模块间协作原则**
@@ -382,4 +382,5 @@ ToolboxDB = {
 | 2026-04-12 | 按当前代码重写冒险指南相关架构：移除已下线的 `ej_mount_filter` / `dungeon_raid_directory` 表述，对齐 `encounter_journal`、`Toolbox.EJ`、`Toolbox.Questlines`、小地图飞出项与 TOC 实际结构；新增 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md) 作为冒险指南总设计 |
 | 2026-04-12 | 任务页签导航重构：`InstanceQuestlines.questLines` 新增 `ExpansionID`，任务页签改为资料片 / 分类顶部导航与统一任务线 / 任务列表，旧三视图状态迁移为 `questNav*` 键 |
 | 2026-04-13 | 任务页签导航二次重构：资料片固定为左侧一级树，资料片下收纳 `地图任务线 / 任务类型` 两个入口；新增 `questNavModeKey / questNavSelectedMapID / questNavSelectedTypeKey / questNavExpandedQuestLineID` 状态键 |
-| 2026-04-13 | `instance_questlines` 导出链路新增 QuestCompletist 补充源：`WoWTools` 可在导出时读取 `qcQuest.lua` 合并任务线关系，生成结构保持不变，冲突以补充源为准 |
+| 2026-04-13 | `instance_questlines` 导出链路新增 QuestCompletist 补充源：`WoWTools` 可在导出时读取 `qcQuest.lua` 合并任务线关系，冲突以补充源为准 |
+| 2026-04-13 | `InstanceQuestlines` 升级到 schema v6：静态数据收敛为 `quests / questLines / expansions`；`questLines[*].QuestIDs` 保留有序任务列表，顶层 `expansions` 作为唯一资料片入口；移除 `questLineXQuest`、`questPOIBlobs`、`questPOIPoints` 与 `quests[*].UiMapID`，并导出全量且链路完整的任务线 |

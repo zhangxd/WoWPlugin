@@ -6,33 +6,32 @@
 ]]
 
 local mockData = {
-  schemaVersion = 3,
+  schemaVersion = 6,
   sourceMode = "mock",
   generatedAt = "2026-01-01T00:00:00Z",
 
   quests = {
     [81001] = {
       ID = 81001,
-      UiMapID = 2371,
-      MapPos = { x = 0.11, y = 0.22 },
     },
     [81002] = {
       ID = 81002,
-      UiMapID = 2371,
-      MapPos = { x = 0.33, y = 0.44, UiMapID = 2371 },
     },
     [81003] = {
       ID = 81003,
-      UiMapID = 2371,
     },
   },
 
   questLines = {
-    [9901] = { ID = 9901, Name_lang = "Mock QuestLine Alpha", UiMapID = 2371 },
+    [9901] = {
+      ID = 9901,
+      UiMapID = 2371,
+      QuestIDs = { 81001, 81002, 81003 },
+    },
   },
 
-  questLineQuestIDs = {
-    [9901] = { 81001, 81002, 81003 },
+  expansions = {
+    [0] = { 9901 },
   },
 }
 

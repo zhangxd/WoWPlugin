@@ -1225,6 +1225,9 @@ function QuestlineTreeView:getOrCreateRightRowButton(rowIndex)
     end
     if (rowData.kind == "quest" or rowData.kind == "recent_quest") and type(rowData.questID) == "number" then
       self.selectedQuestID = rowData.questID
+      if Toolbox.Questlines and type(Toolbox.Questlines.RequestAndDumpQuestDetailsToChat) == "function" then
+        Toolbox.Questlines.RequestAndDumpQuestDetailsToChat(rowData.questID)
+      end
       self:showQuestDetailPopup(rowData.questID)
     end
   end)

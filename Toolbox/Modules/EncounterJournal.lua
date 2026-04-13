@@ -376,8 +376,8 @@ local function registerIntegration()
   eventFrame:RegisterEvent("QUEST_TURNED_IN")
   setLockoutUpdateEventEnabled(isModuleEnabled())
 
-  eventFrame:SetScript("OnEvent", function(self, event, eventArg1)
-    if event == "ADDON_LOADED" and eventArg1 == "Blizzard_EncounterJournal" then
+  eventFrame:SetScript("OnEvent", function(self, event, name)
+    if event == "ADDON_LOADED" and name == "Blizzard_EncounterJournal" then
       self:UnregisterEvent("ADDON_LOADED")
       initHooks()
       refreshAfterHookInit()
@@ -392,7 +392,7 @@ local function registerIntegration()
       RequestRaidInfo()
       hookAdventureGuideMicroButtonTooltip()
     elseif event == "QUEST_TURNED_IN" then
-      local questID = type(eventArg1) == "number" and eventArg1 or nil -- 已完成任务 ID
+      local questID = type(name) == "number" and name or nil -- 已完成任务 ID
       if isModuleEnabled() and type(questID) == "number" and questID > 0 then
         QuestlineTreeView:recordRecentlyCompletedQuest(questID)
       end

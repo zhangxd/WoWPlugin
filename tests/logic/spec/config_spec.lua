@@ -75,7 +75,9 @@ describe("Toolbox.Config encounter journal quest navigation migration", function
     assert.is_nil(moduleDb.questViewSelectedTypeID)
     assert.is_nil(moduleDb.questViewSelectedQuestLineID)
     assert.is_nil(moduleDb.questViewSelectedQuestID)
-    assert.is_nil(moduleDb.questlineTreeCollapsed)
+    assert.same({
+      ["map:2371"] = true,
+    }, moduleDb.questlineTreeCollapsed)
     assert.is_nil(moduleDb.questlineTreeSelection)
   end)
 
