@@ -1,4 +1,4 @@
-﻿--[[
+--[[
   配置管理：ToolboxDB 默认值、初始化与迁移。
   各模块只应通过 GetModule(moduleId) 读写 modules[moduleId]，避免键冲突。
 ]]
@@ -73,14 +73,20 @@ local defaults = {
       questlineTreeEnabled = true,
       -- 左侧树：当前资料片（0 表示运行时自动选择首项）
       questNavExpansionID = 0,
-      -- 左侧树：当前模式（map_questline | quest_type）
+      -- 左侧树：当前模式（map_questline | quest_type | active_log）
       questNavModeKey = "map_questline",
       -- 左侧树：当前地图（0 表示未选中）
       questNavSelectedMapID = 0,
       -- 左侧树：当前类型大类键（空字符串表示未选中）
       questNavSelectedTypeKey = "",
+      -- 页签内搜索关键词
+      questNavSearchText = "",
+      -- 任务页签皮肤模式（default | archive | contrast）
+      questNavSkinPreset = "archive",
       -- 主区：当前展开的任务线（0 表示全部折叠）
       questNavExpandedQuestLineID = 0,
+      -- 左侧树折叠状态（key=true 表示折叠）
+      questlineTreeCollapsed = {},
       -- 根页签顺序（按页签 ID，自定义任务页签固定 ID=203）
       rootTabOrderIds = {},
       -- 根页签隐藏开关（按页签 ID）：[id]=true 表示隐藏对应页签
@@ -245,7 +251,10 @@ function Toolbox.Config.Init()
     local legacyCategoryKey = encounterJournalDb.questNavCategoryKey -- 上一轮顶部分类键
     if legacyViewMode == "type" or legacyCategoryKey == "type" then
       encounterJournalDb.questNavModeKey = "quest_type"
-    elseif encounterJournalDb.questNavModeKey ~= "map_questline" and encounterJournalDb.questNavModeKey ~= "quest_type" then
+    elseif encounterJournalDb.questNavModeKey ~= "map_questline"
+      and encounterJournalDb.questNavModeKey ~= "quest_type"
+      and encounterJournalDb.questNavModeKey ~= "active_log"
+    then
       encounterJournalDb.questNavModeKey = "map_questline"
     end
 
@@ -261,6 +270,16 @@ function Toolbox.Config.Init()
       encounterJournalDb.questNavSelectedTypeKey = "type:" .. tostring(legacyTypeID)
     elseif type(encounterJournalDb.questNavSelectedTypeKey) ~= "string" then
       encounterJournalDb.questNavSelectedTypeKey = ""
+    end
+
+    if type(encounterJournalDb.questNavSearchText) ~= "string" then
+      encounterJournalDb.questNavSearchText = ""
+    end
+    if encounterJournalDb.questNavSkinPreset ~= "default"
+      and encounterJournalDb.questNavSkinPreset ~= "archive"
+      and encounterJournalDb.questNavSkinPreset ~= "contrast"
+    then
+      encounterJournalDb.questNavSkinPreset = "archive"
     end
 
     do
@@ -284,7 +303,9 @@ function Toolbox.Config.Init()
     encounterJournalDb.questViewSelectedTypeID = nil
     encounterJournalDb.questViewSelectedQuestLineID = nil
     encounterJournalDb.questViewSelectedQuestID = nil
-    encounterJournalDb.questlineTreeCollapsed = nil
+    if type(encounterJournalDb.questlineTreeCollapsed) ~= "table" then
+      encounterJournalDb.questlineTreeCollapsed = {}
+    end
     encounterJournalDb.questlineTreeSelection = nil
   end
 end

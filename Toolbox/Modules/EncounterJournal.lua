@@ -547,6 +547,72 @@ Toolbox.RegisterModule({
     end)
     yOffset = yOffset - 36
 
+    local skinPresetLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 任务页签皮肤标签
+    skinPresetLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
+    skinPresetLabel:SetWidth(168)
+    skinPresetLabel:SetJustifyH("LEFT")
+    skinPresetLabel:SetText(localeTable.EJ_QUEST_SKIN_STYLE_LABEL or "任务页签皮肤")
+
+    local skinPresetDropdown = CreateFrame("Frame", nil, box, "UIDropDownMenuTemplate") -- 任务页签皮肤下拉
+    skinPresetDropdown:SetPoint("TOPLEFT", box, "TOPLEFT", 170, yOffset - 2)
+    UIDropDownMenu_SetWidth(skinPresetDropdown, 240)
+    UIDropDownMenu_JustifyText(skinPresetDropdown, "LEFT")
+
+    local skinPresetOptions = {
+      { value = "default", label = localeTable.EJ_QUEST_SKIN_STYLE_DEFAULT or "接近暴雪原生" },
+      { value = "archive", label = localeTable.EJ_QUEST_SKIN_STYLE_ARCHIVE or "古典档案馆（推荐）" },
+      { value = "contrast", label = localeTable.EJ_QUEST_SKIN_STYLE_CONTRAST or "高对比" },
+    }
+
+    local function normalizeSkinPresetValue(value)
+      if value == "default" or value == "archive" or value == "contrast" then
+        return value
+      end
+      return "archive"
+    end
+
+    local function getSkinPresetLabel(value)
+      local normalizedValue = normalizeSkinPresetValue(value) -- 归一化后的皮肤值
+      for _, optionEntry in ipairs(skinPresetOptions) do
+        if optionEntry.value == normalizedValue then
+          return optionEntry.label
+        end
+      end
+      return normalizedValue
+    end
+
+    local function refreshSkinPresetDropdownText()
+      moduleDb.questNavSkinPreset = normalizeSkinPresetValue(moduleDb.questNavSkinPreset)
+      UIDropDownMenu_SetText(skinPresetDropdown, getSkinPresetLabel(moduleDb.questNavSkinPreset))
+    end
+
+    UIDropDownMenu_Initialize(skinPresetDropdown, function(_, level)
+      if level and level > 1 then
+        return
+      end
+      for _, optionEntry in ipairs(skinPresetOptions) do
+        local info = UIDropDownMenu_CreateInfo()
+        info.text = optionEntry.label
+        info.func = function()
+          moduleDb.questNavSkinPreset = optionEntry.value
+          refreshSkinPresetDropdownText()
+          QuestlineTreeView:refresh()
+          RefreshScheduler:schedule("settings_change")
+          CloseDropDownMenus()
+        end
+        UIDropDownMenu_AddButton(info)
+      end
+    end)
+    refreshSkinPresetDropdownText()
+    yOffset = yOffset - 34
+
+    local skinPresetHint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 任务页签皮肤说明
+    skinPresetHint:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
+    skinPresetHint:SetWidth(560)
+    skinPresetHint:SetJustifyH("LEFT")
+    skinPresetHint:SetText(localeTable.EJ_QUEST_SKIN_STYLE_HINT or "仅影响 Toolbox 任务页签自定义界面。")
+    yOffset = yOffset - math.max(24, math.ceil((skinPresetHint:GetStringHeight() or 14) + 8))
+
     yOffset = yOffset - 8
 
     local rootTabSectionTitle = box:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 根页签设置标题
