@@ -1,8 +1,8 @@
 --[[
-  冒险指南任务页签私有实现。
+  quest 模块任务视图私有实现。
 ]]
 
-local Internal = Toolbox.EncounterJournalInternal -- 冒险指南内部命名空间
+local Internal = Toolbox.QuestInternal -- quest 模块内部命名空间
 local Runtime = Internal.Runtime
 local CreateFrame = Internal.CreateFrame
 
@@ -37,7 +37,7 @@ local QuestlineTreeView = {
   rowHeight = 21,
   selected = false,
   selectedExpansionID = nil,
-  selectedModeKey = "map_questline",
+  selectedModeKey = "active_log",
   selectedMapID = nil,
   selectedTypeKey = "",
   searchText = "",
@@ -150,14 +150,8 @@ local function buildEffectiveRootTabOrderIds()
 end
 
 local function ensureEncounterJournalAddonLoaded()
-  local addonName = "Blizzard_EncounterJournal" -- 冒险手册插件名
-  if Runtime.IsAddOnLoaded(addonName) then
-    return true
-  end
-  if Runtime.LoadAddOn(addonName) then
-    return true
-  end
-  return _G.EncounterJournal ~= nil
+  -- 独立 quest 模块只依赖自身宿主 Frame，不主动拉起冒险手册插件。
+  return _G.ToolboxQuestFrame ~= nil
 end
 
 buildDefaultRootTabOrderIds = function()
@@ -165,7 +159,7 @@ buildDefaultRootTabOrderIds = function()
 
   local defaultOrderIds = {} -- 默认顺序（按 ID）
   local addedTabIdSet = {} -- 已纳入默认顺序的页签 ID 集合
-  local journalFrame = _G.EncounterJournal -- 冒险手册根面板
+  local journalFrame = _G.ToolboxQuestFrame -- quest 模块根面板
   local nativeTabs = journalFrame and journalFrame.Tabs -- 原生根页签数组
 
   local function appendTabId(rootTabId)
@@ -776,9 +770,6 @@ local function normalizeQuestNavModeKey(modeKey)
   if modeKey == "active_log" then
     return "active_log"
   end
-  if modeKey == "quest_type" then
-    return "quest_type"
-  end
   return "map_questline"
 end
 
@@ -787,10 +778,10 @@ function QuestlineTreeView:loadSelection()
   self.selectedExpansionID = normalizeSelectionID(moduleDb.questNavExpansionID)
   self.selectedModeKey = normalizeQuestNavModeKey(moduleDb.questNavModeKey)
   self.selectedMapID = normalizeSelectionID(moduleDb.questNavSelectedMapID)
-  self.selectedTypeKey = type(moduleDb.questNavSelectedTypeKey) == "string" and moduleDb.questNavSelectedTypeKey or ""
+  self.selectedTypeKey = ""
   self.searchText = type(moduleDb.questNavSearchText) == "string" and moduleDb.questNavSearchText or ""
   self.expandedQuestLineID = normalizeSelectionID(moduleDb.questNavExpandedQuestLineID)
-  if self.selectedModeKey == "quest_type" or self.selectedModeKey == "active_log" then
+  if self.selectedModeKey == "active_log" then
     self.expandedQuestLineID = nil
   end
   self:trimRecentCompletedQuestRecords()
@@ -802,7 +793,7 @@ function QuestlineTreeView:saveSelection()
   moduleDb.questNavExpansionID = type(self.selectedExpansionID) == "number" and self.selectedExpansionID or 0
   moduleDb.questNavModeKey = normalizeQuestNavModeKey(self.selectedModeKey)
   moduleDb.questNavSelectedMapID = type(self.selectedMapID) == "number" and self.selectedMapID or 0
-  moduleDb.questNavSelectedTypeKey = type(self.selectedTypeKey) == "string" and self.selectedTypeKey or ""
+  moduleDb.questNavSelectedTypeKey = ""
   moduleDb.questNavSearchText = type(self.searchText) == "string" and self.searchText or ""
   moduleDb.questNavExpandedQuestLineID = type(self.expandedQuestLineID) == "number" and self.expandedQuestLineID or 0
 end
@@ -917,20 +908,6 @@ function QuestlineTreeView:resolveNavigationDefaults(navigationModel)
       end
     end
     self.selectedTypeKey = ""
-  elseif self.selectedModeKey == "quest_type" then
-    local typeMode = modeByKey.quest_type -- 类型模式
-    local hasSelectedType = false -- 当前类型是否存在
-    for _, typeEntry in ipairs(typeMode and typeMode.entries or {}) do
-      if tostring(typeEntry.id) == self.selectedTypeKey then
-        hasSelectedType = true
-        break
-      end
-    end
-    if not hasSelectedType then
-      self.selectedTypeKey = typeMode and typeMode.entries and typeMode.entries[1] and tostring(typeMode.entries[1].id) or ""
-    end
-    self.selectedMapID = nil
-    self.expandedQuestLineID = nil
   else
     self.selectedMapID = nil
     self.selectedTypeKey = ""
@@ -972,39 +949,40 @@ function QuestlineTreeView:buildLeftTreeRows(navigationModel)
       end
       for _, modeEntry in ipairs(modeEntryList) do
         local modeKey = modeEntry.key -- 当前模式键
-        local modeSelected = self.selectedModeKey == modeEntry.key -- 模式是否选中
-        local modeCollapseKey = buildModeCollapseKey(expansionSummary.id, modeKey) -- 模式折叠键
-        local modeCollapsed = isTreeNodeCollapsed(collapseState, modeCollapseKey) -- 模式是否折叠
-        local modeText = tostring(modeEntry.name or "") -- 模式显示文本
-        modeText = string.format("%s %s", modeCollapsed and "[+]" or "[-]", modeText)
+        local isSupportedMode = modeKey == "map_questline" -- quest 模块支持的导航模式
+        if isSupportedMode then
+          local modeSelected = self.selectedModeKey == modeEntry.key -- 模式是否选中
+          local modeCollapseKey = buildModeCollapseKey(expansionSummary.id, modeKey) -- 模式折叠键
+          local modeCollapsed = isTreeNodeCollapsed(collapseState, modeCollapseKey) -- 模式是否折叠
+          local modeText = tostring(modeEntry.name or "") -- 模式显示文本
+          modeText = string.format("%s %s", modeCollapsed and "[+]" or "[-]", modeText)
 
-        rowDataList[#rowDataList + 1] = {
-          kind = "mode",
-          text = modeText,
-          selected = modeSelected,
-          expansionID = expansionSummary.id,
-          modeKey = modeKey,
-          collapseKey = modeCollapseKey,
-          collapsed = modeCollapsed,
-        }
-        if modeSelected and not modeCollapsed then
-          for _, childEntry in ipairs(modeEntry.entries or {}) do
-            local childKind = childEntry.kind -- 导航子项类型
-            if type(childKind) ~= "string" or childKind == "" then
-              childKind = modeKey == "quest_type" and "type_group" or "map"
+          rowDataList[#rowDataList + 1] = {
+            kind = "mode",
+            text = modeText,
+            selected = modeSelected,
+            expansionID = expansionSummary.id,
+            modeKey = modeKey,
+            collapseKey = modeCollapseKey,
+            collapsed = modeCollapsed,
+          }
+          if modeSelected and not modeCollapsed then
+            for _, childEntry in ipairs(modeEntry.entries or {}) do
+              local childKind = childEntry.kind -- 导航子项类型
+              if type(childKind) ~= "string" or childKind == "" then
+                childKind = "map"
+              end
+              rowDataList[#rowDataList + 1] = {
+                kind = childKind,
+                text = childEntry.name,
+                selected = (childKind == "map" and self.selectedMapID == childEntry.id)
+                  or (childKind == "questline" and self.selectedMapID == nil and self.expandedQuestLineID == childEntry.id),
+                expansionID = expansionSummary.id,
+                modeKey = modeKey,
+                mapID = childKind == "map" and childEntry.id or nil,
+                questLineID = childKind == "questline" and childEntry.id or nil,
+              }
             end
-            rowDataList[#rowDataList + 1] = {
-              kind = childKind,
-              text = childEntry.name,
-              selected = (childKind == "map" and self.selectedMapID == childEntry.id)
-                or (childKind == "type_group" and self.selectedTypeKey == tostring(childEntry.id))
-                or (childKind == "questline" and self.selectedMapID == nil and self.expandedQuestLineID == childEntry.id),
-              expansionID = expansionSummary.id,
-              modeKey = modeKey,
-              mapID = childKind == "map" and childEntry.id or nil,
-              questLineID = childKind == "questline" and childEntry.id or nil,
-              typeKey = childKind == "type_group" and tostring(childEntry.id) or nil,
-            }
           end
         end
       end
@@ -1080,11 +1058,8 @@ function QuestlineTreeView:getOrCreateRowButton(rowIndex)
           self.selectedModeKey = modeKey
           if modeKey == "map_questline" then
             self.selectedMapID = nil
-            self.selectedTypeKey = ""
-          else
-            self.selectedTypeKey = ""
-            self.selectedMapID = nil
           end
+          self.selectedTypeKey = ""
           self.expandedQuestLineID = nil
           if type(collapseKey) == "string" then
             setTreeNodeCollapsed(collapseState, collapseKey, false)
@@ -1101,11 +1076,6 @@ function QuestlineTreeView:getOrCreateRowButton(rowIndex)
       self.selectedMapID = nil
       self.selectedTypeKey = ""
       self.expandedQuestLineID = rowData.questLineID
-    elseif rowData.kind == "type_group" and type(rowData.typeKey) == "string" then
-      self.selectedModeKey = "quest_type"
-      self.selectedTypeKey = rowData.typeKey
-      self.selectedMapID = nil
-      self.expandedQuestLineID = nil
     end
     self:hideQuestDetailPopup()
     self:saveSelection()
@@ -1384,40 +1354,6 @@ function QuestlineTreeView:buildMainRowsForMap()
   return rowDataList, nil
 end
 
-function QuestlineTreeView:buildMainRowsForType()
-  local rowDataList = {} -- 类型模式主区行
-  local searchKeyword = normalizeSearchText(self.searchText) -- 搜索关键词
-  local questList, errorObject = Toolbox.Questlines.GetTasksForTypeGroup(self.selectedExpansionID, self.selectedTypeKey) -- 类型任务列表
-  if errorObject then
-    return {}, errorObject
-  end
-
-  for _, questEntry in ipairs(questList or {}) do
-    local questName = tostring(questEntry.name or ("Quest #" .. tostring(questEntry.id or "?"))) -- 任务显示名
-    if searchKeyword == "" or textContainsKeyword(questName, searchKeyword) then
-      rowDataList[#rowDataList + 1] = {
-        kind = "quest",
-        text = questName,
-        questID = questEntry.id,
-        status = buildQuestStatusKey(questEntry.status, questEntry.readyForTurnIn),
-        readyForTurnIn = questEntry.readyForTurnIn,
-        selected = self.selectedQuestID == questEntry.id,
-      }
-    end
-  end
-
-  table.sort(rowDataList, function(leftRow, rightRow)
-    local leftRank = getQuestStatusRank(leftRow.status) -- 左侧状态排序权重
-    local rightRank = getQuestStatusRank(rightRow.status) -- 右侧状态排序权重
-    if leftRank ~= rightRank then
-      return leftRank < rightRank
-    end
-    return tostring(leftRow.text or "") < tostring(rightRow.text or "")
-  end)
-
-  return rowDataList, nil
-end
-
 function QuestlineTreeView:buildMainRowsForActive()
   local rowDataList = {} -- 进行中模式主区行
   local searchKeyword = normalizeSearchText(self.searchText) -- 搜索关键词
@@ -1524,7 +1460,7 @@ function QuestlineTreeView:renderLeftRows(rowDataList)
     local indentLevel = 0 -- 缩进层级
     if rowData.kind == "mode" then
       indentLevel = 1
-    elseif rowData.kind == "map" or rowData.kind == "type_group" then
+    elseif rowData.kind == "map" then
       indentLevel = 2
     end
     rowButton.rowFont:SetText(string.rep("  ", indentLevel) .. tostring(rowData.text or ""))
@@ -1699,7 +1635,9 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
   self.breadcrumbButtons = self.breadcrumbButtons or {}
   local breadcrumbList = {} -- 当前路径段
 
-  if self.selectedModeKey ~= "active_log" and type(expansionEntry) == "table" then
+  if self.selectedModeKey == "active_log" then
+    breadcrumbList = {}
+  elseif type(expansionEntry) == "table" then
     breadcrumbList[#breadcrumbList + 1] = {
       text = tostring(expansionEntry.name or ""),
       onClick = function()
@@ -1709,34 +1647,6 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
         self:render()
       end,
     }
-  end
-
-  if self.selectedModeKey == "quest_type" then
-    breadcrumbList[#breadcrumbList + 1] = {
-      text = localeTable.EJ_QUEST_NAV_MODE_QUEST_TYPE or "任务类型",
-      onClick = function()
-        self.selectedTypeKey = ""
-        self:hideQuestDetailPopup()
-        self:saveSelection()
-        self:render()
-      end,
-    }
-    if type(self.selectedTypeKey) == "string" and self.selectedTypeKey ~= "" and type(expansionEntry) == "table" then
-      local typeMode = expansionEntry.modeByKey and expansionEntry.modeByKey.quest_type or nil -- 类型模式
-      for _, typeEntry in ipairs(typeMode and typeMode.entries or {}) do
-        if tostring(typeEntry.id) == self.selectedTypeKey then
-          breadcrumbList[#breadcrumbList + 1] = {
-            text = tostring(typeEntry.name or ""),
-          }
-          break
-        end
-      end
-    end
-  elseif self.selectedModeKey == "active_log" then
-    breadcrumbList[#breadcrumbList + 1] = {
-      text = localeTable.EJ_QUEST_NAV_MODE_ACTIVE or "Active Quests",
-    }
-  else
     breadcrumbList[#breadcrumbList + 1] = {
       text = localeTable.EJ_QUEST_NAV_MODE_MAP_QUESTLINE or "地图任务线",
       onClick = function()
@@ -1747,7 +1657,7 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
         self:render()
       end,
     }
-    if type(self.selectedMapID) == "number" and type(expansionEntry) == "table" then
+    if type(self.selectedMapID) == "number" then
       local mapMode = expansionEntry.modeByKey and expansionEntry.modeByKey.map_questline or nil -- 地图模式
       for _, mapEntry in ipairs(mapMode and mapMode.entries or {}) do
         if mapEntry.id == self.selectedMapID then
@@ -1782,6 +1692,10 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
         }
       end
     end
+  else
+    breadcrumbList[#breadcrumbList + 1] = {
+      text = localeTable.EJ_QUEST_NAV_MODE_MAP_QUESTLINE or "地图任务线",
+    }
   end
 
   local previousButton = nil -- 上一个 breadcrumb 按钮
@@ -1890,9 +1804,7 @@ function QuestlineTreeView:render()
   local leftRows = self:buildLeftTreeRows(navigationModel or {}) -- 左树行
   local mainRows = nil -- 主区行
   local mainError = nil -- 主区错误
-  if self.selectedModeKey == "quest_type" then
-    mainRows, mainError = self:buildMainRowsForType()
-  elseif self.selectedModeKey == "active_log" then
+  if self.selectedModeKey == "active_log" then
     mainRows, mainError = self:buildMainRowsForActive()
   else
     mainRows, mainError = self:buildMainRowsForMap()
@@ -1923,8 +1835,6 @@ function QuestlineTreeView:render()
     local titleCount = #mainRows -- 标题计数
     if self.selectedModeKey == "map_questline" then
       titleText = localeTable.EJ_QUESTLINE_LIST_TITLE or "Questlines"
-    elseif self.selectedModeKey == "quest_type" then
-      titleText = localeTable.EJ_QUEST_TASK_LIST_TITLE or "Quests"
     else
       titleText = localeTable.EJ_QUEST_NAV_MODE_ACTIVE or "Active Quests"
       titleCount = 0
@@ -1939,7 +1849,7 @@ function QuestlineTreeView:render()
 end
 
 function QuestlineTreeView:ensureWidgets()
-  local journalFrame = _G.EncounterJournal -- 冒险手册根面板
+  local journalFrame = _G.ToolboxQuestFrame -- quest 模块根面板
   if not journalFrame then
     return
   end
@@ -1979,7 +1889,7 @@ function QuestlineTreeView:ensureWidgets()
     return
   end
   if not self.tabButton then
-    local tabButton = CreateFrame("Button", "ToolboxEJQuestlineTab", journalFrame, "PanelTabButtonTemplate")
+    local tabButton = CreateFrame("Button", "ToolboxQuestRootTab", journalFrame, "PanelTabButtonTemplate")
     tabButton:SetID(QUEST_ROOT_TAB_ID)
     tabButton:SetScript("OnClick", function()
       self:setSelected(true)
@@ -1988,7 +1898,7 @@ function QuestlineTreeView:ensureWidgets()
     self:layoutRootTabs()
   end
   if not self.panelFrame then
-    local panelFrame = CreateFrame("Frame", "ToolboxEJQuestlinePanel", journalFrame, "InsetFrameTemplate3")
+    local panelFrame = CreateFrame("Frame", "ToolboxQuestMainPanel", journalFrame, "InsetFrameTemplate3")
     local instanceSelect = journalFrame.instanceSelect -- 主内容区
     if instanceSelect then
       panelFrame:SetPoint("TOPLEFT", instanceSelect, "TOPLEFT", 0, 0)
@@ -2025,10 +1935,10 @@ function QuestlineTreeView:ensureWidgets()
     end
   end
   if not self.scrollFrame then
-    self.scrollFrame = CreateFrame("ScrollFrame", "ToolboxEJQuestlineScrollFrame", self.leftTree, "UIPanelScrollFrameTemplate")
+    self.scrollFrame = CreateFrame("ScrollFrame", "ToolboxQuestLeftScrollFrame", self.leftTree, "UIPanelScrollFrameTemplate")
   end
   if not self.scrollChild then
-    local scrollChild = CreateFrame("Frame", "ToolboxEJQuestlineScrollChild", self.scrollFrame)
+    local scrollChild = CreateFrame("Frame", "ToolboxQuestLeftScrollChild", self.scrollFrame)
     scrollChild:SetSize(180, 32)
     self.scrollChild = scrollChild
   end
@@ -2255,6 +2165,15 @@ end
 function QuestlineTreeView:refresh()
   self:ensureWidgets()
   self:updateVisibility()
+end
+
+--- 返回 quest 模块底部分页签模式键顺序。
+---@return string[]
+function QuestlineTreeView:getBottomTabModeKeys()
+  return {
+    "active_log",
+    "map_questline",
+  }
 end
 
 Internal.QuestlineTreeView = QuestlineTreeView

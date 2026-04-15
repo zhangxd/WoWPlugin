@@ -60,18 +60,16 @@ describe("EncounterJournal event lifecycle", function()
     assert.is_false(harness:isEventRegistered("PLAYER_ENTERING_WORLD"))
   end)
 
-  it("refresh_reloads_saved_navigation_state_after_widgets_exist", function()
-    local journalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal") -- 冒险手册根框体
-    journalFrame:Show()
-    journalFrame.instanceSelect = harness.runtime.CreateFrame("Frame", nil, journalFrame)
-    journalFrame.Tabs = {}
-    journalFrame.selectedTab = 4
-    rawset(_G, "EncounterJournal", journalFrame)
+  it("quest_module_refresh_reloads_saved_navigation_state_after_widgets_exist", function()
+    harness:loadQuestModule()
+    local questFrame = harness.runtime.CreateFrame("Frame", "ToolboxQuestFrame") -- quest 根框体
+    questFrame:Show()
+    rawset(_G, "ToolboxQuestFrame", questFrame)
 
-    harness.moduleDb.questNavExpansionID = 10
-    harness.moduleDb.questNavModeKey = "quest_type"
-    harness.moduleDb.questNavSelectedTypeKey = "type:12"
-    harness.moduleDb.questNavExpandedQuestLineID = 101
+    harness.questModuleDb.questNavExpansionID = 10
+    harness.questModuleDb.questNavModeKey = "map_questline"
+    harness.questModuleDb.questNavSelectedMapID = 2472
+    harness.questModuleDb.questNavExpandedQuestLineID = 101
 
     Toolbox.Questlines.GetQuestNavigationModel = function()
       return {
@@ -85,11 +83,9 @@ describe("EncounterJournal event lifecycle", function()
             name = "巨龙时代",
             modes = {
               { key = "map_questline", name = "地图任务线", entries = {} },
-              { key = "quest_type", name = "任务类型", entries = {} },
             },
             modeByKey = {
               map_questline = { key = "map_questline", name = "地图任务线", entries = {} },
-              quest_type = { key = "quest_type", name = "任务类型", entries = {} },
             },
           },
           [10] = {
@@ -103,13 +99,6 @@ describe("EncounterJournal event lifecycle", function()
                   { id = 2472, name = "多恩岛", kind = "map" },
                 },
               },
-              {
-                key = "quest_type",
-                name = "任务类型",
-                entries = {
-                  { id = "type:12", name = "战役", kind = "type_group" },
-                },
-              },
             },
             modeByKey = {
               map_questline = {
@@ -117,13 +106,6 @@ describe("EncounterJournal event lifecycle", function()
                 name = "地图任务线",
                 entries = {
                   { id = 2472, name = "多恩岛", kind = "map" },
-                },
-              },
-              quest_type = {
-                key = "quest_type",
-                name = "任务类型",
-                entries = {
-                  { id = "type:12", name = "战役", kind = "type_group" },
                 },
               },
             },
@@ -137,12 +119,13 @@ describe("EncounterJournal event lifecycle", function()
       }, nil
     end
 
-    local treeView = Toolbox.TestHooks.EncounterJournal:getQuestlineTreeView()
+    local treeView = Toolbox.TestHooks.Quest:getView()
+    treeView:setSelected(true)
     treeView:refresh()
 
     assert.equals(10, treeView.selectedExpansionID)
-    assert.equals("quest_type", treeView.selectedModeKey)
-    assert.equals("type:12", treeView.selectedTypeKey)
+    assert.equals("map_questline", treeView.selectedModeKey)
+    assert.equals(2472, treeView.selectedMapID)
     assert.equals(nil, treeView.expandedQuestLineID)
   end)
 end)

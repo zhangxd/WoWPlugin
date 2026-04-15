@@ -48,13 +48,41 @@ function Harness.new(options)
     traceList = self.traceList,
     addonLoadedSeed = opts.addonLoadedSeed,
   })
-  self.moduleDb = {
-    enabled = opts.moduleEnabled ~= false,
-    debug = opts.moduleDebug == true,
-    mountFilterEnabled = true,
-    lockoutOverlayEnabled = true,
-    questlineTreeEnabled = true,
+  self.moduleDbById = {
+    encounter_journal = {
+      enabled = opts.moduleEnabled ~= false,
+      debug = opts.moduleDebug == true,
+      mountFilterEnabled = true,
+      lockoutOverlayEnabled = true,
+      detailMountOnlyEnabled = false,
+      questlineTreeEnabled = true,
+      questNavExpansionID = 0,
+      questNavModeKey = "map_questline",
+      questNavSelectedMapID = 0,
+      questNavSelectedTypeKey = "",
+      questNavSearchText = "",
+      questNavExpandedQuestLineID = 0,
+      questlineTreeCollapsed = {},
+    },
+    quest = {
+      enabled = opts.moduleEnabled ~= false,
+      debug = opts.moduleDebug == true,
+      questlineTreeEnabled = true,
+      questNavExpansionID = 0,
+      questNavModeKey = "active_log",
+      questNavSelectedMapID = 0,
+      questNavSelectedTypeKey = "",
+      questNavSearchText = "",
+      questNavSkinPreset = "archive",
+      questInspectorLastQuestID = 0,
+      questRecentCompletedList = {},
+      questRecentCompletedMax = 10,
+      questNavExpandedQuestLineID = 0,
+      questlineTreeCollapsed = {},
+    },
   }
+  self.moduleDb = self.moduleDbById.encounter_journal -- 兼容旧测试引用
+  self.questModuleDb = self.moduleDbById.quest -- quest 模块存档快捷引用
   self.locale = opts.locale or "zhCN" -- 当前 locale
   self.lockoutLines = {} -- tooltip 锁定摘要行
   self.lockoutOverflow = 0 -- tooltip 溢出数量
@@ -96,10 +124,10 @@ function Harness:_installGlobals()
       Init = function() end,
       GetModule = function(moduleId, maybeModuleId)
         local resolvedModuleId = maybeModuleId or moduleId -- 兼容点调用与冒号调用
-        if resolvedModuleId ~= "encounter_journal" then
-          return {}
+        if type(self.moduleDbById[resolvedModuleId]) ~= "table" then
+          self.moduleDbById[resolvedModuleId] = {}
         end
-        return self.moduleDb
+        return self.moduleDbById[resolvedModuleId]
       end,
       GetGlobal = function()
         return { debug = false }
@@ -178,7 +206,6 @@ function Harness:loadEncounterJournalModule()
   local modulePathList = {
     self.rootPath .. "/Toolbox/Modules/EncounterJournal/Shared.lua",
     self.rootPath .. "/Toolbox/Modules/EncounterJournal/DetailEnhancer.lua",
-    self.rootPath .. "/Toolbox/Modules/EncounterJournal/QuestNavigation.lua",
     self.rootPath .. "/Toolbox/Modules/EncounterJournal/LockoutOverlay.lua",
     self.rootPath .. "/Toolbox/Modules/EncounterJournal.lua",
   } -- encounter journal 相关加载顺序
@@ -191,6 +218,27 @@ function Harness:loadEncounterJournalModule()
   end
   self.moduleDef = self.toolboxTable._registeredModules.encounter_journal
   assert(self.moduleDef, "encounter_journal module should be registered")
+  if type(self.moduleDef.OnModuleLoad) == "function" then
+    self.moduleDef.OnModuleLoad()
+  end
+  return self.moduleDef
+end
+
+function Harness:loadQuestModule()
+  local modulePathList = {
+    self.rootPath .. "/Toolbox/Modules/Quest/Shared.lua",
+    self.rootPath .. "/Toolbox/Modules/Quest/QuestNavigation.lua",
+    self.rootPath .. "/Toolbox/Modules/Quest.lua",
+  } -- quest 模块加载顺序
+  for _, modulePath in ipairs(modulePathList) do
+    local moduleChunk, loadError = loadfile(modulePath) -- 加载模块 chunk
+    if not moduleChunk then
+      error(loadError)
+    end
+    moduleChunk()
+  end
+  self.moduleDef = self.toolboxTable._registeredModules.quest
+  assert(self.moduleDef, "quest module should be registered")
   if type(self.moduleDef.OnModuleLoad) == "function" then
     self.moduleDef.OnModuleLoad()
   end
@@ -272,6 +320,10 @@ function Harness:teardown()
   local testHooks = self.toolboxTable and self.toolboxTable.TestHooks and self.toolboxTable.TestHooks.EncounterJournal
   if testHooks and type(testHooks.resetInternalState) == "function" then
     pcall(testHooks.resetInternalState)
+  end
+  local questHooks = self.toolboxTable and self.toolboxTable.TestHooks and self.toolboxTable.TestHooks.Quest
+  if questHooks and type(questHooks.resetInternalState) == "function" then
+    pcall(questHooks.resetInternalState)
   end
   for keyName, originalValue in pairs(self.savedGlobals) do
     rawset(_G, keyName, originalValue)

@@ -1997,6 +1997,22 @@ function Toolbox.MinimapButton.RegisterBuiltinFlyoutCatalog()
     end,
   })
   Toolbox.MinimapButton.RegisterFlyoutEntry({
+    id = "tb_flyout_quest",
+    order = 23,
+    titleKey = "MINIMAP_FLYOUT_QUEST",
+    tooltipKey = "MINIMAP_FLYOUT_QUEST_TOOLTIP",
+    icon = "Interface\\Icons\\INV_Misc_Book_09",
+    onClick = function()
+      if Toolbox.Quest and type(Toolbox.Quest.OpenMainFrame) == "function" then
+        Toolbox.Quest.OpenMainFrame()
+        return
+      end
+      if Toolbox.SettingsHost and type(Toolbox.SettingsHost.OpenToModulePage) == "function" then
+        Toolbox.SettingsHost:OpenToModulePage("quest")
+      end
+    end,
+  })
+  Toolbox.MinimapButton.RegisterFlyoutEntry({
     id = "tb_flyout_about",
     order = 24,
     titleKey = "MINIMAP_FLYOUT_ABOUT",

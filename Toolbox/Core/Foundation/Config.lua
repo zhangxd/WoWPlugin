@@ -53,7 +53,7 @@ local defaults = {
       -- 悬停展开方向：vertical 纵向叠放（默认）| horizontal 横向一排（靠小地图一侧为首项）
       flyoutExpand = "vertical",
       -- 悬停展开项 id 列表（顺序即显示顺序）；id 须已由 RegisterFlyoutEntry 注册
-      flyoutSlotIds = { "reload_ui" },
+      flyoutSlotIds = { "reload_ui", "tb_flyout_quest" },
     },
     chat_notify = {
       enabled = true,
@@ -69,34 +69,34 @@ local defaults = {
       mountFilterEnabled = true,
       lockoutOverlayEnabled = true,
       detailMountOnlyEnabled = false,
-      -- 任务页签（与 EJ 副本 ID 解耦，仅作为展示容器）
+    },
+    quest = {
+      enabled = true,
+      debug = false,
+      -- 任务视图总开关
       questlineTreeEnabled = true,
       -- 左侧树：当前资料片（0 表示运行时自动选择首项）
       questNavExpansionID = 0,
-      -- 左侧树：当前模式（map_questline | quest_type | active_log）
-      questNavModeKey = "map_questline",
+      -- 当前模式（active_log | map_questline）
+      questNavModeKey = "active_log",
       -- 左侧树：当前地图（0 表示未选中）
       questNavSelectedMapID = 0,
-      -- 左侧树：当前类型大类键（空字符串表示未选中）
+      -- 兼容旧结构保留（当前版本不再使用 quest_type）
       questNavSelectedTypeKey = "",
-      -- 页签内搜索关键词
+      -- 视图内搜索关键词
       questNavSearchText = "",
-      -- 任务页签皮肤模式（default | archive | contrast）
+      -- 任务视图皮肤模式（default | archive | contrast）
       questNavSkinPreset = "archive",
-      -- 任务详情查询页：最近一次输入的 QuestID（0 表示未查询）
+      -- 任务详情查询页：最近一次输入 QuestID（0 表示未查询）
       questInspectorLastQuestID = 0,
       -- 最近完成任务记录（按时间倒序）
       questRecentCompletedList = {},
       -- 最近完成任务保留上限（1-30）
       questRecentCompletedMax = 10,
-      -- 主区：当前展开的任务线（0 表示全部折叠）
+      -- 主区：当前展开任务线（0 表示全部折叠）
       questNavExpandedQuestLineID = 0,
       -- 左侧树折叠状态（key=true 表示折叠）
       questlineTreeCollapsed = {},
-      -- 根页签顺序（按页签 ID，自定义任务页签固定 ID=203）
-      rootTabOrderIds = {},
-      -- 根页签隐藏开关（按页签 ID）：[id]=true 表示隐藏对应页签
-      rootTabHiddenIds = {},
     },
   },
 }
@@ -235,104 +235,177 @@ function Toolbox.Config.Init()
     ToolboxDB.version = 2
   end
 
-  -- encounter_journal：任务树/导航字段迁移（幂等，不依赖全局 version）。
-  local encounterJournalDb = ToolboxDB.modules and ToolboxDB.modules.encounter_journal
+  -- quest 模块：从 encounter_journal 旧任务键迁移并做字段归一化（幂等，不依赖全局 version）。
+  local moduleStore = ToolboxDB.modules or {} -- 模块存档表
+  local encounterJournalDb = type(moduleStore.encounter_journal) == "table" and moduleStore.encounter_journal or nil -- 冒险指南旧存档
+  local questDb = type(moduleStore.quest) == "table" and moduleStore.quest or {} -- quest 模块存档
+
+  local function readQuestField(fieldName, fallbackValue)
+    if questDb[fieldName] ~= nil then
+      return questDb[fieldName]
+    end
+    if type(encounterJournalDb) == "table" and encounterJournalDb[fieldName] ~= nil then
+      return encounterJournalDb[fieldName]
+    end
+    return fallbackValue
+  end
+
+  local legacyExpandedMap = readQuestField("questlineTreeExpanded", nil) -- 旧版展开状态
+  if type(legacyExpandedMap) == "table" and type(questDb.questlineTreeCollapsed) ~= "table" then
+    questDb.questlineTreeCollapsed = {}
+    for collapseKey, expandedFlag in pairs(legacyExpandedMap) do
+      if expandedFlag == false then
+        questDb.questlineTreeCollapsed[collapseKey] = true
+      end
+    end
+  end
+
+  local legacyViewMode = readQuestField("questViewMode", nil) -- 旧版视图模式
+  local legacyModeKey = readQuestField("questNavModeKey", nil) -- 旧版模式键
+  if legacyModeKey == "active_log" then
+    questDb.questNavModeKey = "active_log"
+  elseif legacyModeKey == "map_questline" then
+    questDb.questNavModeKey = "map_questline"
+  elseif legacyViewMode == nil then
+    questDb.questNavModeKey = "active_log"
+  else
+    questDb.questNavModeKey = "map_questline"
+  end
+
+  local legacyMapID = readQuestField("questViewSelectedMapID", nil) -- 旧版地图选中 ID
+  local selectedMapID = readQuestField("questNavSelectedMapID", nil) -- 当前地图选中 ID
+  if type(legacyMapID) == "number" and legacyMapID > 0 then
+    questDb.questNavSelectedMapID = legacyMapID
+  elseif type(selectedMapID) == "number" then
+    questDb.questNavSelectedMapID = math.max(0, math.floor(selectedMapID))
+  else
+    questDb.questNavSelectedMapID = 0
+  end
+
+  local legacyTypeID = readQuestField("questViewSelectedTypeID", nil) -- 旧版类型 ID
+  local selectedTypeKey = readQuestField("questNavSelectedTypeKey", "") -- 当前类型键
+  if type(legacyTypeID) == "number" and legacyTypeID > 0 then
+    questDb.questNavSelectedTypeKey = "type:" .. tostring(legacyTypeID)
+  elseif type(selectedTypeKey) == "string" then
+    questDb.questNavSelectedTypeKey = selectedTypeKey
+  else
+    questDb.questNavSelectedTypeKey = ""
+  end
+
+  local selectedExpansionID = readQuestField("questNavExpansionID", 0) -- 当前资料片 ID
+  if type(selectedExpansionID) == "number" then
+    questDb.questNavExpansionID = math.max(0, math.floor(selectedExpansionID))
+  else
+    questDb.questNavExpansionID = 0
+  end
+
+  local searchText = readQuestField("questNavSearchText", "") -- 搜索关键词
+  questDb.questNavSearchText = type(searchText) == "string" and searchText or ""
+
+  local skinPreset = readQuestField("questNavSkinPreset", "archive") -- 皮肤模式
+  if skinPreset ~= "default" and skinPreset ~= "archive" and skinPreset ~= "contrast" then
+    skinPreset = "archive"
+  end
+  questDb.questNavSkinPreset = skinPreset
+
+  local inspectorQuestID = readQuestField("questInspectorLastQuestID", 0) -- 最近查询 QuestID
+  if type(inspectorQuestID) == "number" then
+    questDb.questInspectorLastQuestID = math.max(0, math.floor(inspectorQuestID))
+  else
+    questDb.questInspectorLastQuestID = 0
+  end
+
+  local recentCompletedMax = readQuestField("questRecentCompletedMax", 10) -- 最近完成保留上限
+  if type(recentCompletedMax) ~= "number" then
+    recentCompletedMax = 10
+  end
+  recentCompletedMax = math.floor(recentCompletedMax)
+  if recentCompletedMax < 1 then
+    recentCompletedMax = 1
+  elseif recentCompletedMax > 30 then
+    recentCompletedMax = 30
+  end
+  questDb.questRecentCompletedMax = recentCompletedMax
+
+  local recentCompletedList = readQuestField("questRecentCompletedList", {}) -- 最近完成列表
+  if type(recentCompletedList) ~= "table" then
+    recentCompletedList = {}
+  end
+  local normalizedRecentList = {} -- 归一化后的最近完成列表
+  for _, entry in ipairs(recentCompletedList) do
+    if type(entry) == "table" and type(entry.questID) == "number" and entry.questID > 0 then
+      normalizedRecentList[#normalizedRecentList + 1] = {
+        questID = entry.questID,
+        questName = type(entry.questName) == "string" and entry.questName or "",
+        completedAt = type(entry.completedAt) == "number" and entry.completedAt or 0,
+      }
+    end
+  end
+  questDb.questRecentCompletedList = normalizedRecentList
+
+  local legacySelectionTable = readQuestField("questlineTreeSelection", nil) -- 旧版选中状态表
+  local legacyQuestLineID = readQuestField("questViewSelectedQuestLineID", nil) -- 旧版任务线选中 ID
+  local selectedQuestLineID = readQuestField("questNavExpandedQuestLineID", nil) -- 当前展开任务线 ID
+  if type(legacyQuestLineID) ~= "number" and type(legacySelectionTable) == "table" then
+    legacyQuestLineID = legacySelectionTable.selectedQuestLineID
+  end
+  if type(legacyQuestLineID) == "number" and legacyQuestLineID > 0 then
+    questDb.questNavExpandedQuestLineID = legacyQuestLineID
+  elseif type(selectedQuestLineID) == "number" then
+    questDb.questNavExpandedQuestLineID = math.max(0, math.floor(selectedQuestLineID))
+  else
+    questDb.questNavExpandedQuestLineID = 0
+  end
+  if questDb.questNavModeKey == "active_log" then
+    questDb.questNavExpandedQuestLineID = 0
+  end
+
+  if type(readQuestField("questlineTreeEnabled", nil)) == "boolean" then
+    questDb.questlineTreeEnabled = readQuestField("questlineTreeEnabled", true) == true
+  elseif type(questDb.questlineTreeEnabled) ~= "boolean" then
+    questDb.questlineTreeEnabled = true
+  end
+
+  local legacyCollapsedMap = readQuestField("questlineTreeCollapsed", nil) -- 旧版折叠状态
+  if type(legacyCollapsedMap) == "table" then
+    local normalizedCollapseMap = {} -- 归一化后的折叠状态
+    for collapseKey, collapseFlag in pairs(legacyCollapsedMap) do
+      if collapseFlag == true then
+        normalizedCollapseMap[collapseKey] = true
+      end
+    end
+    questDb.questlineTreeCollapsed = normalizedCollapseMap
+  elseif type(questDb.questlineTreeCollapsed) ~= "table" then
+    questDb.questlineTreeCollapsed = {}
+  end
+
+  questDb.questlineTreeExpanded = nil
+  questDb.questlineTreeSelection = nil
+  questDb.questNavCategoryKey = nil
+  questDb.questNavSelectedQuestLineID = nil
+  questDb.questViewMode = nil
+  questDb.questViewSelectedMapID = nil
+  questDb.questViewSelectedTypeID = nil
+  questDb.questViewSelectedQuestLineID = nil
+  questDb.questViewSelectedQuestID = nil
+
+  moduleStore.quest = questDb
+
   if type(encounterJournalDb) == "table" then
-    -- 旧字段 questlineTreeExpanded（true=展开）迁到 questlineTreeCollapsed（true=折叠）
-    if type(encounterJournalDb.questlineTreeExpanded) == "table" and type(encounterJournalDb.questlineTreeCollapsed) ~= "table" then
-      encounterJournalDb.questlineTreeCollapsed = {}
-      for collapseKey, expanded in pairs(encounterJournalDb.questlineTreeExpanded) do
-        if expanded == false then
-          encounterJournalDb.questlineTreeCollapsed[collapseKey] = true
-        end
-      end
-    end
+    encounterJournalDb.questlineTreeEnabled = nil
+    encounterJournalDb.questNavExpansionID = nil
+    encounterJournalDb.questNavModeKey = nil
+    encounterJournalDb.questNavSelectedMapID = nil
+    encounterJournalDb.questNavSelectedTypeKey = nil
+    encounterJournalDb.questNavSearchText = nil
+    encounterJournalDb.questNavSkinPreset = nil
+    encounterJournalDb.questInspectorLastQuestID = nil
+    encounterJournalDb.questRecentCompletedList = nil
+    encounterJournalDb.questRecentCompletedMax = nil
+    encounterJournalDb.questNavExpandedQuestLineID = nil
+    encounterJournalDb.questlineTreeCollapsed = nil
     encounterJournalDb.questlineTreeExpanded = nil
-
-    if type(encounterJournalDb.questNavExpansionID) ~= "number" then
-      encounterJournalDb.questNavExpansionID = 0
-    end
-
-    local legacyViewMode = encounterJournalDb.questViewMode -- 旧版视图模式
-    local legacyCategoryKey = encounterJournalDb.questNavCategoryKey -- 上一轮顶部分类键
-    if legacyViewMode == "type" or legacyCategoryKey == "type" then
-      encounterJournalDb.questNavModeKey = "quest_type"
-    elseif encounterJournalDb.questNavModeKey ~= "map_questline"
-      and encounterJournalDb.questNavModeKey ~= "quest_type"
-      and encounterJournalDb.questNavModeKey ~= "active_log"
-    then
-      encounterJournalDb.questNavModeKey = "map_questline"
-    end
-
-    local legacyMapID = encounterJournalDb.questViewSelectedMapID -- 旧版地图选中 ID
-    if type(legacyMapID) == "number" and legacyMapID > 0 then
-      encounterJournalDb.questNavSelectedMapID = legacyMapID
-    elseif type(encounterJournalDb.questNavSelectedMapID) ~= "number" then
-      encounterJournalDb.questNavSelectedMapID = 0
-    end
-
-    local legacyTypeID = encounterJournalDb.questViewSelectedTypeID -- 旧版类型 ID
-    if type(legacyTypeID) == "number" and legacyTypeID > 0 then
-      encounterJournalDb.questNavSelectedTypeKey = "type:" .. tostring(legacyTypeID)
-    elseif type(encounterJournalDb.questNavSelectedTypeKey) ~= "string" then
-      encounterJournalDb.questNavSelectedTypeKey = ""
-    end
-
-    if type(encounterJournalDb.questNavSearchText) ~= "string" then
-      encounterJournalDb.questNavSearchText = ""
-    end
-    if encounterJournalDb.questNavSkinPreset ~= "default"
-      and encounterJournalDb.questNavSkinPreset ~= "archive"
-      and encounterJournalDb.questNavSkinPreset ~= "contrast"
-    then
-      encounterJournalDb.questNavSkinPreset = "archive"
-    end
-    if type(encounterJournalDb.questInspectorLastQuestID) ~= "number" then
-      encounterJournalDb.questInspectorLastQuestID = 0
-    end
-    encounterJournalDb.questInspectorLastQuestID = math.floor(encounterJournalDb.questInspectorLastQuestID)
-    if encounterJournalDb.questInspectorLastQuestID < 0 then
-      encounterJournalDb.questInspectorLastQuestID = 0
-    end
-    if type(encounterJournalDb.questRecentCompletedMax) ~= "number" then
-      encounterJournalDb.questRecentCompletedMax = 10
-    end
-    encounterJournalDb.questRecentCompletedMax = math.floor(encounterJournalDb.questRecentCompletedMax)
-    if encounterJournalDb.questRecentCompletedMax < 1 then
-      encounterJournalDb.questRecentCompletedMax = 1
-    elseif encounterJournalDb.questRecentCompletedMax > 30 then
-      encounterJournalDb.questRecentCompletedMax = 30
-    end
-    if type(encounterJournalDb.questRecentCompletedList) ~= "table" then
-      encounterJournalDb.questRecentCompletedList = {}
-    else
-      local normalizedRecentList = {} -- 归一化后的最近完成列表
-      for _, entry in ipairs(encounterJournalDb.questRecentCompletedList) do
-        if type(entry) == "table" and type(entry.questID) == "number" and entry.questID > 0 then
-          normalizedRecentList[#normalizedRecentList + 1] = {
-            questID = entry.questID,
-            questName = type(entry.questName) == "string" and entry.questName or "",
-            completedAt = type(entry.completedAt) == "number" and entry.completedAt or 0,
-          }
-        end
-      end
-      encounterJournalDb.questRecentCompletedList = normalizedRecentList
-    end
-
-    do
-      local legacySelectionTable = type(encounterJournalDb.questlineTreeSelection) == "table" and encounterJournalDb.questlineTreeSelection or nil -- 旧版选中状态表
-      local legacyQuestLineID = encounterJournalDb.questViewSelectedQuestLineID -- 旧版任务线选中 ID
-      if type(legacyQuestLineID) ~= "number" then
-        legacyQuestLineID = legacySelectionTable and legacySelectionTable.selectedQuestLineID or nil
-      end
-      if type(legacyQuestLineID) == "number" and legacyQuestLineID > 0 then
-        encounterJournalDb.questNavExpandedQuestLineID = legacyQuestLineID
-      elseif type(encounterJournalDb.questNavExpandedQuestLineID) ~= "number" then
-        encounterJournalDb.questNavExpandedQuestLineID = 0
-      end
-    end
-
-    -- 旧版三视图状态与树折叠状态不再驱动新任务导航
+    encounterJournalDb.questlineTreeSelection = nil
     encounterJournalDb.questNavCategoryKey = nil
     encounterJournalDb.questNavSelectedQuestLineID = nil
     encounterJournalDb.questViewMode = nil
@@ -340,10 +413,22 @@ function Toolbox.Config.Init()
     encounterJournalDb.questViewSelectedTypeID = nil
     encounterJournalDb.questViewSelectedQuestLineID = nil
     encounterJournalDb.questViewSelectedQuestID = nil
-    if type(encounterJournalDb.questlineTreeCollapsed) ~= "table" then
-      encounterJournalDb.questlineTreeCollapsed = {}
+    encounterJournalDb.rootTabOrderIds = nil
+    encounterJournalDb.rootTabHiddenIds = nil
+  end
+
+  local minimapButtonDb = type(moduleStore.minimap_button) == "table" and moduleStore.minimap_button or nil -- 小地图按钮存档
+  if type(minimapButtonDb) == "table" and type(minimapButtonDb.flyoutSlotIds) == "table" then
+    local hasQuestEntry = false -- 是否已存在 quest 入口
+    for _, slotId in ipairs(minimapButtonDb.flyoutSlotIds) do
+      if slotId == "tb_flyout_quest" then
+        hasQuestEntry = true
+        break
+      end
     end
-    encounterJournalDb.questlineTreeSelection = nil
+    if not hasQuestEntry then
+      minimapButtonDb.flyoutSlotIds[#minimapButtonDb.flyoutSlotIds + 1] = "tb_flyout_quest"
+    end
   end
 end
 

@@ -1634,14 +1634,6 @@ local function buildQuestNavigationModel()
     }, questTabError
   end
 
-  local typeIndexModel, typeIndexError = Toolbox.Questlines.GetQuestTypeIndex() -- 类型索引模型
-  if typeIndexError then
-    return {
-      expansionList = {},
-      expansionByID = {},
-    }, typeIndexError
-  end
-
   local navigationModel = {
     expansionList = {},
     expansionByID = {},
@@ -1663,15 +1655,9 @@ local function buildQuestNavigationModel()
           name = (Toolbox.L and Toolbox.L.EJ_QUEST_NAV_MODE_MAP_QUESTLINE) or "地图任务线",
           entries = {},
         },
-        {
-          key = "quest_type",
-          name = (Toolbox.L and Toolbox.L.EJ_QUEST_NAV_MODE_QUEST_TYPE) or "任务类型",
-          entries = {},
-        },
       },
       modeByKey = {},
       _mapEntryByID = {},
-      _typeEntryByKey = {},
     }
     for _, modeEntry in ipairs(expansionEntry.modes) do
       expansionEntry.modeByKey[modeEntry.key] = modeEntry
@@ -1707,37 +1693,6 @@ local function buildQuestNavigationModel()
         end
       end
     end
-    for _, typeEntry in ipairs(typeIndexModel.typeList or {}) do
-      local typeID = type(typeEntry) == "table" and typeEntry.id or nil -- 当前类型 ID
-      if type(typeID) == "number" then
-        local questLineIDList = typeIndexModel.typeToQuestLineIDs and typeIndexModel.typeToQuestLineIDs[typeID] or nil -- 类型下任务线列表
-        for expansionID, expansionQuestLineIDList in pairs(dataTable.expansions or {}) do
-          if type(expansionID) == "number" and expansionID >= 0 then
-            local expansionEntry = ensureExpansionEntry(expansionID) -- 资料片分组
-            local expansionQuestLineSet = {} -- 当前资料片任务线集合
-            for _, expansionQuestLineID in ipairs(expansionQuestLineIDList or {}) do
-              expansionQuestLineSet[expansionQuestLineID] = true
-            end
-            for _, questLineID in ipairs(questLineIDList or {}) do
-              if expansionQuestLineSet[questLineID] == true then
-                local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
-                if type(questLineEntry) == "table" then
-                  local representativeQuestID = questLineEntry.questIDs and questLineEntry.questIDs[1] or nil -- 代表任务 ID
-                  local typeGroupKey, typeGroupName = getQuestTypeGroupInfo(representativeQuestID, typeID) -- 类型分组信息
-                  local typeGroup = ensureCategoryGroup(
-                    expansionEntry.modeByKey.quest_type.entries,
-                    expansionEntry._typeEntryByKey,
-                    typeGroupKey,
-                    typeGroupName
-                  )
-                  appendQuestLineToGroup(typeGroup, questLineEntry)
-                end
-              end
-            end
-          end
-        end
-      end
-    end
   else
     for _, mapEntry in ipairs(questTabModel.maps or {}) do
       for _, questLineEntry in ipairs(mapEntry.questLines or {}) do
@@ -1755,28 +1710,6 @@ local function buildQuestNavigationModel()
       end
     end
 
-    for _, typeEntry in ipairs(typeIndexModel.typeList or {}) do
-      local typeID = type(typeEntry) == "table" and typeEntry.id or nil -- 当前类型 ID
-      if type(typeID) == "number" then
-        local questLineIDList = typeIndexModel.typeToQuestLineIDs and typeIndexModel.typeToQuestLineIDs[typeID] or nil -- 类型下任务线列表
-        for _, questLineID in ipairs(questLineIDList or {}) do
-          local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
-          local expansionID = type(questLineEntry) == "table" and questLineEntry.ExpansionID or nil -- 当前任务线资料片 ID
-          if type(expansionID) == "number" and expansionID >= 0 and type(questLineEntry) == "table" then
-            local expansionEntry = ensureExpansionEntry(expansionID) -- 资料片分组
-            local representativeQuestID = questLineEntry.questIDs and questLineEntry.questIDs[1] or nil -- 代表任务 ID
-            local typeGroupKey, typeGroupName = getQuestTypeGroupInfo(representativeQuestID, typeID) -- 类型分组信息
-            local typeGroup = ensureCategoryGroup(
-              expansionEntry.modeByKey.quest_type.entries,
-              expansionEntry._typeEntryByKey,
-              typeGroupKey,
-              typeGroupName
-            )
-            appendQuestLineToGroup(typeGroup, questLineEntry)
-          end
-        end
-      end
-    end
   end
 
   table.sort(navigationModel.expansionList, function(leftEntry, rightEntry)
@@ -1786,12 +1719,8 @@ local function buildQuestNavigationModel()
   for _, expansionEntry in pairs(navigationModel.expansionByID) do
     sortMixedNavigationEntries(expansionEntry.modeByKey.map_questline.entries or {})
     expansionEntry._mapEntryByID = nil
-    expansionEntry._typeEntryByKey = nil
     expansionEntry._directQuestLineByID = nil
     for _, groupEntry in ipairs(expansionEntry.modeByKey.map_questline.entries or {}) do
-      groupEntry._questLineSeen = nil
-    end
-    for _, groupEntry in ipairs(expansionEntry.modeByKey.quest_type.entries or {}) do
       groupEntry._questLineSeen = nil
     end
   end
@@ -1854,51 +1783,6 @@ function Toolbox.Questlines.GetQuestLinesForMap(mapID, expansionID)
     end
   end
   return filteredQuestLineList, nil
-end
-
---- 按类型大类键获取任务列表。
----@param expansionID number|nil
----@param typeGroupKey string|nil
----@return table[] questList
----@return table|nil errorObject
-function Toolbox.Questlines.GetTasksForTypeGroup(expansionID, typeGroupKey)
-  local navigationModel, navigationError = Toolbox.Questlines.GetQuestNavigationModel() -- 导航模型
-  if navigationError then
-    return {}, navigationError
-  end
-  local expansionEntry = type(expansionID) == "number" and navigationModel.expansionByID and navigationModel.expansionByID[expansionID] or nil -- 当前资料片对象
-  if type(expansionEntry) ~= "table" or type(typeGroupKey) ~= "string" or typeGroupKey == "" then
-    return {}, nil
-  end
-
-  local targetGroup = nil -- 目标类型分组
-  for _, groupEntry in ipairs(expansionEntry.modeByKey.quest_type.entries or {}) do
-    if tostring(groupEntry.id) == typeGroupKey then
-      targetGroup = groupEntry
-      break
-    end
-  end
-  if type(targetGroup) ~= "table" then
-    return {}, nil
-  end
-
-  local questList = {} -- 类型下任务列表
-  local seenQuestIDSet = {} -- 已收集任务集合
-  for _, questLineEntry in ipairs(targetGroup.questLines or {}) do
-    local questLineTaskList, listError = Toolbox.Questlines.GetQuestListByQuestLineID(questLineEntry.id) -- 当前任务线任务列表
-    if listError then
-      return {}, listError
-    end
-    for _, questEntry in ipairs(questLineTaskList or {}) do
-      local groupKey = nil -- 当前任务类型分组键
-      groupKey = select(1, getQuestTypeGroupInfo(questEntry.id, questEntry.typeID))
-      if groupKey == typeGroupKey and seenQuestIDSet[questEntry.id] ~= true then
-        seenQuestIDSet[questEntry.id] = true
-        questList[#questList + 1] = questEntry
-      end
-    end
-  end
-  return questList, nil
 end
 
 --- 获取任务线显示名缓存表。

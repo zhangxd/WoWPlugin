@@ -587,15 +587,10 @@ describe("QuestlineProgress mock data injection", function()
       { id = 2372, questLineIDs = { 9902 } },
     }, collectQuestLineIDs(navigationModel.expansionByID[9].modeByKey.map_questline.entries))
     assert.same({
-      { id = "type:12", questLineIDs = { 9901 } },
-      { id = "type:34", questLineIDs = { 9902 } },
-    }, collectQuestLineIDs(navigationModel.expansionByID[9].modeByKey.quest_type.entries))
-    assert.same({
       { id = 2373, questLineIDs = { 9903 } },
     }, collectQuestLineIDs(navigationModel.expansionByID[10].modeByKey.map_questline.entries))
-    assert.same({
-      { id = "type:12", questLineIDs = { 9903 } },
-    }, collectQuestLineIDs(navigationModel.expansionByID[10].modeByKey.quest_type.entries))
+    assert.is_nil(navigationModel.expansionByID[9].modeByKey.quest_type)
+    assert.is_nil(navigationModel.expansionByID[10].modeByKey.quest_type)
   end)
 
   it("GetQuestLinesForMap scopes results to the selected expansion when provided", function()

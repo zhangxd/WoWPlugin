@@ -50,9 +50,11 @@ Data\InstanceQuestlines.lua
 # ============================================================================
 Modules\EncounterJournal\Shared.lua
 Modules\EncounterJournal\DetailEnhancer.lua
-Modules\EncounterJournal\QuestNavigation.lua
 Modules\EncounterJournal\LockoutOverlay.lua
 Modules\EncounterJournal.lua
+Modules\Quest\Shared.lua
+Modules\Quest\QuestNavigation.lua
+Modules\Quest.lua
 
 # ============================================================================
 # Debug（调试工具）

@@ -1,10 +1,10 @@
---[[
-  冒险指南增强模块（encounter_journal）。
-  本文件仅保留模块注册、事件入口、调度器与设置页等组装层逻辑。
-  具体实现已拆分到 Modules/EncounterJournal/*.lua 私有文件。
+﻿--[[
+  鍐掗櫓鎸囧崡澧炲己妯″潡锛坋ncounter_journal锛夈€?
+  鏈枃浠朵粎淇濈暀妯″潡娉ㄥ唽銆佷簨浠跺叆鍙ｃ€佽皟搴﹀櫒涓庤缃〉绛夌粍瑁呭眰閫昏緫銆?
+  鍏蜂綋瀹炵幇宸叉媶鍒嗗埌 Modules/EncounterJournal/*.lua 绉佹湁鏂囦欢銆?
 ]]
 
-local Internal = Toolbox.EncounterJournalInternal -- 冒险指南内部命名空间
+local Internal = Toolbox.EncounterJournalInternal -- 鍐掗櫓鎸囧崡鍐呴儴鍛藉悕绌洪棿
 local MODULE_ID = Internal.MODULE_ID
 local Runtime = Internal.Runtime
 local CreateFrame = Internal.CreateFrame
@@ -13,7 +13,6 @@ local scrollBoxCache = Internal.scrollBoxCache
 
 local MountFilter = Internal.MountFilter
 local DetailEnhancer = Internal.DetailEnhancer
-local QuestlineTreeView = Internal.QuestlineTreeView
 local LockoutOverlay = Internal.LockoutOverlay
 
 local function getModuleDb()
@@ -31,242 +30,32 @@ end
 local function refreshAll()
   MountFilter = Internal.MountFilter
   DetailEnhancer = Internal.DetailEnhancer
-  QuestlineTreeView = Internal.QuestlineTreeView
   LockoutOverlay = Internal.LockoutOverlay
   MountFilter:createUI()
   DetailEnhancer:refresh()
-  QuestlineTreeView:refresh()
   MountFilter:updateVisibility()
   MountFilter:applyFilter()
   LockoutOverlay:updateFrames()
   LockoutOverlay:hookTooltips()
 end
 
-local function getRootTabHiddenIdsTable()
-  local moduleDb = getModuleDb() -- 模块存档
-  if type(moduleDb.rootTabHiddenIds) ~= "table" then
-    moduleDb.rootTabHiddenIds = {}
-  end
-  return moduleDb.rootTabHiddenIds
-end
-
-local function buildDefaultRootTabOrderIds()
-  return QuestlineTreeView:buildDefaultRootTabOrderIds()
-end
-
-local function buildEffectiveRootTabOrderIds()
-  return QuestlineTreeView:buildEffectiveRootTabOrderIds()
-end
-
-local QUEST_INSPECTOR_PAGE_ID = "quest_inspector"
-local questInspectorUiState = {
-  requestToken = 0,
-  resultText = nil,
-}
-
---- 返回任务详情查询页键名。
----@return string
-local function getQuestInspectorPageKey()
-  local settingsHost = Toolbox and Toolbox.SettingsHost or nil -- 设置页宿主
-  if settingsHost and type(settingsHost.GetModuleSubPageKey) == "function" then
-    return settingsHost:GetModuleSubPageKey(MODULE_ID, QUEST_INSPECTOR_PAGE_ID)
-  end
-  return "module:" .. tostring(MODULE_ID) .. ":subpage:" .. tostring(QUEST_INSPECTOR_PAGE_ID)
-end
-
---- 解析 QuestID 输入文本。
----@param rawValue string|number|nil
----@return number|nil
-local function normalizeQuestInspectorQuestID(rawValue)
-  local numericValue = tonumber(rawValue) -- 输入对应的数字值
-  if type(numericValue) ~= "number" then
-    return nil
-  end
-  numericValue = math.floor(numericValue)
-  if numericValue <= 0 then
-    return nil
-  end
-  return numericValue
-end
-
---- 构建任务详情查询页展示文本。
----@param localeTable table 本地化文案
----@param loadStateText string|nil 加载状态
----@param snapshotObject table|nil 任务详情快照
----@return string
-local function buildQuestInspectorResultText(localeTable, loadStateText, snapshotObject)
-  local lineList = {} -- 结果文本行列表
-  lineList[#lineList + 1] = string.format(
-    "loadState: %s",
-    tostring(loadStateText or "ready")
-  )
-
-  if type(snapshotObject) == "table" and type(snapshotObject.flatLines) == "table" and #snapshotObject.flatLines > 0 then
-    for _, messageText in ipairs(snapshotObject.flatLines) do
-      lineList[#lineList + 1] = messageText
-    end
-    return table.concat(lineList, "\n")
-  end
-
-  lineList[#lineList + 1] = localeTable.EJ_QUEST_INSPECTOR_FAILED or "Quest data load failed or no runtime data is available."
-  return table.concat(lineList, "\n")
-end
-
---- 触发任务详情查询并在设置页结果区回填文本。
----@param questID number 任务 ID
-local function requestQuestInspectorSnapshot(questID)
-  local localeTable = Toolbox.L or {} -- 本地化文案
-  local moduleDb = getModuleDb() -- 模块存档
-  local pageKey = getQuestInspectorPageKey() -- 查询页键名
-  local settingsHost = Toolbox and Toolbox.SettingsHost or nil -- 设置页宿主
-
-  local function rebuildInspectorPage()
-    if settingsHost and type(settingsHost.BuildPage) == "function" then
-      settingsHost:BuildPage(pageKey)
-    end
-  end
-
-  moduleDb.questInspectorLastQuestID = questID
-  questInspectorUiState.requestToken = (questInspectorUiState.requestToken or 0) + 1
-  local currentToken = questInspectorUiState.requestToken -- 当前请求令牌
-  questInspectorUiState.resultText = localeTable.EJ_QUEST_INSPECTOR_LOADING or "Loading quest data..."
-  rebuildInspectorPage()
-
-  if not Toolbox.Questlines or type(Toolbox.Questlines.RequestQuestInspectorSnapshot) ~= "function" then
-    questInspectorUiState.resultText = localeTable.EJ_QUEST_INSPECTOR_FAILED or "Quest data load failed or no runtime data is available."
-    rebuildInspectorPage()
-    return
-  end
-
-  local accepted, stateText, snapshotObject = Toolbox.Questlines.RequestQuestInspectorSnapshot(
-    questID,
-    function(_, loadedStateText, loadedSnapshotObject)
-      if questInspectorUiState.requestToken ~= currentToken then
-        return
-      end
-      questInspectorUiState.resultText = buildQuestInspectorResultText(localeTable, loadedStateText, loadedSnapshotObject)
-      rebuildInspectorPage()
-    end
-  )
-
-  if not accepted then
-    questInspectorUiState.resultText = localeTable.EJ_QUEST_INSPECTOR_FAILED or "Quest data load failed or no runtime data is available."
-  elseif stateText == "ready" then
-    questInspectorUiState.resultText = buildQuestInspectorResultText(localeTable, stateText, snapshotObject)
-  else
-    questInspectorUiState.resultText = localeTable.EJ_QUEST_INSPECTOR_LOADING or "Loading quest data..."
-  end
-  rebuildInspectorPage()
-end
-
---- 构建任务详情查询独立设置子页面。
----@param page table 页面定义
----@param box Frame 子页面容器
-local function buildQuestInspectorSettingsPage(page, box)
-  local localeTable = Toolbox.L or {} -- 本地化文案
-  local moduleDb = getModuleDb() -- 模块存档
-  local yOffset = 0 -- 当前纵向游标
-  local inputLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 输入框标签
-  inputLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-  inputLabel:SetText(localeTable.EJ_QUEST_INSPECTOR_INPUT_LABEL or "QuestID")
-  yOffset = yOffset - 24
-
-  local questIDEditBox = CreateFrame("EditBox", nil, box, "InputBoxTemplate") -- QuestID 输入框
-  questIDEditBox:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-  questIDEditBox:SetSize(200, 24)
-  questIDEditBox:SetAutoFocus(false)
-  questIDEditBox:SetMaxLetters(12)
-  if type(moduleDb.questInspectorLastQuestID) == "number" and moduleDb.questInspectorLastQuestID > 0 then
-    questIDEditBox:SetText(tostring(moduleDb.questInspectorLastQuestID))
-  else
-    questIDEditBox:SetText("")
-  end
-  questIDEditBox:SetScript("OnEscapePressed", function(editBox)
-    editBox:ClearFocus()
-  end)
-
-  local function submitQuestInspectorQuery()
-    local questID = normalizeQuestInspectorQuestID(questIDEditBox:GetText()) -- 当前输入的任务 ID
-    if not questID then
-      questInspectorUiState.resultText = localeTable.EJ_QUEST_INSPECTOR_INVALID_ID or "Please input a valid QuestID."
-      if Toolbox.SettingsHost and type(Toolbox.SettingsHost.BuildPage) == "function" then
-        Toolbox.SettingsHost:BuildPage(getQuestInspectorPageKey())
-      end
-      return
-    end
-    requestQuestInspectorSnapshot(questID)
-  end
-
-  questIDEditBox:SetScript("OnEnterPressed", function(editBox)
-    editBox:ClearFocus()
-    submitQuestInspectorQuery()
-  end)
-
-  local queryButton = CreateFrame("Button", nil, box, "UIPanelButtonTemplate") -- 查询按钮
-  queryButton:SetSize(120, 22)
-  queryButton:SetPoint("LEFT", questIDEditBox, "RIGHT", 12, 0)
-  queryButton:SetText(localeTable.EJ_QUEST_INSPECTOR_QUERY_BUTTON or "Inspect")
-  queryButton:SetScript("OnClick", submitQuestInspectorQuery)
-
-  yOffset = yOffset - 42
-
-  local resultTitle = box:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 结果区标题
-  resultTitle:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-  resultTitle:SetText(localeTable.EJ_QUEST_INSPECTOR_RESULT_TITLE or "Result")
-  yOffset = yOffset - 24
-
-  local resultFrame = CreateFrame("Frame", nil, box, "BackdropTemplate") -- 结果区底板
-  resultFrame:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-  resultFrame:SetSize(560, 420)
-  resultFrame:SetBackdrop({
-    bgFile = "Interface\\Buttons\\WHITE8X8",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true,
-    tileSize = 8,
-    edgeSize = 10,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 },
-  })
-  resultFrame:SetBackdropColor(0.08, 0.08, 0.1, 0.82)
-  resultFrame:SetBackdropBorderColor(0.35, 0.35, 0.38, 0.75)
-
-  local resultScrollFrame = CreateFrame("ScrollFrame", nil, resultFrame, "UIPanelScrollFrameTemplate") -- 结果滚动框
-  resultScrollFrame:SetPoint("TOPLEFT", resultFrame, "TOPLEFT", 8, -8)
-  resultScrollFrame:SetPoint("BOTTOMRIGHT", resultFrame, "BOTTOMRIGHT", -28, 8)
-
-  local resultEditBox = CreateFrame("EditBox", nil, resultScrollFrame) -- 结果文本框
-  resultEditBox:SetMultiLine(true)
-  resultEditBox:SetFontObject(ChatFontNormal)
-  resultEditBox:SetWidth(500)
-  resultEditBox:SetHeight(2000)
-  resultEditBox:SetAutoFocus(false)
-  resultEditBox:SetTextInsets(6, 6, 6, 6)
-  resultEditBox:SetScript("OnEscapePressed", function(editBox)
-    editBox:ClearFocus()
-  end)
-  resultEditBox:SetText(questInspectorUiState.resultText or (localeTable.EJ_QUEST_INSPECTOR_EMPTY or "Input a QuestID and click Inspect."))
-  resultScrollFrame:SetScrollChild(resultEditBox)
-
-  yOffset = yOffset - 436
-  box.realHeight = math.abs(yOffset) + 20
-end
-
 -- ============================================================================
--- 微型菜单「冒险手册」按钮 Tooltip 增补（右下角菜单排）
+-- 寰瀷鑿滃崟銆屽啋闄╂墜鍐屻€嶆寜閽?Tooltip 澧炶ˉ锛堝彸涓嬭鑿滃崟鎺掞級
 -- ============================================================================
 
 local microButtonTooltipHooked = false
 
---- 获取冒险手册微型菜单按钮（Retail 主路径为 EJMicroButton，旧名仅作兜底）。
+--- 鑾峰彇鍐掗櫓鎵嬪唽寰瀷鑿滃崟鎸夐挳锛圧etail 涓昏矾寰勪负 EJMicroButton锛屾棫鍚嶄粎浣滃厹搴曪級銆?
 ---@return Button|nil
 local function getAdventureGuideMicroButton()
-  local microButton = _G.EJMicroButton -- Retail 微型菜单按钮全局名
+  local microButton = _G.EJMicroButton -- Retail 寰瀷鑿滃崟鎸夐挳鍏ㄥ眬鍚?
   if not microButton then
-    microButton = _G.EncounterJournalMicroButton -- 历史命名兜底
+    microButton = _G.EncounterJournalMicroButton -- 鍘嗗彶鍛藉悕鍏滃簳
   end
   return microButton
 end
 
---- 向当前冒险手册微型按钮 tooltip 追加副本 CD 摘要（带一次悬停去重）。
+--- 鍚戝綋鍓嶅啋闄╂墜鍐屽井鍨嬫寜閽?tooltip 杩藉姞鍓湰 CD 鎽樿锛堝甫涓€娆℃偓鍋滃幓閲嶏級銆?
 local function appendAdventureGuideMicroButtonLockoutLines()
   if not isModuleEnabled() then
     return
@@ -279,10 +68,10 @@ local function appendAdventureGuideMicroButtonLockoutLines()
   end
   microTooltipAppendState[GameTooltip] = true
 
-  local localeTable = Toolbox.L or {} -- 本地化字符串表
-  local sectionTitle = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_TITLE or "Current lockouts" -- 标题文案
-  local emptyText = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_EMPTY or "No saved instance lockouts." -- 空态文案
-  local moreFormat = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_MORE_FMT or "+%d more..." -- 溢出计数文案
+  local localeTable = Toolbox.L or {} -- 鏈湴鍖栧瓧绗︿覆琛?
+  local sectionTitle = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_TITLE or "Current lockouts" -- 鏍囬鏂囨
+  local emptyText = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_EMPTY or "No saved instance lockouts." -- 绌烘€佹枃妗?
+  local moreFormat = localeTable.MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_MORE_FMT or "+%d more..." -- 婧㈠嚭璁℃暟鏂囨
 
   Runtime.TooltipAddLine(GameTooltip, " ")
   Runtime.TooltipAddLine(GameTooltip, sectionTitle, 1, 0.82, 0.2)
@@ -292,7 +81,7 @@ local function appendAdventureGuideMicroButtonLockoutLines()
     return
   end
 
-  local lineList, overflowCount = Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines(8) -- 锁定摘要行与溢出数量
+  local lineList, overflowCount = Toolbox.EJ.BuildSavedInstanceLockoutTooltipLines(8) -- 閿佸畾鎽樿琛屼笌婧㈠嚭鏁伴噺
   if type(lineList) ~= "table" or #lineList == 0 then
     Runtime.TooltipAddLine(GameTooltip, emptyText, 0.75, 0.75, 0.75, true)
     return
@@ -306,9 +95,9 @@ local function appendAdventureGuideMicroButtonLockoutLines()
   end
 end
 
---- 若当前 tooltip 正在显示冒险手册微型按钮提示，则重建一次（用于 UPDATE_INSTANCE_INFO 回刷）。
+--- 鑻ュ綋鍓?tooltip 姝ｅ湪鏄剧ず鍐掗櫓鎵嬪唽寰瀷鎸夐挳鎻愮ず锛屽垯閲嶅缓涓€娆★紙鐢ㄤ簬 UPDATE_INSTANCE_INFO 鍥炲埛锛夈€?
 local function refreshAdventureGuideMicroButtonTooltipIfOwned()
-  local microButton = getAdventureGuideMicroButton() -- 冒险手册微型菜单按钮
+  local microButton = getAdventureGuideMicroButton() -- 鍐掗櫓鎵嬪唽寰瀷鑿滃崟鎸夐挳
   if not microButton then
     return
   end
@@ -318,7 +107,7 @@ local function refreshAdventureGuideMicroButtonTooltipIfOwned()
   if GameTooltip then
     microTooltipAppendState[GameTooltip] = nil
   end
-  local onEnterHandler = microButton.GetScript and microButton:GetScript("OnEnter") -- 微型按钮 OnEnter 脚本
+  local onEnterHandler = microButton.GetScript and microButton:GetScript("OnEnter") -- 寰瀷鎸夐挳 OnEnter 鑴氭湰
   if type(onEnterHandler) == "function" then
     pcall(onEnterHandler, microButton)
     appendAdventureGuideMicroButtonLockoutLines()
@@ -329,9 +118,9 @@ local function refreshAdventureGuideMicroButtonTooltipIfOwned()
   Runtime.TooltipShow(GameTooltip)
 end
 
---- 在右下角微型菜单的冒险手册按钮 tooltip 末尾追加当前角色副本 CD 摘要。
+--- 鍦ㄥ彸涓嬭寰瀷鑿滃崟鐨勫啋闄╂墜鍐屾寜閽?tooltip 鏈熬杩藉姞褰撳墠瑙掕壊鍓湰 CD 鎽樿銆?
 local function hookAdventureGuideMicroButtonTooltip()
-  local microButton = getAdventureGuideMicroButton() -- 冒险手册微型菜单按钮
+  local microButton = getAdventureGuideMicroButton() -- 鍐掗櫓鎵嬪唽寰瀷鑿滃崟鎸夐挳
   if not microButton then
     return
   end
@@ -359,7 +148,7 @@ local function hookAdventureGuideMicroButtonTooltip()
 
 end
 
---- 刷新调度器（防抖）
+--- 鍒锋柊璋冨害鍣紙闃叉姈锛?
 local RefreshScheduler = {
   timer = nil,
   token = 0,
@@ -379,7 +168,7 @@ function RefreshScheduler:schedule(reason)
 
   local delay = self.delays[reason] or 0.1
   self.token = (self.token or 0) + 1
-  local currentToken = self.token -- 当前调度令牌
+  local currentToken = self.token -- 褰撳墠璋冨害浠ょ墝
 
   local timerHandle = Runtime.NewTimer(delay, function()
     if self.token ~= currentToken then
@@ -393,7 +182,7 @@ function RefreshScheduler:schedule(reason)
     return
   end
 
-  local afterScheduled = false -- 延时任务是否已调度
+  local afterScheduled = false -- 寤舵椂浠诲姟鏄惁宸茶皟搴?
   Runtime.After(delay, function()
     afterScheduled = true
     if self.token ~= currentToken then
@@ -426,7 +215,7 @@ function RefreshScheduler:execute()
   self.timer = nil
 end
 
---- Hook 管理器（只 Hook 一次）
+--- Hook 绠＄悊鍣紙鍙?Hook 涓€娆★級
 local hooked = false
 local detailInfoOnShowHooked = false
 
@@ -434,7 +223,7 @@ local function hookDetailInfoOnShow()
   if detailInfoOnShowHooked then
     return
   end
-  local infoFrame = getEncounterInfoFrame() -- 详情信息面板
+  local infoFrame = getEncounterInfoFrame() -- 璇︽儏淇℃伅闈㈡澘
   if not infoFrame or not infoFrame.HookScript then
     return
   end
@@ -448,7 +237,7 @@ local function initHooks()
   if hooked then return end
   hooked = true
 
-  -- Hook 1: 列表刷新
+  -- Hook 1: 鍒楄〃鍒锋柊
   if hooksecurefunc and type(_G.EncounterJournal_ListInstances) == "function" then
     pcall(function()
       hooksecurefunc("EncounterJournal_ListInstances", function()
@@ -460,7 +249,7 @@ local function initHooks()
     end)
   end
 
-  -- Hook 1.5: 详情页战利品更新（用于“仅坐骑”筛选）
+  -- Hook 1.5: 璇︽儏椤垫垬鍒╁搧鏇存柊锛堢敤浜庘€滀粎鍧愰獞鈥濈瓫閫夛級
   if hooksecurefunc and type(_G.EncounterJournal_LootUpdate) == "function" then
     pcall(function()
       hooksecurefunc("EncounterJournal_LootUpdate", function()
@@ -469,14 +258,10 @@ local function initHooks()
     end)
   end
 
-  -- Hook 2: 标签切换
+  -- Hook 2: 鏍囩鍒囨崲锛堢敤浜庡埛鏂板垪琛ㄧ紦瀛橈級
   if hooksecurefunc and type(_G.EJ_ContentTab_Select) == "function" then
     pcall(function()
       hooksecurefunc("EJ_ContentTab_Select", function()
-        QuestlineTreeView.pendingNativeSelection = true
-        if QuestlineTreeView.selected then
-          QuestlineTreeView.selected = false
-        end
         Runtime.After(0, function()
           scrollBoxCache.ref = nil
           scrollBoxCache.lastUpdate = 0
@@ -486,7 +271,7 @@ local function initHooks()
     end)
   end
 
-  -- Hook 2.5: 详情页切换实例/首领
+  -- Hook 2.5: 璇︽儏椤靛垏鎹㈠疄渚?棣栭
   if hooksecurefunc and type(_G.EncounterJournal_DisplayInstance) == "function" then
     pcall(function()
       hooksecurefunc("EncounterJournal_DisplayInstance", function()
@@ -504,7 +289,7 @@ local function initHooks()
     end)
   end
 
-  -- Hook 2.6: 右侧难度切换（标题后“重置：xxxx”需与当前难度匹配）
+  -- Hook 2.6: 鍙充晶闅惧害鍒囨崲锛堟爣棰樺悗鈥滈噸缃細xxxx鈥濋渶涓庡綋鍓嶉毦搴﹀尮閰嶏級
   if hooksecurefunc and type(_G.EJ_SetDifficulty) == "function" then
     pcall(function()
       hooksecurefunc("EJ_SetDifficulty", function()
@@ -513,18 +298,17 @@ local function initHooks()
     end)
   end
 
-  -- Hook 3: 主框架显示
+  -- Hook 3: 涓绘鏋舵樉绀?
   local ej = _G.EncounterJournal
   if ej and ej.HookScript then
     pcall(function()
       ej:HookScript("OnShow", function()
         RequestRaidInfo()
         hookDetailInfoOnShow()
-        -- 页签顺序/显隐在 OnShow 当帧先应用，避免首帧出现默认顺序闪烁。
+        -- 椤电椤哄簭/鏄鹃殣鍦?OnShow 褰撳抚鍏堝簲鐢紝閬垮厤棣栧抚鍑虹幇榛樿椤哄簭闂儊銆?
         if isModuleEnabled() then
           MountFilter:createUI()
           MountFilter:updateVisibility()
-          QuestlineTreeView:refresh()
         end
         RefreshScheduler:schedule("frame_show")
       end)
@@ -533,11 +317,11 @@ local function initHooks()
 
   hookDetailInfoOnShow()
 
-  -- Hook 4: 右下角微型菜单的冒险手册按钮 tooltip
+  -- Hook 4: 鍙充笅瑙掑井鍨嬭彍鍗曠殑鍐掗櫓鎵嬪唽鎸夐挳 tooltip
   hookAdventureGuideMicroButtonTooltip()
 end
 
---- 事件管理器
+--- 浜嬩欢绠＄悊鍣?
 local eventFrame = nil
 
 local function setLockoutUpdateEventEnabled(enabled)
@@ -552,8 +336,8 @@ local function setLockoutUpdateEventEnabled(enabled)
 end
 
 local function refreshAfterHookInit()
-  -- hook 安装后无条件执行一次统一刷新，消除首次打开时序差异。
-  local refreshSuccess, refreshError = pcall(refreshAll) -- 统一刷新执行结果
+  -- hook 瀹夎鍚庢棤鏉′欢鎵ц涓€娆＄粺涓€鍒锋柊锛屾秷闄ら娆℃墦寮€鏃跺簭宸紓銆?
+  local refreshSuccess, refreshError = pcall(refreshAll) -- 缁熶竴鍒锋柊鎵ц缁撴灉
   if not refreshSuccess and getModuleDb().debug then
     print("Toolbox EncounterJournal post-hook refresh error:", refreshError)
   end
@@ -565,7 +349,6 @@ local function registerIntegration()
   eventFrame = CreateFrame("Frame", "ToolboxEncounterJournalHost")
   eventFrame:RegisterEvent("ADDON_LOADED")
   eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-  eventFrame:RegisterEvent("QUEST_TURNED_IN")
   setLockoutUpdateEventEnabled(isModuleEnabled())
 
   eventFrame:SetScript("OnEvent", function(self, event, name)
@@ -583,15 +366,10 @@ local function registerIntegration()
       self:UnregisterEvent("PLAYER_ENTERING_WORLD")
       RequestRaidInfo()
       hookAdventureGuideMicroButtonTooltip()
-    elseif event == "QUEST_TURNED_IN" then
-      local questID = type(name) == "number" and name or nil -- 已完成任务 ID
-      if isModuleEnabled() and type(questID) == "number" and questID > 0 then
-        QuestlineTreeView:recordRecentlyCompletedQuest(questID)
-      end
     end
   end)
 
-  -- 如果 EJ 已加载，立即初始化
+  -- 濡傛灉 EJ 宸插姞杞斤紝绔嬪嵆鍒濆鍖?
   if Runtime.IsAddOnLoaded("Blizzard_EncounterJournal") then
     initHooks()
     refreshAfterHookInit()
@@ -601,7 +379,7 @@ local function registerIntegration()
 end
 
 local function exposeTestHooksIfNeeded()
-  local testingEnabled = false -- 是否测试模式
+  local testingEnabled = false -- 鏄惁娴嬭瘯妯″紡
   if type(Runtime.IsTesting) == "function" and Runtime.IsTesting() == true then
     testingEnabled = true
   elseif Runtime.__isTesting == true then
@@ -611,7 +389,7 @@ local function exposeTestHooksIfNeeded()
     return
   end
 
-  Toolbox.TestHooks = Toolbox.TestHooks or {} -- 测试 hook 容器
+  Toolbox.TestHooks = Toolbox.TestHooks or {} -- 娴嬭瘯 hook 瀹瑰櫒
   Toolbox.TestHooks.EncounterJournal = {
     appendAdventureGuideMicroButtonLockoutLines = appendAdventureGuideMicroButtonLockoutLines,
     refreshAdventureGuideMicroButtonTooltipIfOwned = refreshAdventureGuideMicroButtonTooltipIfOwned,
@@ -622,15 +400,11 @@ local function exposeTestHooksIfNeeded()
     getRefreshScheduler = function()
       return RefreshScheduler
     end,
-    getQuestlineTreeView = function()
-      return QuestlineTreeView
-    end,
     resetInternalState = function()
       if eventFrame and eventFrame.UnregisterEvent then
         eventFrame:UnregisterEvent("ADDON_LOADED")
         eventFrame:UnregisterEvent("PLAYER_ENTERING_WORLD")
         eventFrame:UnregisterEvent("UPDATE_INSTANCE_INFO")
-        eventFrame:UnregisterEvent("QUEST_TURNED_IN")
       end
       eventFrame = nil
       microButtonTooltipHooked = false
@@ -644,7 +418,7 @@ local function exposeTestHooksIfNeeded()
 end
 
 -- ============================================================================
--- 模块注册
+-- 妯″潡娉ㄥ唽
 -- ============================================================================
 
 Toolbox.RegisterModule({
@@ -661,7 +435,6 @@ Toolbox.RegisterModule({
   OnModuleEnable = function()
     setLockoutUpdateEventEnabled(true)
     DetailEnhancer:refresh()
-    QuestlineTreeView:refresh()
     MountFilter:syncCheckbox()
     if type(_G.EncounterJournal_ListInstances) == "function" then
       pcall(_G.EncounterJournal_ListInstances)
@@ -669,17 +442,15 @@ Toolbox.RegisterModule({
   end,
 
   OnEnabledSettingChanged = function(enabled)
-    local loc = Toolbox.L or {}
-    local msgKey = enabled and "SETTINGS_MODULE_ENABLED_FMT" or "SETTINGS_MODULE_DISABLED_FMT"
-    Toolbox.Chat.PrintAddonMessage(string.format(loc[msgKey] or "%s", loc.MODULE_ENCOUNTER_JOURNAL or MODULE_ID))
+    local localeTable = Toolbox.L or {} -- 本地化文案
+    local msgKey = enabled and "SETTINGS_MODULE_ENABLED_FMT" or "SETTINGS_MODULE_DISABLED_FMT" -- 提示键
+    Toolbox.Chat.PrintAddonMessage(string.format(localeTable[msgKey] or "%s", localeTable.MODULE_ENCOUNTER_JOURNAL or MODULE_ID))
     setLockoutUpdateEventEnabled(enabled)
     if enabled then
       RequestRaidInfo()
       DetailEnhancer:refresh()
-      QuestlineTreeView:refresh()
     else
       RefreshScheduler:cancel()
-      QuestlineTreeView:setSelected(false)
       LockoutOverlay:clearAllFrames()
     end
     MountFilter:syncCheckbox()
@@ -690,10 +461,7 @@ Toolbox.RegisterModule({
 
   ResetToDefaultsAndRebuild = function()
     Toolbox.Config.ResetModule(MODULE_ID)
-    questInspectorUiState.resultText = nil
     DetailEnhancer:refresh()
-    QuestlineTreeView:setSelected(false)
-    QuestlineTreeView:refresh()
     MountFilter:syncCheckbox()
     if type(_G.EncounterJournal_ListInstances) == "function" then
       pcall(_G.EncounterJournal_ListInstances)
@@ -705,8 +473,7 @@ Toolbox.RegisterModule({
     local moduleDb = getModuleDb() -- 模块存档
     local yOffset = 0 -- 当前纵向游标
 
-    -- 坐骑筛选设置
-    local mountFilterCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 坐骑筛选复选框
+    local mountFilterCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 坐骑筛选开关
     mountFilterCheck:SetPoint("TOPLEFT", 20, yOffset)
     mountFilterCheck.Text:SetText(localeTable.DRD_MOUNT_FILTER_ENABLED or "在冒险指南中筛选坐骑")
     mountFilterCheck:SetChecked(moduleDb.mountFilterEnabled ~= false)
@@ -719,8 +486,7 @@ Toolbox.RegisterModule({
     end)
     yOffset = yOffset - 36
 
-    -- CD 叠加设置
-    local lockoutOverlayCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- CD 叠加复选框
+    local lockoutOverlayCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 锁定叠加开关
     lockoutOverlayCheck:SetPoint("TOPLEFT", 20, yOffset)
     lockoutOverlayCheck.Text:SetText(localeTable.EJ_LOCKOUT_OVERLAY_LABEL or "在冒险指南中显示副本 CD")
     lockoutOverlayCheck:SetChecked(moduleDb.lockoutOverlayEnabled ~= false)
@@ -733,493 +499,16 @@ Toolbox.RegisterModule({
     end)
     yOffset = yOffset - 36
 
-    -- 任务页签设置
-    local questlineTreeCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 任务页签总开关
-    questlineTreeCheck:SetPoint("TOPLEFT", 20, yOffset)
-    questlineTreeCheck.Text:SetText(localeTable.EJ_QUESTLINE_TREE_LABEL or "任务")
-    questlineTreeCheck:SetChecked(moduleDb.questlineTreeEnabled ~= false)
-    questlineTreeCheck:SetScript("OnClick", function(checkButton)
-      moduleDb.questlineTreeEnabled = checkButton:GetChecked() and true or false
-      if moduleDb.questlineTreeEnabled ~= true then
-        QuestlineTreeView:setSelected(false)
-      end
-      RefreshScheduler:schedule("settings_change")
+    local detailMountOnlyCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 详情页仅坐骑开关
+    detailMountOnlyCheck:SetPoint("TOPLEFT", 20, yOffset)
+    detailMountOnlyCheck.Text:SetText(localeTable.EJ_DETAIL_MOUNT_ONLY_LABEL or "详情页仅显示坐骑")
+    detailMountOnlyCheck:SetChecked(moduleDb.detailMountOnlyEnabled == true)
+    detailMountOnlyCheck:SetScript("OnClick", function(checkButton)
+      moduleDb.detailMountOnlyEnabled = checkButton:GetChecked() and true or false
+      DetailEnhancer:refresh()
     end)
     yOffset = yOffset - 36
 
-    local skinPresetLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 任务页签皮肤标签
-    skinPresetLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    skinPresetLabel:SetWidth(168)
-    skinPresetLabel:SetJustifyH("LEFT")
-    skinPresetLabel:SetText(localeTable.EJ_QUEST_SKIN_STYLE_LABEL or "任务页签皮肤")
-
-    local skinPresetDropdown = CreateFrame("Frame", nil, box, "UIDropDownMenuTemplate") -- 任务页签皮肤下拉
-    skinPresetDropdown:SetPoint("TOPLEFT", box, "TOPLEFT", 170, yOffset - 2)
-    UIDropDownMenu_SetWidth(skinPresetDropdown, 240)
-    UIDropDownMenu_JustifyText(skinPresetDropdown, "LEFT")
-
-    local skinPresetOptions = {
-      { value = "default", label = localeTable.EJ_QUEST_SKIN_STYLE_DEFAULT or "接近暴雪原生" },
-      { value = "archive", label = localeTable.EJ_QUEST_SKIN_STYLE_ARCHIVE or "古典档案馆（推荐）" },
-      { value = "contrast", label = localeTable.EJ_QUEST_SKIN_STYLE_CONTRAST or "高对比" },
-    }
-
-    local function normalizeSkinPresetValue(value)
-      if value == "default" or value == "archive" or value == "contrast" then
-        return value
-      end
-      return "archive"
-    end
-
-    local function getSkinPresetLabel(value)
-      local normalizedValue = normalizeSkinPresetValue(value) -- 归一化后的皮肤值
-      for _, optionEntry in ipairs(skinPresetOptions) do
-        if optionEntry.value == normalizedValue then
-          return optionEntry.label
-        end
-      end
-      return normalizedValue
-    end
-
-    local function refreshSkinPresetDropdownText()
-      moduleDb.questNavSkinPreset = normalizeSkinPresetValue(moduleDb.questNavSkinPreset)
-      UIDropDownMenu_SetText(skinPresetDropdown, getSkinPresetLabel(moduleDb.questNavSkinPreset))
-    end
-
-    UIDropDownMenu_Initialize(skinPresetDropdown, function(_, level)
-      if level and level > 1 then
-        return
-      end
-      for _, optionEntry in ipairs(skinPresetOptions) do
-        local info = UIDropDownMenu_CreateInfo()
-        info.text = optionEntry.label
-        info.func = function()
-          moduleDb.questNavSkinPreset = optionEntry.value
-          refreshSkinPresetDropdownText()
-          QuestlineTreeView:refresh()
-          RefreshScheduler:schedule("settings_change")
-          CloseDropDownMenus()
-        end
-        UIDropDownMenu_AddButton(info)
-      end
-    end)
-    refreshSkinPresetDropdownText()
-    yOffset = yOffset - 34
-
-    local skinPresetHint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 任务页签皮肤说明
-    skinPresetHint:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    skinPresetHint:SetWidth(560)
-    skinPresetHint:SetJustifyH("LEFT")
-    skinPresetHint:SetText(localeTable.EJ_QUEST_SKIN_STYLE_HINT or "仅影响 Toolbox 任务页签自定义界面。")
-    yOffset = yOffset - math.max(24, math.ceil((skinPresetHint:GetStringHeight() or 14) + 8))
-
-    local function normalizeRecentCompletedMaxValue(value)
-      local normalizedValue = tonumber(value) or 10 -- 归一化后的最近完成上限
-      normalizedValue = math.floor(normalizedValue)
-      if normalizedValue < 1 then
-        normalizedValue = 1
-      elseif normalizedValue > 30 then
-        normalizedValue = 30
-      end
-      return normalizedValue
-    end
-
-    moduleDb.questRecentCompletedMax = normalizeRecentCompletedMaxValue(moduleDb.questRecentCompletedMax)
-
-    local recentCompletedLimitLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 最近完成数量标签
-    recentCompletedLimitLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    recentCompletedLimitLabel:SetText(localeTable.EJ_QUEST_RECENT_COMPLETED_LIMIT_LABEL or "最近完成任务保留条数")
-    yOffset = yOffset - 24
-
-    local recentCompletedLimitSlider = nil -- 最近完成数量滑条
-    local sliderCreated, sliderObject = pcall(CreateFrame, "Slider", nil, box, "OptionsSliderTemplate")
-    if sliderCreated and sliderObject then
-      recentCompletedLimitSlider = sliderObject
-    else
-      recentCompletedLimitSlider = CreateFrame("Slider", nil, box, "UISliderTemplate")
-    end
-    recentCompletedLimitSlider:SetPoint("TOPLEFT", box, "TOPLEFT", 24, yOffset)
-    recentCompletedLimitSlider:SetWidth(220)
-    recentCompletedLimitSlider:SetMinMaxValues(1, 30)
-    recentCompletedLimitSlider:SetValueStep(1)
-    if recentCompletedLimitSlider.SetObeyStepOnDrag then
-      recentCompletedLimitSlider:SetObeyStepOnDrag(true)
-    end
-    if recentCompletedLimitSlider.Low and recentCompletedLimitSlider.Low.SetText then
-      recentCompletedLimitSlider.Low:SetText("1")
-    end
-    if recentCompletedLimitSlider.High and recentCompletedLimitSlider.High.SetText then
-      recentCompletedLimitSlider.High:SetText("30")
-    end
-    if recentCompletedLimitSlider.Text and recentCompletedLimitSlider.Text.SetText then
-      recentCompletedLimitSlider.Text:SetText("")
-    end
-
-    local recentCompletedLimitValueText = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 最近完成数量值
-    recentCompletedLimitValueText:SetPoint("LEFT", recentCompletedLimitSlider, "RIGHT", 12, 0)
-    recentCompletedLimitValueText:SetJustifyH("LEFT")
-
-    local isSyncingRecentCompletedSlider = false -- 是否正在同步滑条值
-    local function refreshRecentCompletedLimitValueText()
-      recentCompletedLimitValueText:SetText(tostring(moduleDb.questRecentCompletedMax or 10))
-    end
-    recentCompletedLimitSlider:SetScript("OnValueChanged", function(slider, rawValue)
-      if isSyncingRecentCompletedSlider then
-        return
-      end
-      local normalizedValue = normalizeRecentCompletedMaxValue(rawValue) -- 归一化后的滑条值
-      if slider.GetValue and slider:GetValue() ~= normalizedValue then
-        isSyncingRecentCompletedSlider = true
-        slider:SetValue(normalizedValue)
-        isSyncingRecentCompletedSlider = false
-      end
-      if moduleDb.questRecentCompletedMax ~= normalizedValue then
-        moduleDb.questRecentCompletedMax = normalizedValue
-        QuestlineTreeView:trimRecentCompletedQuestRecords()
-        QuestlineTreeView:refresh()
-        RefreshScheduler:schedule("settings_change")
-      end
-      refreshRecentCompletedLimitValueText()
-    end)
-
-    isSyncingRecentCompletedSlider = true
-    recentCompletedLimitSlider:SetValue(moduleDb.questRecentCompletedMax)
-    isSyncingRecentCompletedSlider = false
-    refreshRecentCompletedLimitValueText()
-    yOffset = yOffset - 38
-
-    local recentCompletedLimitHint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 最近完成数量说明
-    recentCompletedLimitHint:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    recentCompletedLimitHint:SetWidth(560)
-    recentCompletedLimitHint:SetJustifyH("LEFT")
-    recentCompletedLimitHint:SetText(localeTable.EJ_QUEST_RECENT_COMPLETED_LIMIT_HINT or "最近完成任务列表仅记录插件启用后通过交任务事件采集的数据。")
-    yOffset = yOffset - math.max(24, math.ceil((recentCompletedLimitHint:GetStringHeight() or 14) + 8))
-
-    yOffset = yOffset - 8
-
-    local rootTabSectionTitle = box:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 根页签设置标题
-    rootTabSectionTitle:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    rootTabSectionTitle:SetText(localeTable.EJ_ROOT_TAB_SETTINGS_TITLE or "冒险指南主页页签排序")
-    yOffset = yOffset - 22
-
-    local rootTabSectionHint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 根页签设置说明
-    rootTabSectionHint:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    rootTabSectionHint:SetWidth(560)
-    rootTabSectionHint:SetJustifyH("LEFT")
-    rootTabSectionHint:SetText(localeTable.EJ_ROOT_TAB_SETTINGS_HINT or "左键拖动每行可调整顺序。可见性开关会立即生效；隐藏项仍会保留在列表中。")
-    yOffset = yOffset - math.max(28, math.ceil((rootTabSectionHint:GetStringHeight() or 16) + 8))
-
-    local rootTabListPanelHeight = 220 -- 页签列表容器高度
-    local rootTabListPanel = CreateFrame("Frame", nil, box, "BackdropTemplate") -- 页签列表容器
-    rootTabListPanel:SetSize(560, rootTabListPanelHeight)
-    rootTabListPanel:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    rootTabListPanel:SetBackdrop({
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true,
-      tileSize = 8,
-      edgeSize = 10,
-      insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    rootTabListPanel:SetBackdropColor(0.06, 0.06, 0.08, 0.65)
-    rootTabListPanel:SetBackdropBorderColor(0.24, 0.24, 0.3, 0.9)
-
-    local rootTabListScrollFrame = CreateFrame("ScrollFrame", nil, rootTabListPanel, "UIPanelScrollFrameTemplate") -- 页签列表滚动容器
-    rootTabListScrollFrame:SetPoint("TOPLEFT", rootTabListPanel, "TOPLEFT", 8, -8)
-    rootTabListScrollFrame:SetPoint("BOTTOMRIGHT", rootTabListPanel, "BOTTOMRIGHT", -28, 8)
-
-    local rootTabListChild = CreateFrame("Frame", nil, rootTabListScrollFrame) -- 页签列表滚动子容器
-    rootTabListChild:SetSize(520, 1)
-    rootTabListScrollFrame:SetScrollChild(rootTabListChild)
-
-    local rootTabOrderIdsForSettings = buildEffectiveRootTabOrderIds() -- 设置页编辑中的页签顺序
-    local rowFrameList = {} -- 设置页行框体列表
-    local refreshRootTabRows = nil -- 行重建函数（前向声明）
-    local dragPreviewFrame = nil -- 拖拽跟随预览框体
-    local dragPreviewText = nil -- 拖拽跟随预览文本
-
-    local function notifyRootTabSettingsChanged()
-      QuestlineTreeView:refresh()
-      RefreshScheduler:schedule("settings_change")
-    end
-
-    local function persistRootTabOrderIds()
-      moduleDb.rootTabOrderIds = moduleDb.rootTabOrderIds or {}
-      local targetOrderIds = moduleDb.rootTabOrderIds -- 模块存档顺序表
-      wipe(targetOrderIds)
-      for _, rootTabId in ipairs(rootTabOrderIdsForSettings) do
-        targetOrderIds[#targetOrderIds + 1] = rootTabId
-      end
-    end
-
-    local function clearRootTabRowFrames()
-      for _, rowFrame in ipairs(rowFrameList) do
-        rowFrame:Hide()
-        rowFrame:SetParent(nil)
-      end
-      wipe(rowFrameList)
-      if dragPreviewFrame then
-        dragPreviewFrame:Hide()
-      end
-    end
-
-    local function moveRootTabByIndex(sourceIndex, targetIndex)
-      local rowCount = #rootTabOrderIdsForSettings -- 当前行数
-      if type(sourceIndex) ~= "number" or type(targetIndex) ~= "number" then
-        return
-      end
-      if sourceIndex < 1 or sourceIndex > rowCount or targetIndex < 1 or targetIndex > rowCount then
-        return
-      end
-      if sourceIndex == targetIndex then
-        return
-      end
-      local movedRootTabId = table.remove(rootTabOrderIdsForSettings, sourceIndex) -- 被移动的页签 ID
-      table.insert(rootTabOrderIdsForSettings, targetIndex, movedRootTabId)
-      persistRootTabOrderIds()
-      if refreshRootTabRows then
-        refreshRootTabRows()
-      end
-      notifyRootTabSettingsChanged()
-    end
-
-    local function ensureDragPreviewFrame()
-      if dragPreviewFrame then
-        return
-      end
-      dragPreviewFrame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-      dragPreviewFrame:SetSize(180, 28)
-      dragPreviewFrame:SetFrameStrata("TOOLTIP")
-      dragPreviewFrame:SetFrameLevel(200)
-      dragPreviewFrame:EnableMouse(false)
-      dragPreviewFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true,
-        tileSize = 8,
-        edgeSize = 10,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-      })
-      dragPreviewFrame:SetBackdropColor(0.1, 0.1, 0.14, 0.72)
-      dragPreviewFrame:SetBackdropBorderColor(0.95, 0.82, 0.2, 0.9)
-
-      dragPreviewText = dragPreviewFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      dragPreviewText:SetPoint("LEFT", dragPreviewFrame, "LEFT", 8, 0)
-      dragPreviewText:SetPoint("RIGHT", dragPreviewFrame, "RIGHT", -8, 0)
-      dragPreviewText:SetJustifyH("LEFT")
-      dragPreviewText:SetWordWrap(false)
-      dragPreviewFrame:Hide()
-    end
-
-    local function updateDragPreviewPosition()
-      if not dragPreviewFrame or not dragPreviewFrame.IsShown or not dragPreviewFrame:IsShown() then
-        return
-      end
-      local parentScale = UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale() or 1 -- UIParent 缩放
-      if type(parentScale) ~= "number" or parentScale <= 0 then
-        parentScale = 1
-      end
-      local cursorPosX, cursorPosY = GetCursorPosition() -- 当前鼠标位置
-      local anchorX = (cursorPosX / parentScale) + 14 -- 预览框锚点 X
-      local anchorY = (cursorPosY / parentScale) - 10 -- 预览框锚点 Y
-      dragPreviewFrame:ClearAllPoints()
-      dragPreviewFrame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", anchorX, anchorY)
-    end
-
-    local function showDragPreview(labelText)
-      ensureDragPreviewFrame()
-      local safeLabelText = type(labelText) == "string" and labelText or "" -- 预览显示文本
-      dragPreviewText:SetText(safeLabelText)
-      local textWidth = dragPreviewText.GetStringWidth and dragPreviewText:GetStringWidth() or 120 -- 文本宽度
-      dragPreviewFrame:SetWidth(math.max(140, math.min(360, textWidth + 20)))
-      dragPreviewFrame:SetAlpha(0.72)
-      dragPreviewFrame:Show()
-      updateDragPreviewPosition()
-    end
-
-    local function hideDragPreview()
-      if dragPreviewFrame then
-        dragPreviewFrame:Hide()
-      end
-    end
-
-    refreshRootTabRows = function()
-      clearRootTabRowFrames()
-
-      local rowHeight = 28 -- 单行高度
-      local rowGap = 6 -- 行间距
-      local displayNameById = QuestlineTreeView:buildRootTabDisplayNameById(rootTabOrderIdsForSettings) -- 页签名映射
-      local rootTabHiddenIds = getRootTabHiddenIdsTable() -- 页签隐藏配置
-
-      for rowIndex, rootTabId in ipairs(rootTabOrderIdsForSettings) do
-        local currentRowIndex = rowIndex -- 当前行索引（用于闭包捕获）
-        local currentRootTabId = rootTabId -- 当前行页签 ID（用于闭包捕获）
-        local rowFrame = CreateFrame("Button", nil, rootTabListChild, "BackdropTemplate") -- 页签设置行
-        rowFrame:SetSize(516, rowHeight)
-        rowFrame:SetPoint("TOPLEFT", rootTabListChild, "TOPLEFT", 0, -((currentRowIndex - 1) * (rowHeight + rowGap)))
-        rowFrame:SetBackdrop({
-          bgFile = "Interface\\Buttons\\WHITE8X8",
-          edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-          tile = true,
-          tileSize = 8,
-          edgeSize = 8,
-          insets = { left = 2, right = 2, top = 2, bottom = 2 },
-        })
-        rowFrame:SetBackdropColor(0.1, 0.1, 0.14, 0.55)
-        rowFrame:SetBackdropBorderColor(0.28, 0.28, 0.34, 0.65)
-        rowFrame:RegisterForDrag("LeftButton")
-        rowFrame:RegisterForClicks("LeftButtonDown")
-
-        local dragHandleText = rowFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 拖拽手柄文案
-        dragHandleText:SetPoint("LEFT", rowFrame, "LEFT", 8, 0)
-        dragHandleText:SetText("|||")
-
-        local rowNameText = rowFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 页签名称文本
-        rowNameText:SetPoint("LEFT", rowFrame, "LEFT", 28, 0)
-        rowNameText:SetPoint("RIGHT", rowFrame, "RIGHT", -138, 0)
-        rowNameText:SetJustifyH("LEFT")
-        rowNameText:SetWordWrap(false)
-        rowNameText:SetText(displayNameById[currentRootTabId] or tostring(currentRootTabId))
-
-        local visibleCheck = CreateFrame("CheckButton", nil, rowFrame, "UICheckButtonTemplate") -- 可见性复选框
-        visibleCheck:SetPoint("RIGHT", rowFrame, "RIGHT", -112, 0)
-        if visibleCheck.Text and visibleCheck.Text.SetText then
-          visibleCheck.Text:SetText("")
-        end
-        visibleCheck:SetChecked(rootTabHiddenIds[currentRootTabId] ~= true)
-        visibleCheck:SetScript("OnClick", function(checkButton)
-          local visibleChecked = checkButton:GetChecked() == true -- 目标可见性
-          rootTabHiddenIds[currentRootTabId] = visibleChecked and nil or true
-          notifyRootTabSettingsChanged()
-        end)
-
-        local visibleLabel = rowFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 显示开关标签
-        visibleLabel:SetPoint("LEFT", visibleCheck, "RIGHT", 0, 0)
-        visibleLabel:SetWidth(24)
-        visibleLabel:SetJustifyH("LEFT")
-        visibleLabel:SetText(localeTable.EJ_ROOT_TAB_SETTINGS_VISIBLE or "显")
-
-        local moveUpButton = CreateFrame("Button", nil, rowFrame, "UIPanelButtonTemplate") -- 上移按钮
-        moveUpButton:SetSize(36, 20)
-        moveUpButton:SetPoint("RIGHT", rowFrame, "RIGHT", -44, 0)
-        moveUpButton:SetText(localeTable.EJ_ROOT_TAB_SETTINGS_MOVE_UP or "Up")
-        moveUpButton:SetScript("OnClick", function()
-          moveRootTabByIndex(currentRowIndex, currentRowIndex - 1)
-        end)
-
-        local moveDownButton = CreateFrame("Button", nil, rowFrame, "UIPanelButtonTemplate") -- 下移按钮
-        moveDownButton:SetSize(36, 20)
-        moveDownButton:SetPoint("RIGHT", rowFrame, "RIGHT", -4, 0)
-        moveDownButton:SetText(localeTable.EJ_ROOT_TAB_SETTINGS_MOVE_DOWN or "Dn")
-        moveDownButton:SetScript("OnClick", function()
-          moveRootTabByIndex(currentRowIndex, currentRowIndex + 1)
-        end)
-
-        local function resolveDropRowIndex()
-          local childTop = rootTabListChild:GetTop() -- 列表子容器顶部坐标
-          local childScale = rootTabListChild:GetEffectiveScale() or 1 -- 列表子容器缩放
-          local scrollOffset = rootTabListScrollFrame.GetVerticalScroll and rootTabListScrollFrame:GetVerticalScroll() or 0 -- 当前滚动偏移
-          local _, cursorY = GetCursorPosition()
-          if type(childTop) ~= "number" or type(cursorY) ~= "number" or childScale <= 0 then
-            return nil
-          end
-          local localOffsetY = (childTop - (cursorY / childScale)) + (scrollOffset or 0) -- 光标相对列表顶部偏移
-          local estimatedIndex = math.floor((localOffsetY + rowGap) / (rowHeight + rowGap)) + 1 -- 估算落点行号
-          if estimatedIndex < 1 then
-            estimatedIndex = 1
-          end
-          if estimatedIndex > #rootTabOrderIdsForSettings then
-            estimatedIndex = #rootTabOrderIdsForSettings
-          end
-          return estimatedIndex
-        end
-
-        rowFrame:SetScript("OnMouseDown", function(dragRowFrame, mouseButton)
-          if mouseButton ~= "LeftButton" then
-            return
-          end
-          if visibleCheck:IsMouseOver() or moveUpButton:IsMouseOver() or moveDownButton:IsMouseOver() then
-            return
-          end
-          dragRowFrame._toolboxDragSourceIndex = currentRowIndex
-          dragRowFrame:SetAlpha(0.45)
-          dragRowFrame:SetBackdropBorderColor(0.95, 0.82, 0.2, 0.95)
-          showDragPreview(rowNameText:GetText())
-          dragRowFrame:SetScript("OnUpdate", function(updateFrame)
-            if IsMouseButtonDown("LeftButton") then
-              updateDragPreviewPosition()
-              return
-            end
-            updateFrame:SetScript("OnUpdate", nil)
-            updateFrame:SetAlpha(1)
-            updateFrame:SetBackdropBorderColor(0.28, 0.28, 0.34, 0.65)
-            hideDragPreview()
-            local sourceIndex = updateFrame._toolboxDragSourceIndex -- 拖拽源索引
-            updateFrame._toolboxDragSourceIndex = nil
-            local dropRowIndex = resolveDropRowIndex() -- 拖拽落点索引
-            if type(sourceIndex) == "number"
-              and type(dropRowIndex) == "number"
-              and dropRowIndex ~= sourceIndex
-            then
-              moveRootTabByIndex(sourceIndex, dropRowIndex)
-            end
-          end)
-        end)
-
-        rowFrameList[#rowFrameList + 1] = rowFrame
-      end
-
-      local listHeight = #rootTabOrderIdsForSettings * (rowHeight + rowGap) -- 列表总高度
-      rootTabListChild:SetSize(520, math.max(1, listHeight))
-    end
-
-    refreshRootTabRows()
-
-    yOffset = yOffset - rootTabListPanelHeight - 12
-
-    local resetRootTabOrderButton = CreateFrame("Button", nil, box, "UIPanelButtonTemplate") -- 恢复默认顺序按钮
-    resetRootTabOrderButton:SetSize(180, 22)
-    resetRootTabOrderButton:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    resetRootTabOrderButton:SetText(localeTable.EJ_ROOT_TAB_SETTINGS_RESET_ORDER or "恢复默认顺序")
-    resetRootTabOrderButton:SetScript("OnClick", function()
-      local defaultOrderIds = buildDefaultRootTabOrderIds() -- 当前客户端可用的默认顺序
-      local defaultTabIdSet = {} -- 默认页签 ID 集合
-      local extraTabIdList = {} -- 非默认页签 ID 列表
-      for _, defaultRootTabId in ipairs(defaultOrderIds) do
-        defaultTabIdSet[defaultRootTabId] = true
-      end
-      for _, rootTabId in ipairs(rootTabOrderIdsForSettings) do
-        if not defaultTabIdSet[rootTabId] then
-          extraTabIdList[#extraTabIdList + 1] = rootTabId
-        end
-      end
-      wipe(rootTabOrderIdsForSettings)
-      for _, defaultRootTabId in ipairs(defaultOrderIds) do
-        rootTabOrderIdsForSettings[#rootTabOrderIdsForSettings + 1] = defaultRootTabId
-      end
-      for _, extraRootTabId in ipairs(extraTabIdList) do
-        rootTabOrderIdsForSettings[#rootTabOrderIdsForSettings + 1] = extraRootTabId
-      end
-      persistRootTabOrderIds()
-      refreshRootTabRows()
-      notifyRootTabSettingsChanged()
-    end)
-
-    yOffset = yOffset - 30
-
-    box.realHeight = math.abs(yOffset) + 8
-  end,
-
-  GetSettingsPages = function()
-    return {
-      {
-        id = QUEST_INSPECTOR_PAGE_ID,
-        titleKey = "EJ_QUEST_INSPECTOR_PAGE_TITLE",
-        introKey = "EJ_QUEST_INSPECTOR_PAGE_INTRO",
-        build = function(page, box)
-          buildQuestInspectorSettingsPage(page, box)
-        end,
-      },
-    }
+    box.realHeight = math.abs(yOffset) + 12
   end,
 })

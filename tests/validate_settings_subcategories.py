@@ -26,7 +26,6 @@ def read_encounter_journal_bundle_text() -> str:
         ("Toolbox", "Modules", "EncounterJournal.lua"),
         ("Toolbox", "Modules", "EncounterJournal", "Shared.lua"),
         ("Toolbox", "Modules", "EncounterJournal", "DetailEnhancer.lua"),
-        ("Toolbox", "Modules", "EncounterJournal", "QuestNavigation.lua"),
         ("Toolbox", "Modules", "EncounterJournal", "LockoutOverlay.lua"),
     ]
     texts = []
@@ -85,9 +84,10 @@ def validate_config() -> None:
         ("encounter_journal = {", "encounter journal module defaults"),
         ("mountFilterEnabled = true", "encounter journal mount filter default"),
         ("lockoutOverlayEnabled = true", "encounter journal lockout overlay default"),
-        ("questInspectorLastQuestID = 0", "encounter journal quest inspector last quest id default"),
-        ("rootTabOrderIds = {}", "encounter journal root tab order ids default"),
-        ("rootTabHiddenIds = {}", "encounter journal root tab hidden ids default"),
+        ("quest = {", "quest module defaults"),
+        ("questNavModeKey = \"active_log\"", "quest mode default"),
+        ("questInspectorLastQuestID = 0", "quest inspector last quest id default"),
+        ("questlineTreeCollapsed = {}", "quest collapse state default"),
         ("minimap_button = {", "minimap button module defaults"),
         ("showMinimapButton", "minimap button visibility default"),
         ("minimapPos", "minimap button angle storage"),
@@ -119,6 +119,8 @@ def validate_locales() -> None:
         ("SETTINGS_MODULE_RESET_REBUILD", "shared reset locale"),
         ("MODULE_ENCOUNTER_JOURNAL", "encounter journal module locale"),
         ("MODULE_ENCOUNTER_JOURNAL_INTRO", "encounter journal intro locale"),
+        ("MODULE_QUEST", "quest module locale"),
+        ("MODULE_QUEST_INTRO", "quest module intro locale"),
         ("EJ_MOUNT_FILTER_LABEL", "encounter journal mount filter locale"),
         ("EJ_QUEST_INSPECTOR_PAGE_TITLE", "encounter journal inspector page title locale"),
         ("EJ_QUEST_INSPECTOR_PAGE_INTRO", "encounter journal inspector page intro locale"),
@@ -132,6 +134,8 @@ def validate_locales() -> None:
         ("EJ_ROOT_TAB_SETTINGS_VISIBLE", "encounter journal root tab settings visible locale"),
         ("EJ_ROOT_TAB_SETTINGS_RESET_ORDER", "encounter journal root tab settings reset locale"),
         ("EJ_ROOT_TAB_NAME_UNKNOWN_FMT", "encounter journal root tab unknown name format locale"),
+        ("MINIMAP_FLYOUT_QUEST", "quest flyout locale"),
+        ("MINIMAP_FLYOUT_QUEST_TOOLTIP", "quest flyout tooltip locale"),
         ("MODULE_MINIMAP_BUTTON", "minimap button module locale"),
     ]:
         require_contains(text, needle, label)
@@ -141,6 +145,7 @@ def validate_modules() -> None:
     files = [
         "ChatNotify.lua",
         "EncounterJournal.lua",
+        "Quest.lua",
         "MinimapButton.lua",
         "Mover.lua",
         "TooltipAnchor.lua",
@@ -171,9 +176,11 @@ def validate_toc() -> None:
     require_contains(text, "Core\\Foundation\\Runtime.lua", "runtime adapter toc entry")
     require_contains(text, "Modules\\EncounterJournal\\Shared.lua", "encounter journal shared toc entry")
     require_contains(text, "Modules\\EncounterJournal\\DetailEnhancer.lua", "encounter journal detail enhancer toc entry")
-    require_contains(text, "Modules\\EncounterJournal\\QuestNavigation.lua", "encounter journal quest navigation toc entry")
     require_contains(text, "Modules\\EncounterJournal\\LockoutOverlay.lua", "encounter journal lockout overlay toc entry")
     require_contains(text, "Modules\\EncounterJournal.lua", "encounter journal module toc entry")
+    require_contains(text, "Modules\\Quest\\Shared.lua", "quest shared toc entry")
+    require_contains(text, "Modules\\Quest\\QuestNavigation.lua", "quest navigation toc entry")
+    require_contains(text, "Modules\\Quest.lua", "quest module toc entry")
     require_contains(text, "Modules\\MinimapButton.lua", "minimap button module toc entry")
     require_contains(text, "## Interface: 120000, 120001", "retail toc compatibility range")
 
@@ -360,7 +367,13 @@ def validate_encounter_journal_questline_tree_feature() -> None:
     toc_text = read_text("Toolbox", "Toolbox.toc")
     config_text = read_text("Toolbox", "Core", "Foundation", "Config.lua")
     locale_text = read_text("Toolbox", "Core", "Foundation", "Locales.lua")
-    module_text = read_encounter_journal_bundle_text()
+    module_text = "\n".join(
+        [
+            read_text("Toolbox", "Modules", "Quest.lua"),
+            read_text("Toolbox", "Modules", "Quest", "Shared.lua"),
+            read_text("Toolbox", "Modules", "Quest", "QuestNavigation.lua"),
+        ]
+    )
     data_text = read_text("Toolbox", "Data", "InstanceQuestlines.lua")
     require_file("Toolbox", "Data", "InstanceQuestlines.lua")
     require_file("Toolbox", "Core", "API", "QuestlineProgress.lua")
@@ -368,12 +381,15 @@ def validate_encounter_journal_questline_tree_feature() -> None:
 
     require_contains(toc_text, "Data\\InstanceQuestlines.lua", "questline data toc entry")
     require_contains(toc_text, "Core\\API\\QuestlineProgress.lua", "questline api toc entry")
+    require_contains(toc_text, "Modules\\Quest\\QuestNavigation.lua", "quest module quest navigation toc entry")
+    require_contains(toc_text, "Modules\\Quest.lua", "quest module toc entry")
 
     require_contains(config_text, "questlineTreeEnabled", "encounter journal questline tree setting default")
-    require_contains(config_text, "questNavExpansionID", "encounter journal quest navigation expansion default")
-    require_contains(config_text, "questNavModeKey", "encounter journal quest navigation mode default")
-    require_contains(config_text, "questNavSelectedMapID", "encounter journal quest navigation selected map default")
-    require_contains(config_text, "questNavExpandedQuestLineID", "encounter journal quest navigation expanded questline default")
+    require_contains(config_text, "questNavExpansionID", "quest navigation expansion default")
+    require_contains(config_text, "questNavModeKey", "quest navigation mode default")
+    require_contains(config_text, "questNavSelectedMapID", "quest navigation selected map default")
+    require_contains(config_text, "questNavExpandedQuestLineID", "quest navigation expanded questline default")
+    require_contains(config_text, "quest = {", "quest module config bucket")
 
     require_contains(locale_text, "EJ_QUESTLINE_TREE_LABEL", "questline tree label locale")
     require_contains(locale_text, "EJ_QUESTLINE_TREE_EMPTY", "questline tree empty locale")
@@ -404,75 +420,23 @@ def validate_encounter_journal_questline_tree_feature() -> None:
         raise AssertionError("missing questline expansion grouping field")
     require_contains(questline_api_text, "function Toolbox.Questlines.SetDataOverride(", "questline mock data override api")
 
-    require_contains(module_text, "QuestlineTreeView", "encounter journal questline tree view")
-    require_contains(module_text, "questlineTreeEnabled", "encounter journal questline tree setting usage")
-    require_contains(module_text, "Toolbox.Questlines.GetQuestNavigationModel", "encounter journal uses quest navigation model api")
-    require_contains(module_text, "Toolbox.Questlines.GetQuestListByQuestLineID", "encounter journal uses questline task list api")
-    require_contains(module_text, "Toolbox.Questlines.GetQuestDetailByID", "encounter journal uses quest detail api")
-    require_contains(module_text, "detailObject.UiMapID", "encounter journal quest detail uses UiMapID field")
-    if "Toolbox.Questlines.GetExpansionTree" in module_text:
-        raise AssertionError("encounter journal should not fallback to legacy GetExpansionTree api")
-    if "questLineEntry.mapID" in module_text:
-        raise AssertionError("encounter journal should not read questline mapID from legacy field")
-    if "detailObject.mapID" in module_text:
-        raise AssertionError("encounter journal should not read detail mapID from legacy field")
-    require_contains(module_text, "selectedExpansionID", "encounter journal quest tab keeps selected expansion state")
-    require_contains(module_text, "selectedModeKey", "encounter journal quest tab keeps selected mode state")
-    require_contains(module_text, "breadcrumbButtons", "encounter journal quest tab has breadcrumb navigation buttons")
-    require_contains(module_text, "breadcrumbFrame", "encounter journal quest tab has breadcrumb container")
-    require_contains(module_text, "detailPopupFrame", "encounter journal quest tab uses popup for quest detail")
-    require_contains(module_text, "EJ_QUESTLINE_TREE_LABEL", "encounter journal renders questline tab label")
-    require_contains(module_text, "if journalFrame and type(journalFrame.Tabs) == \"table\" then", "encounter journal reads native root tabs from encounter journal tabs list")
-    if "_G.EncounterJournalRaidTab" in module_text or "_G.EncounterJournalTutorialsTab" in module_text:
-        raise AssertionError("encounter journal should not fallback raid/tutorial mapping to explicit global names")
-    if "_G.EncounterJournalTab2" in module_text or "_G.EncounterJournalTab3" in module_text or '_G[\"EncounterJournalTab\" .. tabIndex]' in module_text:
-        raise AssertionError("encounter journal should not use generic EncounterJournalTabN fallback slots")
-    require_contains(module_text, 'rootTabButton:SetPoint("LEFT", previousTab, "RIGHT", 3, 0)', "encounter journal rebuilds bottom tab chain with fixed spacing")
-    require_contains(module_text, 'rootTabButton:SetPoint("TOPLEFT", self.hostJournalFrame, "BOTTOMLEFT", 11, 2)', "encounter journal reanchors first visible root tab to default origin")
-    require_contains(module_text, "PanelTabButtonTemplate", "encounter journal quest tab uses tab template")
-    require_contains(module_text, "hookVanillaTabsOnce", "encounter journal synchronizes with native tab switches")
-    require_contains(module_text, "local canShow = treeEnabled and journalShown", "encounter journal quest tab visibility bound to journal page")
-    require_contains(module_text, "EJ_HideNonInstancePanels", "encounter journal hides non-instance native panels when showing quest tab")
-    require_contains(module_text, "hideNativeRootChrome", "encounter journal has a dedicated native chrome hide step for quest tab")
-    require_contains(module_text, "EncounterJournal_HideGreatVaultButton", "encounter journal hides journeys-only great vault button when showing quest tab")
-    require_contains(module_text, "self.hostJournalFrame.navBar", "encounter journal hides native navigation bar when showing quest tab")
-    require_contains(module_text, "self.hostJournalFrame.searchBox", "encounter journal hides native search box when showing quest tab")
-    require_contains(module_text, "self.hostJournalFrame.JourneysFrame", "encounter journal hides journeys frame when showing quest tab")
-    require_contains(module_text, "deselectAllNativeTabs", "encounter journal clears native tab selected visuals when quest tab is active")
-    require_contains(module_text, "pendingNativeSelection", "encounter journal tracks native tab transition intent to avoid redundant restores")
-    require_contains(module_text, "buildDefaultRootTabOrderIds", "encounter journal builds default root tab order ids dynamically")
-    require_contains(module_text, "if #defaultOrderIds == 0 then\n    return { QUEST_ROOT_TAB_ID }", "encounter journal default order does not synthesize native ids when tabs are unavailable")
-    require_contains(module_text, "getRootTabHiddenIdsTable", "encounter journal reads root tab hidden ids config")
-    require_contains(module_text, "getConfiguredRootTabOrderIds", "encounter journal reads root tab order ids config")
-    require_contains(module_text, "buildEffectiveRootTabOrderIds", "encounter journal normalizes configured root tab order ids")
-    require_contains(module_text, "local defaultOrderIds = buildDefaultRootTabOrderIds() -- 当前客户端可用的默认顺序", "encounter journal reset order uses runtime default order builder")
-    require_contains(module_text, "resolveNativeRootTabId", "encounter journal maps native tab buttons to numeric ids")
-    require_contains(module_text, "readRootTabDisplayName", "encounter journal reads tab names dynamically at runtime")
-    require_contains(module_text, "buildRootTabDisplayNameById", "encounter journal builds root tab id-name map for settings")
-    require_contains(module_text, "setNativeRootTabShown", "encounter journal applies show/hide to native root tabs via config")
-    require_contains(module_text, "local shouldShow = not hiddenByConfig", "encounter journal root tab visibility is driven by config state")
-    if "visibleByBlizzard and not hiddenByConfig" in module_text:
-        raise AssertionError("encounter journal root tab visibility should not be gated by previous frame shown state")
-    require_contains(module_text, "QUEST_ROOT_TAB_ID", "encounter journal has fixed custom quest root tab id")
-    require_contains(module_text, "shouldShowQuestTab = isQuestlineTreeEnabled() and rootTabHiddenIds[QUEST_ROOT_TAB_ID] ~= true", "encounter journal supports hiding quest tab through id config")
-    require_contains(module_text, "EJ_ROOT_TAB_SETTINGS_TITLE", "encounter journal settings exposes root tab order section")
-    require_contains(module_text, "moveRootTabByIndex", "encounter journal settings supports row move actions")
-    require_contains(module_text, "rowFrame:RegisterForDrag(\"LeftButton\")", "encounter journal settings enables mouse drag reorder")
-    require_contains(module_text, "rootTabListScrollFrame", "encounter journal settings uses a dedicated scroll frame for tab rows")
-    require_contains(module_text, "rootTabHiddenIds[currentRootTabId] = visibleChecked and nil or true", "encounter journal settings writes per-id tab visibility flags")
-    require_contains(module_text, "showDragPreview(", "encounter journal settings shows drag preview while reordering rows")
-    require_contains(module_text, "updateDragPreviewPosition()", "encounter journal settings updates drag preview position with cursor")
-    require_contains(module_text, "dragRowFrame:SetAlpha(0.45)", "encounter journal settings fades dragged source row")
-    require_contains(module_text, "hideDragPreview()", "encounter journal settings hides drag preview after drop")
-    require_contains(module_text, "rootStateStrategies", "encounter journal uses root-state strategy pattern for tab surface switching")
-    require_contains(module_text, "function QuestlineTreeView:resolveRootState(", "encounter journal resolves target root state before applying strategy")
-    require_contains(module_text, "function QuestlineTreeView:applyRootState(", "encounter journal applies root-state strategy through a single entry")
-    require_contains(module_text, "previousRootState == \"quest\"", "encounter journal restores native tab only on quest->native transition")
-    require_contains(module_text, "currentRootState == \"native\"", "encounter journal guards native restore by target state")
-    require_contains(module_text, "UIPanelScrollFrameTemplate", "encounter journal quest tree uses scrollable container")
-    require_contains(module_text, "self.scrollFrame:SetScrollChild(self.scrollChild)", "encounter journal quest tree binds scroll child")
-    if 'CreateFrame("Button", "ToolboxEJQuestlineTab", infoFrame, "UIPanelButtonTemplate")' in module_text:
-        raise AssertionError("questline entry should be a tab template, not a plain panel button template")
+    require_contains(module_text, "QuestlineTreeView", "quest module questline tree view")
+    require_contains(module_text, "questlineTreeEnabled", "quest module questline tree setting usage")
+    require_contains(module_text, "Toolbox.Questlines.GetQuestNavigationModel", "quest module uses quest navigation model api")
+    require_contains(module_text, "Toolbox.Questlines.GetQuestListByQuestLineID", "quest module uses questline task list api")
+    require_contains(module_text, "Toolbox.Questlines.GetQuestDetailByID", "quest module uses quest detail api")
+    require_contains(module_text, "selectedExpansionID", "quest module keeps selected expansion state")
+    require_contains(module_text, "selectedModeKey", "quest module keeps selected mode state")
+    require_contains(module_text, "breadcrumbButtons", "quest module has breadcrumb navigation buttons")
+    require_contains(module_text, "detailPopupFrame", "quest module uses popup for quest detail")
+    require_contains(module_text, "function QuestlineTreeView:getBottomTabModeKeys(", "quest module exposes bottom tab mode list")
+    require_contains(module_text, "\"active_log\"", "quest module keeps active_log mode")
+    require_contains(module_text, "\"map_questline\"", "quest module keeps map_questline mode")
+    if "quest_type" in module_text:
+        raise AssertionError("quest module should not keep quest_type mode")
+    require_contains(module_text, "if self.selectedModeKey == \"active_log\" then", "quest active_log branch")
+    require_contains(module_text, "breadcrumbList = {}", "quest active_log mode keeps breadcrumb empty")
+    require_contains(module_text, "Toolbox.Quest.OpenMainFrame", "quest module exposes open api")
 
 
 def validate_generated_data_contract_headers() -> None:
