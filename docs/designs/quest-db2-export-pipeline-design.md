@@ -319,7 +319,7 @@ QuestPOI.db2
    - 说明：CSV 明确不是插件运行时正式数据格式
 3. **Lua 运行时层**
    - 文件：`Toolbox/Data/InstanceQuestlines.lua`
-   - 职责：按 `encounter_journal` 的消费需求做聚合收敛，仅保留运行时真正需要的核心字段
+   - 职责：按 `Toolbox.Questlines` / `quest` 模块的消费需求做聚合收敛，仅保留运行时真正需要的核心字段
 
 固定约定：
 
@@ -359,7 +359,7 @@ QuestPOI.db2
 
 - `InstanceQuestlines.lua`
   - 角色：插件运行时正式静态表
-  - 说明：保持 `schema v6` 主骨架兼容，扩展字段以 `encounter_journal` 的消费需求为准
+  - 说明：保持 `schema v6` 主骨架兼容，扩展字段以 `Toolbox.Questlines` / `quest` 模块的消费需求为准
 
 ### 5.2.3 `instance_questlines` 正式导出策略（快速迭代版）
 
@@ -368,7 +368,7 @@ QuestPOI.db2
 1. **不再要求通过 `DataContracts/instance_questlines.json` 驱动正式导出。**
 2. 由专门脚本直接读取 `quest_expansion_map.csv`，聚合并输出 `Toolbox/Data/InstanceQuestlines.lua`。
 3. 该脚本的职责是：
-   - 把 CSV 分析层收敛为 `encounter_journal` 所需的运行时静态结构
+   - 把 CSV 分析层收敛为 `quest` / `Toolbox.Questlines` 所需的运行时静态结构
    - 保持现有 `schema v6` 主骨架兼容
    - 支持快速迭代字段和聚合规则，而不必同步维护契约 DSL
 4. `DataContracts/instance_questlines.json` 在后续迭代中不再作为 `instance_questlines` 的正式事实源；如历史文件仍保留，仅作参考，不参与当前正式导出链路。
@@ -377,7 +377,7 @@ QuestPOI.db2
 
 - `instance_questlines` 当前仍在快速迭代字段与聚合规则。
 - 其运行时结构已明显偏离通用“SQL 直出 -> 契约写 Lua”的模式，更适合由专门脚本从 CSV 中间层二次聚合。
-- 先去掉契约耦合，可以更快验证 `encounter_journal` 的消费模型；待结构稳定后，再评估是否需要回归统一契约治理。
+- 先去掉契约耦合，可以更快验证 `Toolbox.Questlines` / `quest` 模块的消费模型；待结构稳定后，再评估是否需要回归统一契约治理。
 
 约束：
 
@@ -388,9 +388,9 @@ QuestPOI.db2
   - 运行时 strict 校验
   - 逻辑测试 fixture
 
-### 5.2.4 `encounter_journal` 导航规则（资料片优先）
+### 5.2.4 `quest` 导航规则（资料片优先）
 
-`encounter_journal` 的任务页签导航固定采用：
+`quest` 模块当前的任务导航固定采用：
 
 ```text
 资料片 -> 混合列表项 -> 任务线 -> 任务
@@ -607,4 +607,4 @@ python build_quest_table.py
 | 2026-04-15 | 补充“任务线串联语义约定”，明确官方流程、OrderIndex 与条件字段的解释优先级 |
 | 2026-04-15 | 固定 `DB -> CSV -> Lua` 三层导出原则，并补充脚本、目录、文件职责边界 |
 | 2026-04-15 | 为 `instance_questlines` 固定快速迭代特例：跳过 `DataContracts`，改由专门脚本直接从 CSV 聚合正式 Lua |
-| 2026-04-15 | 补充 `encounter_journal` 的资料片优先导航规则，以及“地图或任务线混合列表项”的运行时结构建议 |
+| 2026-04-15 | 补充 `quest` 模块的资料片优先导航规则，以及“地图或任务线混合列表项”的运行时结构建议 |

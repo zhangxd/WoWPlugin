@@ -8,13 +8,16 @@
 > 架构与模块映射见 [Toolbox-addon-design.md](./Toolbox-addon-design.md)
 > 文档写作规范见 [DOCS-STANDARD.md](./DOCS-STANDARD.md)
 > 冒险指南功能说明见 [features/encounter-journal-features.md](./features/encounter-journal-features.md)
+> 任务模块功能说明见 [features/quest-features.md](./features/quest-features.md)
 > 冒险指南详细设计见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)
+> 任务模块详细设计见 [designs/quest-design.md](./designs/quest-design.md)
 
 ## 这是什么
 
 `Toolbox` 是一个面向魔兽世界正式服的工具箱插件，当前重点增强以下几类体验：
 
 - 冒险指南浏览
+- 独立任务浏览
 - Tooltip 显示位置
 - 插件消息输出
 - 小地图快捷入口
@@ -32,7 +35,7 @@
 
 ### 冒险指南增强
 
-适用场景：想更快查看副本坐骑、锁定信息、掉落内容和任务线时。
+适用场景：想更快查看副本坐骑、锁定信息和掉落内容时。
 
 当前包含：
 
@@ -40,16 +43,29 @@
   支持“仅坐骑”筛选、列表行内 CD 叠加，以及悬停查看更详细的锁定信息。
 - **副本详情页增强**
   在掉落页支持“仅坐骑”筛选，并在详情区显示当前难度的重置时间。
-- **任务页签增强**
-  新增“任务”页签，左侧固定为资料片树；选中资料片后可沿 `地图任务线` 或 `任务类型` 两条路径浏览任务。
-- **浏览状态记忆**
-  会记住当前资料片、当前模式、当前地图或类型大类，以及当前展开的任务线，减少重复定位成本。
-- **主页页签管理**
-  可在设置中调整冒险指南主页页签的顺序与显隐。
 - **外部入口联动**
   小地图飞出菜单内置“冒险手册”入口；其 tooltip 与右下角 `EJMicroButton` tooltip 都会追加当前副本锁定摘要。
 
 详见 [features/encounter-journal-features.md](./features/encounter-journal-features.md)。
+
+### 独立任务浏览
+
+适用场景：想用独立界面浏览当前任务、任务线和任务详情时。
+
+当前包含：
+
+- **独立任务界面**
+  提供单独的 `quest` 主界面，不再依赖冒险指南任务页签。
+- **当前任务视图**
+  在同一页里展示“最近完成”和“当前任务”两段内容。
+- **任务线视图**
+  按资料片和地图浏览任务线，并在主区展开对应任务列表。
+- **搜索与详情联动**
+  支持搜索任务线 / 任务名称；点击任务后可查看弹框详情，并输出运行时调试信息到聊天框。
+- **Quest Inspector**
+  在设置子页面里按 `QuestID` 查询运行时任务与任务线字段，结果文本可复制。
+
+详见 [features/quest-features.md](./features/quest-features.md)。
 
 ### Tooltip 增强
 
@@ -73,7 +89,7 @@
 
 ### 小地图按钮
 
-适用场景：希望快速进入插件设置或查看冒险指南相关摘要时。
+适用场景：希望快速进入插件设置、冒险指南或任务界面时。
 
 当前包含：
 
@@ -81,6 +97,7 @@
 - 支持拖拽调整按钮位置
 - 悬停可查看扩展功能项
 - 内置“冒险手册”入口，可直接打开冒险指南
+- 内置“任务”入口，可直接打开独立任务界面
 - 悬停“冒险手册”相关入口时，可查看当前副本 CD 摘要
 
 ### 设置与模块开关
@@ -92,6 +109,7 @@
 - 每个模块都有独立设置页
 - 支持公共启用/禁用开关
 - 支持恢复默认值或重建相关配置
+- 支持同一模块挂多个真实子页面（例如 `quest` 下的 Quest Inspector）
 
 ## 适用环境
 
@@ -103,7 +121,7 @@
 
 - 副本 CD 显示依赖游戏原生 `GetSavedInstanceInfo` API
 - 坐骑筛选依赖静态数据表维护
-- 任务页签中的类型信息依赖游戏运行时任务数据，个别任务可能没有可识别类型
+- 任务浏览依赖 `Toolbox.Data.InstanceQuestlines` 与运行时任务 API 聚合结果
 - 部分功能需要 `Blizzard_EncounterJournal` 插件已加载
 
 ## 更新日志

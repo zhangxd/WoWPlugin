@@ -4,7 +4,7 @@
 - 状态：可执行
 - 主题：instance-questlines-questcompletist
 - 适用范围：`DataContracts/instance_questlines.json`、`../WoWTools/scripts/export/**`、`Toolbox/Data/InstanceQuestlines.lua`
-- 关联模块：encounter_journal
+- 关联模块：quest
 - 关联文档：
   - `docs/Toolbox-addon-design.md`
   - `docs/designs/instance-questlines-questcompletist-design.md`
@@ -32,7 +32,7 @@
 - 将 `questLineXQuest` 合并进 `questLines[questLineID].QuestIDs`，并保证导出顺序稳定。
 - 移除 `questPOIBlobs`、`questPOIPoints` 以及 `quests[*].UiMapID`。
 - 新增顶层 `expansions[expansionID] = { questLineID... }` 分组索引。
-- 更新插件侧 `Toolbox.Questlines` 与任务页签消费逻辑。
+- 更新插件侧 `Toolbox.Questlines` 与 `quest` 模块消费逻辑。
 - 重新导出经典旧世数据并完成静态 / 逻辑验证。
 
 ### 3.2 Out of Scope
@@ -79,7 +79,7 @@
   - 若最终 `UiMapID` 查不到 `ExpansionID`，则不导出
 - 不再按 `ExpansionID` 过滤资料片范围；只要链路完整就导出
 - 插件侧边界：
-  - `Toolbox.Questlines` 与 `encounter_journal` 只消费统一导出结果
+  - `Toolbox.Questlines` 与 `quest` 模块只消费统一导出结果
   - 任务详情不再依赖静态 `quests[*].UiMapID`
   - 地图信息改为运行时 API 获取，或由调用路径显式传入上下文
 - 数据来源：QuestCompletist 主数据位于 `qcQuest.lua`，任务线名称位于 `qcQuestLines`，任务记录位于 `qcQuestDatabase`。
@@ -98,7 +98,7 @@
 5. 只有链路完整且能解析出 `ExpansionID` 的任务线会出现在最终导出结果中。
 6. 未提供 QuestCompletist 路径时，导出脚本仍可按纯 `wow.db` 路径工作，且不会报本地路径相关错误。
 7. `export_toolbox_one.py instance_questlines` 可成功生成带契约头的 [InstanceQuestlines.lua](D:\WoWProject\WoWPlugin\Toolbox\Data\InstanceQuestlines.lua)，并保存契约快照。
-8. 插件侧现有消费代码无需新增入口即可使用更新后的静态数据结构；任务详情地图信息改为运行时 API 或显式上下文传入。
+8. 插件侧现有消费代码无需新增额外数据入口即可使用更新后的静态数据结构；任务详情地图信息改为运行时 API 或显式上下文传入。
 
 ## 7. 实施状态
 

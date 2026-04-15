@@ -1,39 +1,40 @@
 # 冒险指南测试基线
 
 - 文档类型：测试
-- 状态：执行中
+- 状态：有问题
 - 主题：encounter-journal
-- 适用范围：`encounter_journal` 当前已实现能力的自动化与手工验证基线
+- 适用范围：`encounter_journal` 当前副本列表、详情页与锁定摘要增强的自动化与手工验证基线
 - 关联模块：`encounter_journal`、`minimap_button`
 - 关联文档：
-  - `docs/features/encounter-journal-features.md`
   - `docs/specs/encounter-journal-spec.md`
   - `docs/designs/encounter-journal-design.md`
   - `docs/plans/encounter-journal-plan.md`
-- 最后更新：2026-04-13
+- 最后更新：2026-04-15
 
 ## 1. 测试背景
 
-- 本文档用于记录 `encounter_journal` 当前已实现能力的验证基线。
-- 由于其中一部分能力依赖游戏内 UI、角色锁定和运行时任务状态，当前测试基线分为“自动化回归”和“手工游戏内验证”两部分。
+- 本文档用于记录 `encounter_journal` 当前真实边界下的验证基线。
+- 当前测试范围只覆盖副本列表、详情页与锁定摘要能力，不再覆盖已拆到 `quest` 模块的任务浏览能力。
 
 ## 2. 测试范围
 
 - In Scope：
-  - 静态校验与逻辑测试中覆盖到的冒险指南行为
-  - 当前文档列出的手工验证场景
+  - 静态校验与逻辑测试中覆盖到的 `encounter_journal` 相关行为
+  - 当前文档列出的游戏内手工验证场景
 - Out of Scope：
+  - `quest` 模块独立任务界面与 Quest Inspector
   - 与冒险指南无关的 Tooltip、Mover、聊天提示能力
-  - 未实现的未来功能
 
 ## 3. 测试环境
 
-- 客户端 / 版本：WoW Retail，Interface 以仓库当前 `Toolbox.toc` 为准
-- 自动化环境：本地 Python + busted 逻辑测试环境
-- 关键命令：`python tests/run_all.py --ci`
-- 游戏内前置条件：
-  - 角色存在至少一条可观察的副本锁定时，可更完整验证锁定摘要
-  - 角色任务日志中存在任务时，可验证资料片树导航、任务线展开与详情回跳
+- 客户端 / 版本：
+  WoW Retail，Interface 以仓库当前 `Toolbox.toc` 为准
+- 账号或角色条件：
+  角色存在至少一条可观察的副本锁定时，可更完整验证锁定摘要
+- 数据前置条件：
+  对应副本和坐骑掉落静态数据已导出并可被插件加载
+- 工具与命令：
+  `python tests/run_all.py --ci`
 
 ## 4. 测试用例
 
@@ -45,44 +46,35 @@
 | TC-MANUAL-03 | 角色存在副本锁定 | 悬停副本列表项 | tooltip 显示锁定详情 |
 | TC-MANUAL-04 | 打开某个副本详情页掉落标签 | 切换“仅坐骑” | 仅显示当前副本掉落中的坐骑物品 |
 | TC-MANUAL-05 | 打开某个副本详情页 | 查看标题区域 | 显示当前难度重置时间或“重置：无” |
-| TC-MANUAL-06 | 打开任务页签 | 在资料片树中切换 `地图任务线` 与 `任务类型` 两条路径 | 左侧导航与主区列表按当前路径正确刷新 |
-| TC-MANUAL-07 | 任务日志存在任务 | 在地图路径下展开任务线并点击任务详情中的回跳入口 | 对应资料片 / 地图 / 任务线被正确定位并展开 |
-| TC-MANUAL-08 | 打开设置页 | 调整根页签顺序与显隐 | 设置即时生效，冒险指南根页签更新 |
-| TC-MANUAL-09 | 显示小地图按钮或 `EJMicroButton` | 悬停相关入口 | tooltip 显示当前副本锁定摘要 |
-| TC-MANUAL-10 | 任务页签存在无法解析运行时名称的任务线 | 浏览对应任务线 | 任务线显示稳定回退为 `QuestLine #<id>`，界面不报错 |
-| TC-MANUAL-11 | 任务类型索引存在缺失名称的类型 | 浏览类型视图 | 类型名称回退为 `Unknown Type (%s)`，界面不报错 |
+| TC-MANUAL-06 | 显示小地图“冒险手册”入口或 `EJMicroButton` | 悬停相关入口 | tooltip 显示当前副本锁定摘要 |
 
 ## 5. 执行结果
 
 | 编号 | 实际结果 | 结论 | 备注 |
 |------|----------|------|------|
-| TC-AUTO-01 | `python tests/run_all.py --ci` 通过；静态校验通过，logic tests 为 `29 successes / 0 failures / 0 errors / 0 pending` | 通过 | 本轮已实际执行 |
+| TC-AUTO-01 | `python tests/run_all.py --ci` 失败，停在 `validate_data_contracts.py`：`instance_questlines: lua header contract_id mismatch` | 失败 | 当前为共享数据契约问题，非本次文档改动引入 |
 | TC-MANUAL-01 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-02 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-03 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-04 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-05 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-06 | 待执行 | 待执行 | 需游戏内验证 |
-| TC-MANUAL-07 | 待执行 | 待执行 | 需游戏内验证 |
-| TC-MANUAL-08 | 待执行 | 待执行 | 需游戏内验证 |
-| TC-MANUAL-09 | 待执行 | 待执行 | 需游戏内验证 |
-| TC-MANUAL-10 | 待执行 | 待执行 | 需游戏内验证 |
-| TC-MANUAL-11 | 待执行 | 待执行 | 需游戏内验证 |
 
 ## 6. 问题与阻塞
 
-- 游戏内手工验证未在本轮文档整理中执行，因此仍需后续补齐。
+- 共享自动化校验当前失败：`validate_data_contracts.py` 报 `instance_questlines` 的 Lua 文件头 `contract_id` 与契约不一致。
+- 游戏内手工验证未在本轮文档回写中执行，因此仍需后续补齐。
 
 ## 7. 结论
 
-- 当前结论：执行中
+- 当前结论：有问题
 - 后续动作：
-  - 在游戏内按本清单补齐手工验证
+  - 先修复 `instance_questlines` 的 Lua 文件头与契约不一致问题
+  - 在游戏内补齐本清单中的手工验证项
 
 ## 8. 修订记录
 
 | 日期 | 内容 |
 |------|------|
 | 2026-04-12 | 初稿：建立 `encounter_journal` 当前能力的测试基线与手工验证清单 |
-| 2026-04-13 | 对齐最新交互：手工用例改为资料片树双入口、任务线单展开与详情回跳验证 |
-| 2026-04-13 | 并回子专题：补充任务线名称与任务类型名称回退用例，后续不再拆独立 `encounter-journal-*` 测试文档 |
+| 2026-04-15 | 对齐当前实现：移除已拆分到 `quest` 模块的任务验证项，只保留副本列表、详情页与锁定摘要测试 |

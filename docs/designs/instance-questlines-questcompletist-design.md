@@ -4,7 +4,7 @@
 - 状态：已确认
 - 主题：instance-questlines-questcompletist
 - 适用范围：`../WoWTools/scripts/export/**`、`DataContracts/instance_questlines.json`
-- 关联模块：encounter_journal
+- 关联模块：quest
 - 关联文档：
   - `docs/specs/instance-questlines-questcompletist-spec.md`
   - `docs/plans/instance-questlines-questcompletist-plan.md`

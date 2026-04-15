@@ -4,7 +4,7 @@
 - 状态：待执行
 - 主题：quest-db2-export-pipeline
 - 适用范围：`../WoWTools/scripts/export/**`、`../WoWTools/outputs/toolbox/**`、`Toolbox/Data/InstanceQuestlines.lua`
-- 关联模块：encounter_journal
+- 关联模块：quest
 - 关联文档：
   - `docs/designs/quest-db2-export-pipeline-design.md`
   - `docs/plans/instance-questlines-runtime-extension-plan.md`
@@ -45,7 +45,7 @@
 - [ ] 步骤 4：明确 `toolbox_db_export.py` 仍是通用契约导出入口，但 `instance_questlines` 当前属于快速迭代特例，正式落地由专门脚本完成。
 - [ ] 步骤 5：列出 `outputs/toolbox/` 各文件的生命周期和覆盖规则，避免把临时预览文件误当正式数据。
 - [ ] 步骤 6：补充脚本帮助文本或注释，写清“分析中间层 / 预览层 / 正式层”的边界。
-- [ ] 步骤 7：在正式接入 `instance_questlines` 前，先以 `runtime_preview` 验证字段收敛是否满足 `encounter_journal` 需要。
+- [ ] 步骤 7：在正式接入 `instance_questlines` 前，先以 `runtime_preview` 验证字段收敛是否满足 `quest` / `Toolbox.Questlines` 需要。
 - [ ] 步骤 8：待字段和消费逻辑定版后，再把 CSV 聚合逻辑接入 `toolbox_db_export.py` 与 `instance_questlines.json`。
 
 ## 5. 验证

@@ -4,7 +4,7 @@
 - 状态：待执行
 - 主题：instance-questlines-runtime-extension
 - 适用范围：`../WoWTools/scripts/export/**`、`Toolbox/Data/InstanceQuestlines.lua`、`Toolbox/Core/API/QuestlineProgress.lua`
-- 关联模块：encounter_journal
+- 关联模块：quest
 - 关联文档：
   - `docs/designs/quest-db2-export-pipeline-design.md`
   - `docs/designs/instance-questlines-questcompletist-design.md`
@@ -68,7 +68,7 @@
 - 命令 / 检查点 4：
   - 运行 `tests/logic/spec/questline_progress_spec.lua`
 - 游戏内验证点：
-  - 冒险手册任务页签仍能按主地图显示任务线
+  - `quest` 模块仍能按主地图显示任务线
   - `收复吉尔尼斯` 归到 `Dragonflight`
   - 当前角色不满足阵营/种族/职业条件时，相关任务线或任务被隐藏
 
