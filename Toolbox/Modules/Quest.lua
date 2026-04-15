@@ -57,30 +57,17 @@ local function ensureQuestHostFrame()
   if existingFrame then
     questHostFrame = existingFrame
   else
-    questHostFrame = CreateFrame("Frame", "ToolboxQuestFrame", UIParent, "BackdropTemplate") -- quest 主界面
+    questHostFrame = CreateFrame("Frame", "ToolboxQuestFrame", UIParent, "PortraitFrameTemplate") -- quest 主界面
     questHostFrame:SetSize(980, 700)
     questHostFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    if questHostFrame.SetBackdrop then
-      questHostFrame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true,
-        tileSize = 32,
-        edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
-      })
-      questHostFrame:SetBackdropColor(0.04, 0.04, 0.06, 0.94)
+    local localeTable = Toolbox.L or {} -- 本地化文案
+    if questHostFrame.SetTitle then
+      questHostFrame:SetTitle(localeTable.MODULE_QUEST or "Quest")
+    end
+    if questHostFrame.SetPortraitToAsset then
+      questHostFrame:SetPortraitToAsset([[Interface\QuestFrame\UI-QuestLog-BookIcon]])
     end
     questHostFrame:Hide()
-
-    local titleText = questHostFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 标题文本
-    titleText:SetPoint("TOPLEFT", questHostFrame, "TOPLEFT", 14, -14)
-    titleText:SetPoint("TOPRIGHT", questHostFrame, "TOPRIGHT", -44, -14)
-    local localeTable = Toolbox.L or {} -- 本地化文案
-    titleText:SetText(localeTable.MODULE_QUEST or "Quest")
-
-    local closeButton = CreateFrame("Button", nil, questHostFrame, "UIPanelCloseButton") -- 关闭按钮
-    closeButton:SetPoint("TOPRIGHT", questHostFrame, "TOPRIGHT", -8, -8)
   end
 
   if questHostFrame and not questHostFrame._toolboxQuestHooksBound then

@@ -195,6 +195,83 @@ function Harness:_installGlobals()
   self:_setGlobal("GetCursorPosition", function() return 0, 0 end)
   self:_setGlobal("InCombatLockdown", function() return false end)
   self:_setGlobal("IsMouseButtonDown", function() return false end)
+  self:_setGlobal("NavBar_Initialize", function(navBarFrame, buttonTemplateName, homeData)
+    if not navBarFrame then
+      return
+    end
+    navBarFrame._navButtonTemplateName = buttonTemplateName or "NavButtonTemplate"
+    navBarFrame._navHomeData = homeData
+    navBarFrame._navButtonList = navBarFrame._navButtonList or {}
+    navBarFrame._navButtonDataList = {}
+  end)
+  self:_setGlobal("NavBar_Reset", function(navBarFrame)
+    if not navBarFrame then
+      return
+    end
+    navBarFrame._navButtonDataList = {}
+    for _, buttonObject in ipairs(navBarFrame._navButtonList or {}) do
+      if buttonObject and buttonObject.Hide then
+        buttonObject:Hide()
+      end
+    end
+  end)
+  self:_setGlobal("NavBar_AddButton", function(navBarFrame, buttonData)
+    if not navBarFrame then
+      return nil
+    end
+    navBarFrame._navButtonList = navBarFrame._navButtonList or {}
+    navBarFrame._navButtonDataList = navBarFrame._navButtonDataList or {}
+    local buttonIndex = #navBarFrame._navButtonDataList + 1 -- 新增按钮索引
+    navBarFrame._navButtonDataList[buttonIndex] = buttonData
+
+    local buttonObject = navBarFrame._navButtonList[buttonIndex] -- 导航按钮
+    if not buttonObject then
+      buttonObject = self.runtime.CreateFrame("Button", nil, navBarFrame, navBarFrame._navButtonTemplateName or "NavButtonTemplate")
+      navBarFrame._navButtonList[buttonIndex] = buttonObject
+    end
+
+    local buttonText = "" -- 导航按钮文本
+    if type(buttonData) == "table" then
+      buttonText = tostring(buttonData.name or buttonData.text or "")
+    end
+    buttonObject:SetText(buttonText)
+    buttonObject:SetWidth(math.max(32, buttonObject:GetTextWidth() + 20))
+    buttonObject:ClearAllPoints()
+    if buttonIndex == 1 then
+      buttonObject:SetPoint("TOPLEFT", navBarFrame, "TOPLEFT", 0, 0)
+    else
+      buttonObject:SetPoint("LEFT", navBarFrame._navButtonList[buttonIndex - 1], "RIGHT", 4, 0)
+    end
+
+    if type(buttonData) == "table" and type(buttonData.OnClick) == "function" then
+      buttonObject:SetEnabled(true)
+      buttonObject:SetScript("OnClick", function()
+        buttonData.OnClick(buttonData, buttonData.id, navBarFrame)
+      end)
+    else
+      buttonObject:SetEnabled(false)
+      buttonObject:SetScript("OnClick", nil)
+    end
+
+    buttonObject:Show()
+    return buttonObject
+  end)
+  self:_setGlobal("NavBar_OpenTo", function(navBarFrame, buttonID)
+    if not navBarFrame or type(navBarFrame._navButtonDataList) ~= "table" then
+      return
+    end
+    for buttonIndex = #navBarFrame._navButtonDataList, 1, -1 do
+      local buttonData = navBarFrame._navButtonDataList[buttonIndex] -- 当前按钮数据
+      if type(buttonData) == "table" and buttonData.id == buttonID then
+        break
+      end
+      navBarFrame._navButtonDataList[buttonIndex] = nil
+      local buttonObject = navBarFrame._navButtonList and navBarFrame._navButtonList[buttonIndex] or nil -- 当前按钮
+      if buttonObject and buttonObject.Hide then
+        buttonObject:Hide()
+      end
+    end
+  end)
 end
 
 function Harness:setLockoutTooltipData(lineList, overflowCount)

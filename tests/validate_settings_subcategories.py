@@ -396,6 +396,9 @@ def validate_encounter_journal_questline_tree_feature() -> None:
     require_contains(locale_text, "EJ_QUESTLINE_TREE_TYPE_MAP", "questline tree map type locale")
     require_contains(locale_text, "EJ_QUESTLINE_PROGRESS_FMT", "questline tree progress locale")
     require_contains(locale_text, "EJ_QUEST_EXPANSION_UNKNOWN_FMT", "questline expansion fallback locale")
+    require_contains(locale_text, "QUEST_VIEW_TAB_ACTIVE", "quest current-task tab locale")
+    require_contains(locale_text, "QUEST_VIEW_TAB_QUESTLINE", "quest questline tab locale")
+    require_contains(locale_text, "QUEST_VIEW_RECENT_TOGGLE_COLLAPSE", "quest recent-collapse locale")
 
     require_contains(questline_api_text, "Toolbox.Questlines", "questline namespace")
     require_contains(questline_api_text, "function Toolbox.Questlines.GetChainProgress(", "questline chain progress api")
@@ -435,7 +438,11 @@ def validate_encounter_journal_questline_tree_feature() -> None:
     if "quest_type" in module_text:
         raise AssertionError("quest module should not keep quest_type mode")
     require_contains(module_text, "if self.selectedModeKey == \"active_log\" then", "quest active_log branch")
-    require_contains(module_text, "breadcrumbList = {}", "quest active_log mode keeps breadcrumb empty")
+    require_contains(module_text, "getActiveLogRootText(localeTable)", "quest active_log root breadcrumb text")
+    require_contains(module_text, "getQuestlineRootText(localeTable)", "quest questline root breadcrumb text")
+    require_contains(module_text, "activeLogCurrentPanel", "quest active_log current panel")
+    require_contains(module_text, "activeLogRecentPanel", "quest active_log recent panel")
+    require_contains(module_text, "activeLogRecentToggleButton", "quest active_log recent toggle")
     require_contains(module_text, "Toolbox.Quest.OpenMainFrame", "quest module exposes open api")
 
 

@@ -12,7 +12,7 @@
   - `docs/tests/quest-test.md`
   - `docs/designs/encounter-journal-design.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-15
+- 最后更新：2026-04-17
 
 ## 1. 背景
 
@@ -24,6 +24,7 @@
 - 明确 `quest` 模块的独立界面、导航、详情与设置结构。
 - 明确 `quest` 与 `Toolbox.Questlines`、`minimap_button` 的协作关系。
 - 把任务能力从 `encounter_journal` 文档中剥离出来，恢复清晰边界。
+- 把现有写死的任务导航状态收敛成 `quest` 模块内部可复用的节点导航模型。
 
 ## 3. 非目标
 
@@ -63,11 +64,20 @@
 ### 5.2 界面结构
 
 - 宿主界面：
-  使用独立 `ToolboxQuestFrame` 作为主容器，提供标题和关闭按钮。
-- 左侧树：
-  顶部固定“当前任务”入口；其下按资料片组织导航，资料片展开后只保留 `map_questline` 路径，并按导航模型显示地图或直连任务线条目。
-- 右侧主区：
-  包含 breadcrumb、搜索框、标题和滚动列表。
+  使用独立 `ToolboxQuestFrame` 作为主容器，标题区样式对齐 Blizzard 冒险指南的 `PortraitFrameTemplate`：使用同类标题栏、关闭按钮和头像区域，而不是对话框式 `BackdropTemplate` 标题条。
+- 底部分页签：
+  固定保留 `当前任务` 与 `任务线` 两个视图页签；默认打开逻辑保持现状，不额外改变首次进入的默认视图。
+  已确认对齐 Blizzard 冒险指南的根页签实现：两枚页签继续挂在 `ToolboxQuestFrame` 根容器，而不是挂在任何内容视图下；视觉上锚在 `ToolboxQuestFrame` 宿主底边，并位于唯一视图框 `panelFrame` 的外侧下方，页签本身不占用视图内部高度。
+- 唯一视图框：
+  `panelFrame` 作为唯一整框视图，边框位置贴近宿主内框，参考冒险指南 `InsetFrameTemplate + instanceSelect` 的锚点关系；不得再保留旧的底部大间距，也不得在 `leftTree` / `rightContent` 上继续画第二层整框边线。
+- 左上角导航路径：
+  `map_questline` 视图顶部路径导航使用 Blizzard `NavBar` 组件承载，视觉对齐冒险指南地下城页签的原生路径条；路径仍由当前选中节点的祖先链推导，祖先节点可点击回退，末级节点仅表示当前位置。
+  `NavBar` 的布局锚点落在右侧内容区头部，而不是继续贴宿主左上角；左侧需避让宿主头像 / 标题图标区，右侧需避让搜索框，避免路径被图标盖住或与搜索框重叠。
+- `当前任务` 视图：
+  不再沿用左树 + 右区布局；主区拆成上下两段。上段固定显示当前任务列表并支持内部滚动，下段显示历史完成列表，支持折叠；折叠后上段占满内容区。
+  该视图仍会注册自己的根节点，用于左上角通用导航路径展示当前上下文，但不单独显示左侧树。
+- `任务线` 视图：
+  继续采用左侧层级导航 + 右侧主区布局。左侧仅展示资料片 / 地图 / 任务线节点，不再出现“当前任务”入口；右侧继续显示 `NavBar` 路径导航、搜索框、标题和滚动列表。
 - 详情弹框：
   点击任务后显示任务详情；若有任务线归属，可跳回对应地图 / 任务线，也可切到“当前任务”视图定位该任务。
 
@@ -75,19 +85,37 @@
 
 #### `active_log`
 
-- 左侧树中通过“当前任务”入口进入。
-- 主区同时显示“最近完成”和“当前任务”两个区块。
+- 由底部分页签直接进入，不再挂在左树内部。
+- 主区拆为“当前任务”与“历史完成”两个独立面板。
 - 最近完成列表来自 `QUEST_TURNED_IN` 事件维护的 `questRecentCompletedList`。
+- 历史完成面板支持折叠；折叠后当前任务面板占满主区高度。
 - 当前任务按状态排序，优先 `ready`，其次 `active`，最后 `pending`。
+- 布局计算不得再为底部分页签预留 `bottomInset`；唯一视图框内部高度应全部让给当前任务 / 历史完成两段内容。
 
 #### `map_questline`
 
-- 从资料片下的 `map_questline` 路径进入。
-- 左侧树显示地图或直连任务线条目。
+- 从底部分页签进入后，左侧树显示当前视图注册出来的导航节点。
+- 左侧树不再写死“模式”或“当前任务”语义，只按父子节点关系呈现资料片 / 地图 / 任务线层级。
 - 主区显示任务线列表；每条任务线独占一行，支持单展开、进度显示、任务数量显示和“下一步”提示。
 - 任务点击后既弹出详情，也会触发聊天调试输出。
+- 左树与右侧主区同样填满 `panelFrame` 内部区域；底部分页签只贴在 `panelFrame` 外侧下沿，不压缩左右内容区高度。
 
-### 5.4 数据与 API
+### 5.4 导航节点模型
+
+- 落点范围：
+  本轮通用导航仅在 `quest` 模块内部实现，不上提到 `Core`。
+- 节点职责：
+  节点只描述父子关系、显示文本与上下文载荷，不直接承载页面跳转逻辑。
+- 建议字段：
+  `nodeId`、`parentNodeId`、`title`、`order`、`nodeType`、`payload`。
+- 运行时状态：
+  由“当前选中节点 + 导航路径 + 折叠状态”组成。左侧点击节点时，只更新当前选中节点并重算导航路径；右侧内容根据当前节点的 `nodeType + payload` 决定展示内容。
+- 视图接入方式：
+  每个视图都可以注册节点。`active_log` 注册根节点与可选子节点但不渲染左树；`map_questline` 注册资料片 / 地图 / 任务线节点并渲染左树。
+- 持久化策略：
+  本轮优先复用现有 `questNavModeKey`、`questNavExpansionID`、`questNavSelectedMapID`、`questNavExpandedQuestLineID`、`questlineTreeCollapsed` 等键，不新增 `Core` 级导航存档。
+
+### 5.5 数据与 API
 
 | 数据 / API | 来源 | 用途 |
 |------------|------|------|
@@ -99,7 +127,7 @@
 | `Toolbox.Questlines.RequestAndDumpQuestDetailsToChat()` | 领域对外 API | 点击任务时输出运行时调试详情。 |
 | `Toolbox.Questlines.RequestQuestInspectorSnapshot()` | 领域对外 API | Quest Inspector 异步查询与结果回填。 |
 
-### 5.5 设置与存档
+### 5.6 设置与存档
 
 当前 `ToolboxDB.modules.quest` 主要字段包括：
 
@@ -118,8 +146,9 @@
 
 - `questNavSelectedTypeKey` 与 `questNavSkinPreset` 仍在配置层保留，但当前界面不再暴露 `quest_type` 视图，也没有皮肤切换设置。
 - `Config.lua` 会把旧 `encounter_journal.quest*` 字段迁移或清理到 `modules.quest`。
+- 本轮导航重构默认不新增新的持久化键，避免把模块内通用导航模型外溢到全局契约。
 
-### 5.6 外部入口
+### 5.7 外部入口
 
 - `Toolbox.MinimapButton.RegisterFlyoutEntry()` 注册“任务”飞出项。
 - 点击飞出项时优先调用 `Toolbox.Quest.OpenMainFrame()`；若当前环境不能直接打开，则回退到 `quest` 设置页。
@@ -161,3 +190,7 @@
 | 日期 | 内容 |
 |------|------|
 | 2026-04-15 | 初稿：按当前 `quest` 模块实现补齐独立任务界面、导航、设置与 Quest Inspector 设计 |
+| 2026-04-16 | 导航与布局重构：底部双视图固定、左上角改为通用导航路径、`active_log` 改上下布局、`map_questline` 左树改为节点驱动并去掉“当前任务”入口 |
+| 2026-04-17 | 确认底部分页签布局：对齐 Blizzard 冒险指南根页签，挂在 `ToolboxQuestFrame` 根级并贴到宿主底边、位于 `panelFrame` 外侧下方，内容区不再为页签预留内部高度 |
+| 2026-04-17 | 修正宿主与视图样式目标：`ToolboxQuestFrame` 标题区对齐 `PortraitFrameTemplate`，`panelFrame` 贴近宿主内框，`leftTree/rightContent` 不再显示第二层整框边线 |
+| 2026-04-16 | 确认 `map_questline` 顶部路径导航改用 Blizzard `NavBar` 组件，并将其锚到右侧内容区头部以避让宿主头像 / 搜索框 |

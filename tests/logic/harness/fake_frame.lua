@@ -27,6 +27,7 @@ function FakeFrame.new(options)
   self._verticalScroll = 0 -- 垂直滚动偏移
   self._highlightTexture = nil -- 高亮贴图替身
   self._textColor = nil -- 文本颜色缓存
+  self._points = {} -- 锚点记录
   return self
 end
 
@@ -130,6 +131,18 @@ end
 function FakeFrame:GetText()
   return self._text
 end
+function FakeFrame:GetTextWidth()
+  return #(self._text or "") * 8
+end
+function FakeFrame:SetTitle(text)
+  self._title = text or ""
+end
+function FakeFrame:SetPortraitToAsset(assetPath)
+  self._portraitAsset = assetPath
+end
+function FakeFrame:SetPortraitTexture(assetPath)
+  self._portraitAsset = assetPath
+end
 function FakeFrame:SetAutoFocus(value)
   self._autoFocus = value == true
 end
@@ -166,7 +179,27 @@ function FakeFrame:IsMouseOver()
   return false
 end
 
-function FakeFrame:SetPoint() end
+function FakeFrame:SetPoint(pointName, arg2, arg3, arg4, arg5)
+  local pointRecord = {
+    point = pointName,
+    relativeFrame = nil,
+    relativePoint = nil,
+    x = 0,
+    y = 0,
+  } -- 当前锚点记录
+
+  if type(arg2) == "number" or arg2 == nil then
+    pointRecord.x = tonumber(arg2) or 0
+    pointRecord.y = tonumber(arg3) or 0
+  else
+    pointRecord.relativeFrame = arg2
+    pointRecord.relativePoint = arg3
+    pointRecord.x = tonumber(arg4) or 0
+    pointRecord.y = tonumber(arg5) or 0
+  end
+
+  self._points[#self._points + 1] = pointRecord
+end
 function FakeFrame:SetSize(widthValue, heightValue)
   self._width = tonumber(widthValue) or self._width
   self._height = tonumber(heightValue) or self._height
@@ -206,15 +239,33 @@ function FakeFrame:GetStringHeight()
   return 16
 end
 function FakeFrame:SetAlpha() end
-function FakeFrame:SetBackdrop() end
-function FakeFrame:SetBackdropColor() end
-function FakeFrame:SetBackdropBorderColor() end
+function FakeFrame:SetBackdrop(backdropTable)
+  self._backdrop = backdropTable
+end
+function FakeFrame:SetBackdropColor(redValue, greenValue, blueValue, alphaValue)
+  self._backdropColor = {
+    tonumber(redValue) or 0,
+    tonumber(greenValue) or 0,
+    tonumber(blueValue) or 0,
+    tonumber(alphaValue) or 0,
+  }
+end
+function FakeFrame:SetBackdropBorderColor(redValue, greenValue, blueValue, alphaValue)
+  self._backdropBorderColor = {
+    tonumber(redValue) or 0,
+    tonumber(greenValue) or 0,
+    tonumber(blueValue) or 0,
+    tonumber(alphaValue) or 0,
+  }
+end
 function FakeFrame:RegisterForDrag() end
 function FakeFrame:RegisterForClicks() end
 function FakeFrame:EnableMouse() end
 function FakeFrame:SetFrameStrata() end
 function FakeFrame:SetFrameLevel() end
-function FakeFrame:ClearAllPoints() end
+function FakeFrame:ClearAllPoints()
+  self._points = {}
+end
 function FakeFrame:GetEffectiveScale() return 1 end
 function FakeFrame:GetTop() return 0 end
 function FakeFrame:GetVerticalScroll()
@@ -234,9 +285,24 @@ function FakeFrame:SetValueStep() end
 function FakeFrame:SetObeyStepOnDrag() end
 function FakeFrame:SetValue() end
 function FakeFrame:GetValue() return 0 end
-function FakeFrame:SetEnabled() end
-function FakeFrame:Disable() end
-function FakeFrame:Enable() end
+function FakeFrame:SetEnabled(enabled)
+  self._enabled = enabled ~= false
+end
+function FakeFrame:IsEnabled()
+  if self._enabled == nil then
+    return true
+  end
+  return self._enabled == true
+end
+function FakeFrame:Disable()
+  self._enabled = false
+end
+function FakeFrame:Enable()
+  self._enabled = true
+end
+function FakeFrame:SetMotionScriptsWhileDisabled(enabled)
+  self._motionScriptsWhileDisabled = enabled == true
+end
 function FakeFrame:SetID(idValue)
   self._id = idValue
 end

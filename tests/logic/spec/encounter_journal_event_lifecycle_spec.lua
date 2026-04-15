@@ -118,6 +118,17 @@ describe("EncounterJournal event lifecycle", function()
         { id = 1001, name = "任务一", status = "active", readyForTurnIn = false, typeID = 12 },
       }, nil
     end
+    Toolbox.Questlines.GetQuestLinesForMap = function(mapID)
+      if mapID == 2472 then
+        return {
+          { id = 101, name = "多恩岛起始线", UiMapID = 2472, questCount = 1 },
+        }, nil
+      end
+      return {}, nil
+    end
+    Toolbox.Questlines.GetQuestLineProgress = function()
+      return { completed = 0, total = 1 }, nil
+    end
 
     local treeView = Toolbox.TestHooks.Quest:getView()
     treeView:setSelected(true)
@@ -126,6 +137,6 @@ describe("EncounterJournal event lifecycle", function()
     assert.equals(10, treeView.selectedExpansionID)
     assert.equals("map_questline", treeView.selectedModeKey)
     assert.equals(2472, treeView.selectedMapID)
-    assert.equals(nil, treeView.expandedQuestLineID)
+    assert.equals(101, treeView.expandedQuestLineID)
   end)
 end)

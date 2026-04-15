@@ -97,11 +97,11 @@ describe("Quest module navigation", function()
     questView:refresh()
 
     local leftTexts = collectVisibleRowTexts(questView.rowButtons)
-    assertContainsText(leftTexts, "地图任务线")
+    assertContainsText(leftTexts, "巨龙时代")
     assertContainsText(leftTexts, "觉醒海岸")
   end)
 
-  it("active_log_mode_keeps_breadcrumb_empty", function()
+  it("active_log_mode_registers_current_task_root_breadcrumb", function()
     local questFrame = harness.runtime.CreateFrame("Frame", "ToolboxQuestFrame") -- quest 根框体
     questFrame:Show()
     rawset(_G, "ToolboxQuestFrame", questFrame)
@@ -119,7 +119,7 @@ describe("Quest module navigation", function()
     questView:refresh()
 
     local breadcrumbList = Toolbox.TestHooks.Quest:getBreadcrumbTextList() -- breadcrumb 文本列表
-    assert.same({}, breadcrumbList)
+    assert.same({ Toolbox.L.QUEST_VIEW_TAB_ACTIVE or "当前任务" }, breadcrumbList)
   end)
 
   it("does_not_render_quest_type_mode_in_left_tree", function()

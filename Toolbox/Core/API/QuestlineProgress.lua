@@ -2223,6 +2223,7 @@ function Toolbox.Questlines.GetQuestDetailByID(questID, contextOptions)
         npcPos = runtimeState.npcPos,
         questLineID = nil,
         questLineName = nil,
+        questLineExpansionID = nil,
         runtime = runtimeState,
       }, nil
     end
@@ -2246,6 +2247,7 @@ function Toolbox.Questlines.GetQuestDetailByID(questID, contextOptions)
     npcPos = runtimeState.npcPos,
     questLineID = questLineID,
     questLineName = questLineEntry and questLineEntry.name or nil,
+    questLineExpansionID = type(questLineEntry) == "table" and questLineEntry.ExpansionID or nil,
     runtime = runtimeState,
   }, nil
 end

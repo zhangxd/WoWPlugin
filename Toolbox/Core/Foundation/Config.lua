@@ -144,6 +144,7 @@ function Toolbox.Config.Init()
   end
   ToolboxDB.global = ToolboxDB.global or {}
   ToolboxDB.modules = ToolboxDB.modules or {}
+  local preMergeModuleStore = type(ToolboxDB.modules) == "table" and CopyTable(ToolboxDB.modules) or {} -- 合并默认值前的模块存档快照
   mergeTable(ToolboxDB, defaults)
 
   local ver = ToolboxDB.version or 0
@@ -237,15 +238,18 @@ function Toolbox.Config.Init()
 
   -- quest 模块：从 encounter_journal 旧任务键迁移并做字段归一化（幂等，不依赖全局 version）。
   local moduleStore = ToolboxDB.modules or {} -- 模块存档表
-  local encounterJournalDb = type(moduleStore.encounter_journal) == "table" and moduleStore.encounter_journal or nil -- 冒险指南旧存档
+  local legacyModuleStore = type(preMergeModuleStore) == "table" and preMergeModuleStore or {} -- 默认值合并前的模块存档
+  local legacyEncounterJournalDb = type(legacyModuleStore.encounter_journal) == "table" and legacyModuleStore.encounter_journal or nil -- 冒险指南旧存档
+  local legacyQuestDb = type(legacyModuleStore.quest) == "table" and legacyModuleStore.quest or nil -- quest 模块旧存档
+  local encounterJournalDb = type(moduleStore.encounter_journal) == "table" and moduleStore.encounter_journal or nil -- 当前冒险指南存档
   local questDb = type(moduleStore.quest) == "table" and moduleStore.quest or {} -- quest 模块存档
 
   local function readQuestField(fieldName, fallbackValue)
-    if questDb[fieldName] ~= nil then
-      return questDb[fieldName]
+    if type(legacyQuestDb) == "table" and legacyQuestDb[fieldName] ~= nil then
+      return legacyQuestDb[fieldName]
     end
-    if type(encounterJournalDb) == "table" and encounterJournalDb[fieldName] ~= nil then
-      return encounterJournalDb[fieldName]
+    if type(legacyEncounterJournalDb) == "table" and legacyEncounterJournalDb[fieldName] ~= nil then
+      return legacyEncounterJournalDb[fieldName]
     end
     return fallbackValue
   end
