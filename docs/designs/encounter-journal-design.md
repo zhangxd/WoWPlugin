@@ -12,7 +12,7 @@
   - `docs/tests/encounter-journal-test.md`
   - `docs/FEATURES.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-14
+- 最后更新：2026-04-15
 
 ## 1. 背景
 
@@ -204,3 +204,105 @@
 | 2026-04-14 | 补充：确认 `EncounterJournal.lua` 可按私有实现文件拆分，模块边界、存档键与对外 API 保持不变 |
 | 2026-04-14 | 补充：确认任务页签选中任务时可调用 `Toolbox.Questlines` 的异步任务详情输出能力，输出落到聊天框用于运行时排查 |
 | 2026-04-14 | 调整：任务页签聊天调试输出改为仅消费异步任务 API 返回字段，不再读取静态任务线数据补齐资料片等归属信息 |
+| 2026-04-15 | 并回：新增“任务详情查询”独立设置子页面设计，采用 `QuestID + 运行时 API + 可复制文本结果区` 方案 |
+
+## 10. 2026-04-15 任务详情查询独立子页面设计
+
+### 10.1 背景
+
+- 现有 `Toolbox.Questlines` 已具备较多任务运行时查询与异步加载能力，但面向玩家可见的查询入口仍只有任务页签内的浏览与聊天调试输出。
+- 用户需要一个放在设置中的独立页面，用于输入 `QuestID` 后直接查看任务详细信息，并且结果文本必须可复制。
+
+### 10.2 方案对比
+
+#### 方案 A：把查询区塞进现有 `encounter_journal` 设置页
+
+- 做法：继续沿用当前模块单页设置结构，在原页面底部增加输入框、按钮和结果区。
+- 优点：对 `SettingsHost` 改动最小。
+- 风险 / 缺点：结果文本会很长，和现有副本筛选、任务页签设置混在一起后可读性差，也不符合“新增一个页面”的用户要求。
+
+#### 方案 B：在 `encounter_journal` 下新增独立设置子页面
+
+- 做法：扩展 `SettingsHost` 页面注册模型，使同一模块可注册多个真实子页面；`encounter_journal` 保留现有主设置页，并新增“任务详情查询”页面。
+- 优点：页面职责清晰，长文本结果区有独立空间，符合用户预期，也便于后续继续增加开发型查询工具。
+- 风险 / 缺点：需要扩展现有设置页注册协议，而不是只改模块内部绘制代码。
+
+#### 方案 C：仅保留聊天输出
+
+- 做法：继续复用当前聊天调试接口，不新增设置页结果区。
+- 优点：实现最省事。
+- 风险 / 缺点：不满足“下方展示”和“文本可复制”的核心需求。
+
+### 10.3 选型结论
+
+- 选定方案：方案 B。
+- 选择原因：这是唯一同时满足“独立页面”“长文本可复制”“不新增模块”“仅运行时 API”四项约束的方案。
+
+### 10.4 选定方案
+
+#### 10.4.1 页面归属与入口
+
+- 页面仍归属 `encounter_journal`，不新增 `RegisterModule`。
+- 在设置左侧导航中，`encounter_journal` 除现有主页面外，再注册一个“任务详情查询”真实子页面。
+- 该页面只作为设置里的开发/查询工具，不新增菜单按钮、飞出项或 slash 命令。
+
+#### 10.4.2 数据链路
+
+- 查询主键固定为 `QuestID`。
+- 任务详情与任务线信息仅通过运行时 API 获取，不使用 `Toolbox.Data.InstanceQuestlines` 或其它静态数据补齐。
+- 推荐由 `Toolbox.Questlines` 暴露一个新的结构化快照接口，统一汇总：
+  - 任务基础字段
+  - 日志状态
+  - 任务标签与类型
+  - 地图与父地图链
+  - 目标列表
+  - 描述/任务文本
+  - `C_QuestLine.GetQuestLineInfo` 可读出的任务线字段
+- 若任务缓存未就绪，则由 `Toolbox.Questlines` 统一处理 `C_QuestLog.RequestLoadQuestByID` 和 `QUEST_DATA_LOAD_RESULT`，并在结果可读后回调页面刷新。
+
+#### 10.4.3 UI 结构
+
+- 页面顶部：说明文字，强调输入的是 `QuestID`。
+- 中部：数字输入框 + 查询按钮。
+- 下部：带滚动条的多行 `EditBox` 结果区，用户可直接选中文本并复制。
+- 结果格式：一行一个字段，统一为 `字段名: 字段值`。
+- 对于列表或嵌套表，采用扁平化键路径，例如：
+  - `questLine.questLineID: 12345`
+  - `objectives[1].text: ...`
+  - `parentMaps[2].name: ...`
+
+#### 10.4.4 存档
+
+- 数据落在 `ToolboxDB.modules.encounter_journal`。
+- 本轮仅计划新增轻量字段，例如：
+  - `questInspectorLastQuestID`
+- 若后续需要页面展示偏好，也继续落在同一模块键下。
+
+### 10.5 影响面
+
+- 数据与存档：
+  `ToolboxDB.modules.encounter_journal` 新增任务详情查询页面专属键。
+- API：
+  `Toolbox.Questlines` 需要新增“生成结构化任务详情快照”与“异步请求后刷新页面”的调用面；页面代码不直接拼装底层 API。
+- 文件与目录：
+  预计主要影响 `Toolbox/UI/SettingsHost.lua`、`Toolbox/Modules/EncounterJournal.lua`、`Toolbox/Core/API/QuestlineProgress.lua`、`Toolbox/Core/Foundation/Config.lua`、`Toolbox/Core/Foundation/Locales.lua`。
+- 文档回写：
+  功能落地后需回写 `docs/features/encounter-journal-features.md` 与 `docs/Toolbox-addon-design.md`。
+
+### 10.6 风险与回退
+
+- 风险：
+  部分任务字段依赖异步缓存；首次查询时可能先看到不完整结果，随后刷新补齐。
+- 风险：
+  运行时 API 对个别任务返回字段不全，结果区需要明确展示“不可用”，而不是伪造值。
+- 回退方式：
+  若页面注册模型扩展带来问题，可暂时只保留 `encounter_journal` 主页面不注册该子页面，并保留 `Toolbox.Questlines` 结构化快照接口供后续恢复。
+
+### 10.7 验证策略
+
+- 游戏内验证：
+  打开设置，确认 `encounter_journal` 下新增“任务详情查询”页面；输入已知 QuestID，检查结果区是否可复制、是否会在异步加载后自动刷新。
+- 稳定性验证：
+  对非法 QuestID、空输入、任务数据加载失败场景验证页面提示，不出现 Lua 报错。
+- 分层验证：
+  确认任务数据采集逻辑集中在 `Toolbox.Questlines`，页面层只负责输入、触发和展示。

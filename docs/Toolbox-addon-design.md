@@ -206,6 +206,7 @@ ToolboxDB = {
       questNavSelectedMapID = 0,
       questNavSelectedTypeKey = "",
       questNavExpandedQuestLineID = 0,
+      questInspectorLastQuestID = 0,
       rootTabOrderIds = {},
       rootTabHiddenIds = {},
     },
@@ -249,7 +250,8 @@ ToolboxDB = {
 | `dependencies` | 可选，模块 id 列表；核心按拓扑排序初始化 |
 | `OnModuleLoad` | 不依赖角色数据的初始化 |
 | `OnModuleEnable` | `PLAYER_LOGIN` 后执行（读角色、应用 UI） |
-| `RegisterSettings` | 向 Settings 宿主注册本模块**专属**配置 UI |
+| `RegisterSettings` | 向 Settings 宿主注册本模块**主设置页**的专属配置 UI |
+| `GetSettingsPages` | 可选，返回模块额外设置子页面定义；由 `SettingsHost` 统一注册真实子页面 |
 | `OnEnabledSettingChanged` | 公共启用开关变化后，模块立即重应用当前状态 |
 | `OnDebugSettingChanged` | 公共调试开关变化后，模块同步内部调试行为 |
 | `ResetToDefaultsAndRebuild` | 公共“清理并重建”入口；恢复默认值并立刻重新应用 |
@@ -310,6 +312,7 @@ ToolboxDB = {
 | **列表增强** | 提供“仅坐骑”筛选、列表行内 CD 叠加、悬停锁定详情。 |
 | **详情页增强** | 在掉落页提供“仅坐骑”筛选；在详情页标题区域显示当前难度的重置时间。 |
 | **任务页签** | 新增“任务”页签，左侧第一层固定为资料片树；资料片下展开 `地图任务线 / 任务类型` 两个子入口。地图路径下主区采用任务线单展开列表，类型路径下主区直接显示任务列表，任务详情改为 tooltip + 点击弹框，并支持回跳到对应地图 / 任务线；设置页可调整冒险指南根页签顺序与显隐。 |
+| **任务详情查询页** | 在 `encounter_journal` 设置下新增独立子页面：输入 `QuestID` 后，通过 `Toolbox.Questlines` 的运行时查询接口汇总任务字段与任务线字段，并在可复制结果区按“字段名: 字段值”逐行展示；若任务缓存未就绪，则先异步请求 `C_QuestLog.RequestLoadQuestByID`，待 `QUEST_DATA_LOAD_RESULT` 返回后刷新。 |
 | **外部入口** | 小地图飞出菜单中的“冒险手册”项和 `EJMicroButton` tooltip 都会显示当前副本锁定摘要。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
 
 ---
@@ -384,3 +387,4 @@ ToolboxDB = {
 | 2026-04-13 | 任务页签导航二次重构：资料片固定为左侧一级树，资料片下收纳 `地图任务线 / 任务类型` 两个入口；新增 `questNavModeKey / questNavSelectedMapID / questNavSelectedTypeKey / questNavExpandedQuestLineID` 状态键 |
 | 2026-04-13 | `instance_questlines` 导出链路新增 QuestCompletist 补充源：`WoWTools` 可在导出时读取 `qcQuest.lua` 合并任务线关系，冲突以补充源为准 |
 | 2026-04-13 | `InstanceQuestlines` 升级到 schema v6：静态数据收敛为 `quests / questLines / expansions`；`questLines[*].QuestIDs` 保留有序任务列表，顶层 `expansions` 作为唯一资料片入口；移除 `questLineXQuest`、`questPOIBlobs`、`questPOIPoints` 与 `quests[*].UiMapID`，并导出全量且链路完整的任务线 |
+| 2026-04-15 | `encounter_journal` 设置下新增“任务详情查询”独立子页面；`SettingsHost` 支持同模块额外子页面，`QuestlineProgress` 新增运行时任务详情快照与异步查询接口 |

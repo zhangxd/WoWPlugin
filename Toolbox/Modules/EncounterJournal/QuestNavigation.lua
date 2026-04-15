@@ -896,14 +896,25 @@ function QuestlineTreeView:resolveNavigationDefaults(navigationModel)
   if self.selectedModeKey == "map_questline" then
     local mapMode = modeByKey.map_questline -- 地图模式
     local hasSelectedMap = false -- 当前地图是否存在
+    local hasSelectedQuestLine = false -- 当前直接任务线是否存在
     for _, mapEntry in ipairs(mapMode and mapMode.entries or {}) do
-      if mapEntry.id == self.selectedMapID then
+      if mapEntry.kind == "map" and mapEntry.id == self.selectedMapID then
         hasSelectedMap = true
         break
       end
+      if mapEntry.kind == "questline" and mapEntry.id == self.expandedQuestLineID and self.selectedMapID == nil then
+        hasSelectedQuestLine = true
+      end
     end
-    if not hasSelectedMap then
-      self.selectedMapID = mapMode and mapMode.entries and mapMode.entries[1] and mapMode.entries[1].id or nil
+    if not hasSelectedMap and not hasSelectedQuestLine then
+      local firstEntry = mapMode and mapMode.entries and mapMode.entries[1] or nil -- 默认子项
+      if type(firstEntry) == "table" and firstEntry.kind == "questline" then
+        self.selectedMapID = nil
+        self.expandedQuestLineID = firstEntry.id
+      else
+        self.selectedMapID = firstEntry and firstEntry.id or nil
+        self.expandedQuestLineID = nil
+      end
     end
     self.selectedTypeKey = ""
   elseif self.selectedModeKey == "quest_type" then
@@ -986,10 +997,12 @@ function QuestlineTreeView:buildLeftTreeRows(navigationModel)
               kind = childKind,
               text = childEntry.name,
               selected = (childKind == "map" and self.selectedMapID == childEntry.id)
-                or (childKind == "type_group" and self.selectedTypeKey == tostring(childEntry.id)),
+                or (childKind == "type_group" and self.selectedTypeKey == tostring(childEntry.id))
+                or (childKind == "questline" and self.selectedMapID == nil and self.expandedQuestLineID == childEntry.id),
               expansionID = expansionSummary.id,
               modeKey = modeKey,
               mapID = childKind == "map" and childEntry.id or nil,
+              questLineID = childKind == "questline" and childEntry.id or nil,
               typeKey = childKind == "type_group" and tostring(childEntry.id) or nil,
             }
           end
@@ -1083,6 +1096,11 @@ function QuestlineTreeView:getOrCreateRowButton(rowIndex)
       self.selectedMapID = rowData.mapID
       self.selectedTypeKey = ""
       self.expandedQuestLineID = nil
+    elseif rowData.kind == "questline" and type(rowData.questLineID) == "number" then
+      self.selectedModeKey = "map_questline"
+      self.selectedMapID = nil
+      self.selectedTypeKey = ""
+      self.expandedQuestLineID = rowData.questLineID
     elseif rowData.kind == "type_group" and type(rowData.typeKey) == "string" then
       self.selectedModeKey = "quest_type"
       self.selectedTypeKey = rowData.typeKey
@@ -1278,9 +1296,26 @@ function QuestlineTreeView:buildMainRowsForMap()
   local rowDataList = {} -- 地图模式主区行
   local localeTable = Toolbox.L or {} -- 本地化文案
   local searchKeyword = normalizeSearchText(self.searchText) -- 搜索关键词
-  local questLineList, errorObject = Toolbox.Questlines.GetQuestLinesForMap(self.selectedMapID) -- 地图下任务线
-  if errorObject then
-    return {}, errorObject
+  local questLineList = nil -- 当前主区任务线列表
+  if type(self.selectedMapID) == "number" then
+    local errorObject = nil -- 地图查询错误
+    questLineList, errorObject = Toolbox.Questlines.GetQuestLinesForMap(self.selectedMapID, self.selectedExpansionID) -- 当前资料片地图下任务线
+    if errorObject then
+      return {}, errorObject
+    end
+  elseif type(self.expandedQuestLineID) == "number" then
+    local questTabModel, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 任务页签模型
+    if errorObject then
+      return {}, errorObject
+    end
+    local questLineEntry = questTabModel and questTabModel.questLineByID and questTabModel.questLineByID[self.expandedQuestLineID] or nil -- 当前直接任务线
+    if type(questLineEntry) == "table" then
+      questLineList = { questLineEntry }
+    else
+      questLineList = {}
+    end
+  else
+    questLineList = {}
   end
 
   for _, questLineEntry in ipairs(questLineList or {}) do

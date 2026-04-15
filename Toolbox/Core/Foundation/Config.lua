@@ -83,6 +83,8 @@ local defaults = {
       questNavSearchText = "",
       -- 任务页签皮肤模式（default | archive | contrast）
       questNavSkinPreset = "archive",
+      -- 任务详情查询页：最近一次输入的 QuestID（0 表示未查询）
+      questInspectorLastQuestID = 0,
       -- 最近完成任务记录（按时间倒序）
       questRecentCompletedList = {},
       -- 最近完成任务保留上限（1-30）
@@ -284,6 +286,13 @@ function Toolbox.Config.Init()
       and encounterJournalDb.questNavSkinPreset ~= "contrast"
     then
       encounterJournalDb.questNavSkinPreset = "archive"
+    end
+    if type(encounterJournalDb.questInspectorLastQuestID) ~= "number" then
+      encounterJournalDb.questInspectorLastQuestID = 0
+    end
+    encounterJournalDb.questInspectorLastQuestID = math.floor(encounterJournalDb.questInspectorLastQuestID)
+    if encounterJournalDb.questInspectorLastQuestID < 0 then
+      encounterJournalDb.questInspectorLastQuestID = 0
     end
     if type(encounterJournalDb.questRecentCompletedMax) ~= "number" then
       encounterJournalDb.questRecentCompletedMax = 10

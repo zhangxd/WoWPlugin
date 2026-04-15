@@ -39,6 +39,9 @@ describe("QuestlineProgress mock data injection", function()
   local originalCreateFrame = nil -- 原始 CreateFrame 全局
   local originalCTaskQuest = nil -- 原始 C_TaskQuest 全局
   local originalEnum = nil -- 原始 Enum 全局
+  local originalUnitFactionGroup = nil -- 原始 UnitFactionGroup 全局
+  local originalUnitRace = nil -- 原始 UnitRace 全局
+  local originalUnitClass = nil -- 原始 UnitClass 全局
   local injectedMockData = nil -- 当前用例注入的 mock 数据
   local questLogInfoList = nil -- Quest Log 条目列表
   local questActiveByID = nil -- 进行中任务集合
@@ -61,6 +64,9 @@ describe("QuestlineProgress mock data injection", function()
     originalCreateFrame = rawget(_G, "CreateFrame")
     originalCTaskQuest = rawget(_G, "C_TaskQuest")
     originalEnum = rawget(_G, "Enum")
+    originalUnitFactionGroup = rawget(_G, "UnitFactionGroup")
+    originalUnitRace = rawget(_G, "UnitRace")
+    originalUnitClass = rawget(_G, "UnitClass")
 
     chatMessageList = {}
     eventFrameList = {}
@@ -171,6 +177,15 @@ describe("QuestlineProgress mock data injection", function()
     })
     rawset(_G, "Enum", rawget(_G, "Enum") or { UIMapType = { Continent = 2 } })
     rawset(_G, "QuestUtils_GetQuestName", nil)
+    rawset(_G, "UnitFactionGroup", function()
+      return "Alliance", "Alliance"
+    end)
+    rawset(_G, "UnitRace", function()
+      return "Human", "Human", 1
+    end)
+    rawset(_G, "UnitClass", function()
+      return "Warrior", "WARRIOR", 1
+    end)
     rawset(_G, "GetQuestLogIndexByID", function()
       return 0
     end)
@@ -221,6 +236,9 @@ describe("QuestlineProgress mock data injection", function()
     rawset(_G, "CreateFrame", originalCreateFrame)
     rawset(_G, "C_TaskQuest", originalCTaskQuest)
     rawset(_G, "Enum", originalEnum)
+    rawset(_G, "UnitFactionGroup", originalUnitFactionGroup)
+    rawset(_G, "UnitRace", originalUnitRace)
+    rawset(_G, "UnitClass", originalUnitClass)
   end)
 
   it("strict_validation_accepts_mock_fixture", function()
@@ -580,6 +598,36 @@ describe("QuestlineProgress mock data injection", function()
     }, collectQuestLineIDs(navigationModel.expansionByID[10].modeByKey.quest_type.entries))
   end)
 
+  it("GetQuestLinesForMap scopes results to the selected expansion when provided", function()
+    local v6Data = {
+      schemaVersion = 6,
+      sourceMode = "mock",
+      generatedAt = "2026-04-15T00:00:00Z",
+      quests = {
+        [81001] = { ID = 81001, QuestLineIDs = { 9901 }, UiMapIDs = { 2371 }, FactionTags = {}, FactionConditions = {}, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 9 },
+        [81002] = { ID = 81002, QuestLineIDs = { 9902 }, UiMapIDs = { 2371 }, FactionTags = {}, FactionConditions = {}, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 10 },
+      },
+      questLines = {
+        [9901] = { ID = 9901, UiMapID = 2371, QuestIDs = { 81001 }, UiMapIDs = { 2371 }, PrimaryUiMapID = 2371, PrimaryMapCount = 1, PrimaryMapShare = 1, FactionTags = {}, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 9 },
+        [9902] = { ID = 9902, UiMapID = 2371, QuestIDs = { 81002 }, UiMapIDs = { 2371 }, PrimaryUiMapID = 2371, PrimaryMapCount = 1, PrimaryMapShare = 1, FactionTags = {}, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 10 },
+      },
+      expansions = {
+        [9] = { 9901 },
+        [10] = { 9902 },
+      },
+    }
+
+    Toolbox.Questlines.SetDataOverride(v6Data)
+
+    local allQuestLines, allError = Toolbox.Questlines.GetQuestLinesForMap(2371)
+    assert.is_nil(allError)
+    assert.same({ 9901, 9902 }, { allQuestLines[1].id, allQuestLines[2].id })
+
+    local scopedQuestLines, scopedError = Toolbox.Questlines.GetQuestLinesForMap(2371, 9)
+    assert.is_nil(scopedError)
+    assert.same({ 9901 }, { scopedQuestLines[1].id })
+  end)
+
   it("quest_tab_model_uses_injected_mock_data", function()
     local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 查询模型
     assert.is_nil(errorObject)
@@ -640,5 +688,214 @@ describe("QuestlineProgress mock data injection", function()
     local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(81001)
     assert.is_nil(detailError)
     assert.is_nil(detailObject.mapPos)
+  end)
+
+  it("strict_validation_allows_shared_quest_ids_across_multiple_questlines_when_quest_declares_links", function()
+    local sharedData = {
+      schemaVersion = 6,
+      sourceMode = "mock",
+      generatedAt = "2026-04-15T00:00:00Z",
+      quests = {
+        [81001] = { ID = 81001, QuestLineIDs = { 9901, 9902 }, UiMapIDs = { 2371 }, FactionTags = {}, FactionConditions = {}, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 9 },
+      },
+      questLines = {
+        [9901] = { ID = 9901, UiMapID = 2371, QuestIDs = { 81001 }, UiMapIDs = { 2371 }, PrimaryUiMapID = 2371, PrimaryMapCount = 1, PrimaryMapShare = 1, FactionTags = {}, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 9 },
+        [9902] = { ID = 9902, UiMapID = 2372, QuestIDs = { 81001 }, UiMapIDs = { 2372 }, PrimaryUiMapID = 2372, PrimaryMapCount = 1, PrimaryMapShare = 1, FactionTags = {}, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 9 },
+      },
+      expansions = {
+        [9] = { 9901, 9902 },
+      },
+    }
+
+    local valid, errorObject = Toolbox.Questlines.ValidateInstanceQuestlinesData(sharedData, true)
+    assert.is_true(valid)
+    assert.is_nil(errorObject)
+  end)
+
+  it("quest_detail_prefers_context_questline_for_shared_tasks", function()
+    local sharedData = {
+      schemaVersion = 6,
+      sourceMode = "mock",
+      generatedAt = "2026-04-15T00:00:00Z",
+      quests = {
+        [81001] = {
+          ID = 81001,
+          QuestLineIDs = { 9901, 9902 },
+          UiMapIDs = { 2371, 2372 },
+          FactionTags = {},
+          FactionConditions = {},
+          RaceMaskValues = {},
+          ClassMaskValues = {},
+          ContentExpansionID = 9,
+        },
+      },
+      questLines = {
+        [9901] = { ID = 9901, UiMapID = 2371, QuestIDs = { 81001 }, UiMapIDs = { 2371 }, PrimaryUiMapID = 2371, PrimaryMapCount = 1, PrimaryMapShare = 1, FactionTags = {}, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 9 },
+        [9902] = { ID = 9902, UiMapID = 2372, QuestIDs = { 81001 }, UiMapIDs = { 2372 }, PrimaryUiMapID = 2372, PrimaryMapCount = 1, PrimaryMapShare = 1, FactionTags = {}, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 10 },
+      },
+      expansions = {
+        [9] = { 9901 },
+        [10] = { 9902 },
+      },
+    }
+
+    Toolbox.Questlines.SetDataOverride(sharedData)
+
+    local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(81001, {
+      questLineID = 9902,
+      expansionID = 10,
+      mapID = 2372,
+    })
+    assert.is_nil(detailError)
+    assert.equals(9902, detailObject.questLineID)
+    assert.equals(2372, detailObject.UiMapID)
+  end)
+
+  it("filters quests and questlines by faction and class restrictions", function()
+    local filteredData = {
+      schemaVersion = 6,
+      sourceMode = "mock",
+      generatedAt = "2026-04-15T00:00:00Z",
+      quests = {
+        [81001] = { ID = 81001, QuestLineIDs = { 9901 }, UiMapIDs = { 2371 }, FactionTags = { "alliance" }, FactionConditions = { "alliance" }, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 9 },
+        [81002] = { ID = 81002, QuestLineIDs = { 9901 }, UiMapIDs = { 2371 }, FactionTags = { "horde" }, FactionConditions = { "horde" }, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 9 },
+        [81003] = { ID = 81003, QuestLineIDs = { 9901 }, UiMapIDs = { 2371 }, FactionTags = {}, FactionConditions = {}, RaceMaskValues = {}, ClassMaskValues = { 2 }, ContentExpansionID = 9 },
+        [81004] = { ID = 81004, QuestLineIDs = { 9902 }, UiMapIDs = { 2372 }, FactionTags = { "horde" }, FactionConditions = { "horde" }, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 9 },
+      },
+      questLines = {
+        [9901] = { ID = 9901, UiMapID = 2371, QuestIDs = { 81001, 81002, 81003 }, UiMapIDs = { 2371 }, PrimaryUiMapID = 2371, PrimaryMapCount = 3, PrimaryMapShare = 1, FactionTags = { "shared" }, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 9 },
+        [9902] = { ID = 9902, UiMapID = 2372, QuestIDs = { 81004 }, UiMapIDs = { 2372 }, PrimaryUiMapID = 2372, PrimaryMapCount = 1, PrimaryMapShare = 1, FactionTags = { "horde" }, RaceMaskValues = {}, ClassMaskValues = {}, ContentExpansionID = 9 },
+      },
+      expansions = {
+        [9] = { 9901, 9902 },
+      },
+    }
+
+    Toolbox.Questlines.SetDataOverride(filteredData)
+
+    local questList, listError = Toolbox.Questlines.GetQuestListByQuestLineID(9901)
+    assert.is_nil(listError)
+    assert.same({ 81001 }, { questList[1].id })
+
+    local model, modelError = Toolbox.Questlines.GetQuestTabModel()
+    assert.is_nil(modelError)
+    assert.is_truthy(model.questLineByID[9901])
+    assert.is_nil(model.questLineByID[9902])
+
+    local navigationModel, navigationError = Toolbox.Questlines.GetQuestNavigationModel()
+    assert.is_nil(navigationError)
+    assert.same({
+      { id = 2371, questLineIDs = { 9901 } },
+    }, collectQuestLineIDs(navigationModel.expansionByID[9].modeByKey.map_questline.entries))
+  end)
+
+  it("quest_inspector_snapshot_reads_runtime_task_and_questline_fields", function()
+    rawset(_G, "C_QuestLog", {
+      GetTitleForQuestID = function(questID)
+        if questID == 99901 then
+          return "Inspector Quest"
+        end
+        return questTitleByID[questID] or ("Quest #" .. tostring(questID))
+      end,
+      GetLogIndexForQuestID = function(questID)
+        if questID == 99901 then
+          return 7
+        end
+        return questActiveByID[questID] == true and 1 or 0
+      end,
+      IsQuestFlaggedCompleted = function(questID)
+        return questCompletedByID[questID] == true
+      end,
+      ReadyForTurnIn = function(questID)
+        if questID == 99901 then
+          return true
+        end
+        return questReadyByID[questID] == true
+      end,
+      GetQuestType = function(questID)
+        if questID == 99901 then
+          return 12
+        end
+        return questTypeByID[questID]
+      end,
+      GetQuestTagInfo = function(questID)
+        if questID == 99901 then
+          return {
+            tagID = 77,
+            tagName = "World Event",
+            worldQuestType = 5,
+          }
+        end
+        if questID == 81002 then
+          return {
+            tagID = 12,
+            tagName = "Campaign",
+          }
+        end
+        return nil
+      end,
+      GetQuestObjectives = function(questID)
+        if questID == 99901 then
+          return {
+            { text = "Collect 5 widgets", finished = false, numFulfilled = 2, numRequired = 5 },
+            { text = "Return to the archivist", finished = false },
+          }
+        end
+        return {}
+      end,
+      GetNumQuestLogEntries = function()
+        return #questLogInfoList, #questLogInfoList
+      end,
+      GetInfo = function(index)
+        if index == 7 then
+          return { questID = 99901, title = "Inspector Quest", isHeader = false, isHidden = false }
+        end
+        return questLogInfoList[index]
+      end,
+    })
+    rawset(_G, "GetQuestLogQuestText", function(logIndex)
+      if logIndex == 7 then
+        return "Inspect description", "Inspect objective summary"
+      end
+      return "Quest description #" .. tostring(logIndex), "Quest objective text #" .. tostring(logIndex)
+    end)
+    rawset(_G, "C_QuestLine", {
+      GetQuestLineInfo = function(questID, uiMapID)
+        if questID == 99901 and uiMapID == 2022 then
+          return {
+            questLineID = 4567,
+            questLineName = "Inspector QuestLine",
+            questLineQuestID = 99901,
+            x = 0.12,
+            y = 0.34,
+          }
+        end
+        return nil
+      end,
+    })
+
+    assert.is_function(Toolbox.Questlines.GetQuestInspectorSnapshot)
+
+    local snapshotObject, errorObject = Toolbox.Questlines.GetQuestInspectorSnapshot(99901)
+    assert.is_nil(errorObject)
+    assert.equals(99901, snapshotObject.questID)
+    assert.equals("Inspector Quest", snapshotObject.title)
+    assert.equals("active", snapshotObject.status)
+    assert.equals(true, snapshotObject.readyForTurnIn)
+    assert.equals(2022, snapshotObject.mapID)
+    assert.equals("Quest Zone", snapshotObject.mapName)
+    assert.equals("Quest Continent", snapshotObject.continentMapName)
+    assert.equals("Inspect description", snapshotObject.description)
+    assert.equals("Inspect objective summary", snapshotObject.objectiveText)
+    assert.equals("World Event", snapshotObject.tagName)
+    assert.equals(77, snapshotObject.tagID)
+    assert.equals(5, snapshotObject.worldQuestType)
+    assert.equals(4567, snapshotObject.questLineID)
+    assert.equals("Inspector QuestLine", snapshotObject.questLineName)
+    assert.is_table(snapshotObject.objectives)
+    assert.equals("Collect 5 widgets", snapshotObject.objectives[1].text)
+    assert.is_table(snapshotObject.flatLines)
+    assert.is_true(#snapshotObject.flatLines > 0)
+    assert.is_true(string.find(table.concat(snapshotObject.flatLines, "\n"), "questLine.questLineName: Inspector QuestLine", 1, true) ~= nil)
   end)
 end)

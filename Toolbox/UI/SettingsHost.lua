@@ -95,6 +95,34 @@ local function getModuleIntro(module)
   return ""
 end
 
+local function getPageTitle(page)
+  local L = Toolbox.L or {}
+  if page.titleKey and L[page.titleKey] then
+    return L[page.titleKey]
+  end
+  if page.titleText then
+    return page.titleText
+  end
+  if page.module then
+    return getModuleTitle(page.module)
+  end
+  return page.key
+end
+
+local function getPageIntro(page)
+  local L = Toolbox.L or {}
+  if page.introKey and L[page.introKey] then
+    return L[page.introKey]
+  end
+  if type(page.introText) == "string" then
+    return page.introText
+  end
+  if page.module and not page.isSubPage then
+    return getModuleIntro(page.module)
+  end
+  return ""
+end
+
 local function applyModuleCallbacks(module)
   local db = Toolbox.Config.GetModule(module.id)
   if module.OnEnabledSettingChanged then
@@ -138,6 +166,10 @@ function Toolbox.SettingsHost:GetModulePageKey(moduleId)
   return "module:" .. tostring(moduleId)
 end
 
+function Toolbox.SettingsHost:GetModuleSubPageKey(moduleId, pageId)
+  return "module:" .. tostring(moduleId) .. ":subpage:" .. tostring(pageId)
+end
+
 --- 重建单个设置页内容；用于语言切换、模块公共开关变化后刷新 UI。
 ---@param pageKey string 页面键
 function Toolbox.SettingsHost:BuildPage(pageKey)
@@ -157,10 +189,10 @@ function Toolbox.SettingsHost:RefreshAllPages()
   end
   for _, page in ipairs(self.pages or {}) do
     if page.category and page.category.SetName then
-      if page.module then
-        page.category:SetName(getModuleTitle(page.module))
-      elseif page.key == "about" and Toolbox.L then
+      if page.key == "about" and Toolbox.L then
         page.category:SetName(Toolbox.L.SETTINGS_ABOUT_TITLE or "About")
+      elseif page.module or page.titleKey or page.titleText then
+        page.category:SetName(getPageTitle(page))
       end
     end
     if page.builder then
@@ -447,7 +479,7 @@ function Toolbox.SettingsHost:BuildModulePage(page)
   local child = resetCanvasPanel(page.panel)
   local y = -8
 
-  y = buildHeader(child, y, getModuleTitle(module), getModuleIntro(module))
+  y = buildHeader(child, y, getPageTitle(page), getPageIntro(page))
   y = self:BuildSharedModuleControls(child, y, module)
 
   local customTitle = child:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -460,6 +492,32 @@ function Toolbox.SettingsHost:BuildModulePage(page)
   box:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
   module.RegisterSettings(box)
   y = y - (box.realHeight or 160) - 16
+
+  setChildHeight(child, y)
+end
+
+--- 构建模块额外设置子页面。
+---@param page table 页面定义
+function Toolbox.SettingsHost:BuildModuleSubPage(page)
+  local module = page.module -- 页面所属模块
+  local child = resetCanvasPanel(page.panel)
+  local y = -8
+
+  y = buildHeader(child, y, getPageTitle(page), getPageIntro(page))
+  y = self:BuildSharedModuleControls(child, y, module)
+
+  local customTitle = child:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  customTitle:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
+  customTitle:SetText((Toolbox.L and Toolbox.L.SETTINGS_MODULE_SECTION_TITLE) or "")
+  y = y - 24
+
+  local box = CreateFrame("Frame", nil, child)
+  box:SetSize(MODULE_BOX_WIDTH, 240)
+  box:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
+  if type(page.buildContent) == "function" then
+    page.buildContent(page, box)
+  end
+  y = y - (box.realHeight or 240) - 16
 
   setChildHeight(child, y)
 end
@@ -576,6 +634,45 @@ function Toolbox.SettingsHost:EnsureCreated()
     local subcategory = Settings.RegisterCanvasLayoutSubcategory(category, panel, getModuleTitle(module))
     Settings.RegisterAddOnCategory(subcategory)
     page.category = subcategory
+
+    local extraPageList = type(module.GetSettingsPages) == "function" and module.GetSettingsPages() or nil
+    if type(extraPageList) == "table" then
+      for _, extraPageDef in ipairs(extraPageList) do
+        if type(extraPageDef) == "table" and type(extraPageDef.id) == "string" and type(extraPageDef.build) == "function" then
+          local extraPanelName = "ToolboxSettingsModule"
+            .. sanitizePageName(module.id)
+            .. "SubPage"
+            .. sanitizePageName(extraPageDef.id)
+            .. "Panel"
+          local extraPanel = createCanvasPanel(extraPanelName)
+          local extraPageKey = self:GetModuleSubPageKey(module.id, extraPageDef.id)
+          local extraPage = {
+            key = extraPageKey,
+            panel = extraPanel,
+            module = module,
+            isSubPage = true,
+            titleKey = extraPageDef.titleKey,
+            titleText = extraPageDef.titleText,
+            introKey = extraPageDef.introKey,
+            introText = extraPageDef.introText,
+            buildContent = extraPageDef.build,
+            builder = function(pageDef)
+              Toolbox.SettingsHost:BuildModuleSubPage(pageDef)
+            end,
+          }
+          self.pages[#self.pages + 1] = extraPage
+          self.pagesByKey[extraPage.key] = extraPage
+
+          local extraSubcategory = Settings.RegisterCanvasLayoutSubcategory(
+            category,
+            extraPanel,
+            getPageTitle(extraPage)
+          )
+          Settings.RegisterAddOnCategory(extraSubcategory)
+          extraPage.category = extraSubcategory
+        end
+      end
+    end
   end
 
   local aboutPanel = createCanvasPanel("ToolboxSettingsAboutPanel")

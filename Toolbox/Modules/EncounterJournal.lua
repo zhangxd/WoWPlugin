@@ -58,6 +58,198 @@ local function buildEffectiveRootTabOrderIds()
   return QuestlineTreeView:buildEffectiveRootTabOrderIds()
 end
 
+local QUEST_INSPECTOR_PAGE_ID = "quest_inspector"
+local questInspectorUiState = {
+  requestToken = 0,
+  resultText = nil,
+}
+
+--- 返回任务详情查询页键名。
+---@return string
+local function getQuestInspectorPageKey()
+  local settingsHost = Toolbox and Toolbox.SettingsHost or nil -- 设置页宿主
+  if settingsHost and type(settingsHost.GetModuleSubPageKey) == "function" then
+    return settingsHost:GetModuleSubPageKey(MODULE_ID, QUEST_INSPECTOR_PAGE_ID)
+  end
+  return "module:" .. tostring(MODULE_ID) .. ":subpage:" .. tostring(QUEST_INSPECTOR_PAGE_ID)
+end
+
+--- 解析 QuestID 输入文本。
+---@param rawValue string|number|nil
+---@return number|nil
+local function normalizeQuestInspectorQuestID(rawValue)
+  local numericValue = tonumber(rawValue) -- 输入对应的数字值
+  if type(numericValue) ~= "number" then
+    return nil
+  end
+  numericValue = math.floor(numericValue)
+  if numericValue <= 0 then
+    return nil
+  end
+  return numericValue
+end
+
+--- 构建任务详情查询页展示文本。
+---@param localeTable table 本地化文案
+---@param loadStateText string|nil 加载状态
+---@param snapshotObject table|nil 任务详情快照
+---@return string
+local function buildQuestInspectorResultText(localeTable, loadStateText, snapshotObject)
+  local lineList = {} -- 结果文本行列表
+  lineList[#lineList + 1] = string.format(
+    "loadState: %s",
+    tostring(loadStateText or "ready")
+  )
+
+  if type(snapshotObject) == "table" and type(snapshotObject.flatLines) == "table" and #snapshotObject.flatLines > 0 then
+    for _, messageText in ipairs(snapshotObject.flatLines) do
+      lineList[#lineList + 1] = messageText
+    end
+    return table.concat(lineList, "\n")
+  end
+
+  lineList[#lineList + 1] = localeTable.EJ_QUEST_INSPECTOR_FAILED or "Quest data load failed or no runtime data is available."
+  return table.concat(lineList, "\n")
+end
+
+--- 触发任务详情查询并在设置页结果区回填文本。
+---@param questID number 任务 ID
+local function requestQuestInspectorSnapshot(questID)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local moduleDb = getModuleDb() -- 模块存档
+  local pageKey = getQuestInspectorPageKey() -- 查询页键名
+  local settingsHost = Toolbox and Toolbox.SettingsHost or nil -- 设置页宿主
+
+  local function rebuildInspectorPage()
+    if settingsHost and type(settingsHost.BuildPage) == "function" then
+      settingsHost:BuildPage(pageKey)
+    end
+  end
+
+  moduleDb.questInspectorLastQuestID = questID
+  questInspectorUiState.requestToken = (questInspectorUiState.requestToken or 0) + 1
+  local currentToken = questInspectorUiState.requestToken -- 当前请求令牌
+  questInspectorUiState.resultText = localeTable.EJ_QUEST_INSPECTOR_LOADING or "Loading quest data..."
+  rebuildInspectorPage()
+
+  if not Toolbox.Questlines or type(Toolbox.Questlines.RequestQuestInspectorSnapshot) ~= "function" then
+    questInspectorUiState.resultText = localeTable.EJ_QUEST_INSPECTOR_FAILED or "Quest data load failed or no runtime data is available."
+    rebuildInspectorPage()
+    return
+  end
+
+  local accepted, stateText, snapshotObject = Toolbox.Questlines.RequestQuestInspectorSnapshot(
+    questID,
+    function(_, loadedStateText, loadedSnapshotObject)
+      if questInspectorUiState.requestToken ~= currentToken then
+        return
+      end
+      questInspectorUiState.resultText = buildQuestInspectorResultText(localeTable, loadedStateText, loadedSnapshotObject)
+      rebuildInspectorPage()
+    end
+  )
+
+  if not accepted then
+    questInspectorUiState.resultText = localeTable.EJ_QUEST_INSPECTOR_FAILED or "Quest data load failed or no runtime data is available."
+  elseif stateText == "ready" then
+    questInspectorUiState.resultText = buildQuestInspectorResultText(localeTable, stateText, snapshotObject)
+  else
+    questInspectorUiState.resultText = localeTable.EJ_QUEST_INSPECTOR_LOADING or "Loading quest data..."
+  end
+  rebuildInspectorPage()
+end
+
+--- 构建任务详情查询独立设置子页面。
+---@param page table 页面定义
+---@param box Frame 子页面容器
+local function buildQuestInspectorSettingsPage(page, box)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local moduleDb = getModuleDb() -- 模块存档
+  local yOffset = 0 -- 当前纵向游标
+  local inputLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 输入框标签
+  inputLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
+  inputLabel:SetText(localeTable.EJ_QUEST_INSPECTOR_INPUT_LABEL or "QuestID")
+  yOffset = yOffset - 24
+
+  local questIDEditBox = CreateFrame("EditBox", nil, box, "InputBoxTemplate") -- QuestID 输入框
+  questIDEditBox:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
+  questIDEditBox:SetSize(200, 24)
+  questIDEditBox:SetAutoFocus(false)
+  questIDEditBox:SetMaxLetters(12)
+  if type(moduleDb.questInspectorLastQuestID) == "number" and moduleDb.questInspectorLastQuestID > 0 then
+    questIDEditBox:SetText(tostring(moduleDb.questInspectorLastQuestID))
+  else
+    questIDEditBox:SetText("")
+  end
+  questIDEditBox:SetScript("OnEscapePressed", function(editBox)
+    editBox:ClearFocus()
+  end)
+
+  local function submitQuestInspectorQuery()
+    local questID = normalizeQuestInspectorQuestID(questIDEditBox:GetText()) -- 当前输入的任务 ID
+    if not questID then
+      questInspectorUiState.resultText = localeTable.EJ_QUEST_INSPECTOR_INVALID_ID or "Please input a valid QuestID."
+      if Toolbox.SettingsHost and type(Toolbox.SettingsHost.BuildPage) == "function" then
+        Toolbox.SettingsHost:BuildPage(getQuestInspectorPageKey())
+      end
+      return
+    end
+    requestQuestInspectorSnapshot(questID)
+  end
+
+  questIDEditBox:SetScript("OnEnterPressed", function(editBox)
+    editBox:ClearFocus()
+    submitQuestInspectorQuery()
+  end)
+
+  local queryButton = CreateFrame("Button", nil, box, "UIPanelButtonTemplate") -- 查询按钮
+  queryButton:SetSize(120, 22)
+  queryButton:SetPoint("LEFT", questIDEditBox, "RIGHT", 12, 0)
+  queryButton:SetText(localeTable.EJ_QUEST_INSPECTOR_QUERY_BUTTON or "Inspect")
+  queryButton:SetScript("OnClick", submitQuestInspectorQuery)
+
+  yOffset = yOffset - 42
+
+  local resultTitle = box:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 结果区标题
+  resultTitle:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
+  resultTitle:SetText(localeTable.EJ_QUEST_INSPECTOR_RESULT_TITLE or "Result")
+  yOffset = yOffset - 24
+
+  local resultFrame = CreateFrame("Frame", nil, box, "BackdropTemplate") -- 结果区底板
+  resultFrame:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
+  resultFrame:SetSize(560, 420)
+  resultFrame:SetBackdrop({
+    bgFile = "Interface\\Buttons\\WHITE8X8",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true,
+    tileSize = 8,
+    edgeSize = 10,
+    insets = { left = 3, right = 3, top = 3, bottom = 3 },
+  })
+  resultFrame:SetBackdropColor(0.08, 0.08, 0.1, 0.82)
+  resultFrame:SetBackdropBorderColor(0.35, 0.35, 0.38, 0.75)
+
+  local resultScrollFrame = CreateFrame("ScrollFrame", nil, resultFrame, "UIPanelScrollFrameTemplate") -- 结果滚动框
+  resultScrollFrame:SetPoint("TOPLEFT", resultFrame, "TOPLEFT", 8, -8)
+  resultScrollFrame:SetPoint("BOTTOMRIGHT", resultFrame, "BOTTOMRIGHT", -28, 8)
+
+  local resultEditBox = CreateFrame("EditBox", nil, resultScrollFrame) -- 结果文本框
+  resultEditBox:SetMultiLine(true)
+  resultEditBox:SetFontObject(ChatFontNormal)
+  resultEditBox:SetWidth(500)
+  resultEditBox:SetHeight(2000)
+  resultEditBox:SetAutoFocus(false)
+  resultEditBox:SetTextInsets(6, 6, 6, 6)
+  resultEditBox:SetScript("OnEscapePressed", function(editBox)
+    editBox:ClearFocus()
+  end)
+  resultEditBox:SetText(questInspectorUiState.resultText or (localeTable.EJ_QUEST_INSPECTOR_EMPTY or "Input a QuestID and click Inspect."))
+  resultScrollFrame:SetScrollChild(resultEditBox)
+
+  yOffset = yOffset - 436
+  box.realHeight = math.abs(yOffset) + 20
+end
+
 -- ============================================================================
 -- 微型菜单「冒险手册」按钮 Tooltip 增补（右下角菜单排）
 -- ============================================================================
@@ -498,6 +690,7 @@ Toolbox.RegisterModule({
 
   ResetToDefaultsAndRebuild = function()
     Toolbox.Config.ResetModule(MODULE_ID)
+    questInspectorUiState.resultText = nil
     DetailEnhancer:refresh()
     QuestlineTreeView:setSelected(false)
     QuestlineTreeView:refresh()
@@ -1015,5 +1208,18 @@ Toolbox.RegisterModule({
     yOffset = yOffset - 30
 
     box.realHeight = math.abs(yOffset) + 8
+  end,
+
+  GetSettingsPages = function()
+    return {
+      {
+        id = QUEST_INSPECTOR_PAGE_ID,
+        titleKey = "EJ_QUEST_INSPECTOR_PAGE_TITLE",
+        introKey = "EJ_QUEST_INSPECTOR_PAGE_INTRO",
+        build = function(page, box)
+          buildQuestInspectorSettingsPage(page, box)
+        end,
+      },
+    }
   end,
 })

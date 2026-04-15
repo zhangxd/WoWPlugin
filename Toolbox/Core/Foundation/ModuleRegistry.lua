@@ -7,6 +7,7 @@
   - settingsIntroKey：页面简介文案键
   - settingsOrder：子页面顺序（数字越小越靠前）
   - RegisterSettings(box)：仅绘制模块专属设置区
+  - GetSettingsPages()：返回额外设置子页面定义列表；每项至少含 `id`、`titleKey`、`build(page, box)`
   - OnEnabledSettingChanged(enabled)：公共启用开关变化后同步模块状态
   - OnDebugSettingChanged(enabled)：公共调试开关变化后同步模块状态
   - ResetToDefaultsAndRebuild()：公共“清理并重建”入口
