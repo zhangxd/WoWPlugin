@@ -41,6 +41,15 @@ local function newFakeRuntime(options)
       templateName = templateName,
       traceList = traceList,
     })
+    if templateName == "PortraitFrameTemplate" then
+      frameRef.TitleContainer = FakeFrame.new({
+        frameType = "Frame",
+        frameName = nil,
+        parentFrame = frameRef,
+        templateName = nil,
+        traceList = traceList,
+      })
+    end
     if type(frameName) == "string" and frameName ~= "" then
       frameByName[frameName] = frameRef
       _G[frameName] = frameRef

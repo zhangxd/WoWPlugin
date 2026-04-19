@@ -216,9 +216,15 @@ end
 function FakeFrame:GetHeight()
   return self._height
 end
-function FakeFrame:SetJustifyH() end
-function FakeFrame:SetJustifyV() end
-function FakeFrame:SetWordWrap() end
+function FakeFrame:SetJustifyH(justifyMode)
+  self._justifyH = justifyMode
+end
+function FakeFrame:SetJustifyV(justifyMode)
+  self._justifyV = justifyMode
+end
+function FakeFrame:SetWordWrap(enabled)
+  self._wordWrap = enabled ~= false
+end
 function FakeFrame:SetTextColor(redValue, greenValue, blueValue)
   self._textColor = {
     tonumber(redValue) or 0,

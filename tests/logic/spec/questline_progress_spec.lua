@@ -348,7 +348,7 @@ describe("QuestlineProgress mock data injection", function()
 
     assert.equals(81002, questEntryList[1].questID)
     assert.equals(9901, questEntryList[1].questLineID)
-    assert.is_nil(questEntryList[1].UiMapID)
+    assert.equals(2371, questEntryList[1].UiMapID)
 
     assert.equals(99901, questEntryList[2].questID)
     assert.equals("Live Quest #99901", questEntryList[2].name)
@@ -365,6 +365,34 @@ describe("QuestlineProgress mock data injection", function()
 
     assert.equals(81003, questEntryList[3].questID)
     assert.equals(true, questEntryList[3].readyForTurnIn)
+  end)
+
+  it("current_quest_log_entries_prefer_runtime_quest_and_questline_names", function()
+    questLogInfoList = {
+      { questID = 81002, title = "Stale Quest Log Title", isHeader = false, isHidden = false },
+    }
+    questTitleByID[81002] = "Runtime Quest Title"
+    rawset(_G, "C_QuestLine", {
+      GetQuestLineInfo = function(questID)
+        if questID == 81002 then
+          return {
+            questLineID = 9901,
+            questLineName = "Runtime QuestLine Title",
+          }
+        end
+        return nil
+      end,
+    })
+
+    local questEntryList, errorObject = Toolbox.Questlines.GetCurrentQuestLogEntries()
+    assert.is_nil(errorObject)
+    assert.equals(1, #questEntryList)
+    assert.equals("Runtime Quest Title", questEntryList[1].name)
+    assert.equals("Runtime QuestLine Title", questEntryList[1].questLineName)
+
+    local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(81002)
+    assert.is_nil(detailError)
+    assert.equals("Runtime QuestLine Title", detailObject.questLineName)
   end)
 
   it("request_and_dump_quest_details_to_chat_waits_for_async_load_result", function()
@@ -463,6 +491,13 @@ describe("QuestlineProgress mock data injection", function()
     assert.is_function(Toolbox.Questlines.GetQuestTypeLabel)
     assert.equals("Campaign", Toolbox.Questlines.GetQuestTypeLabel(12))
     assert.equals("Unknown Type (999)", Toolbox.Questlines.GetQuestTypeLabel(999))
+  end)
+
+  it("quest_detail_includes_type_label_for_inline_display", function()
+    local detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(81002)
+    assert.is_nil(detailError)
+    assert.equals(12, detailObject.typeID)
+    assert.equals("Campaign", detailObject.typeLabel)
   end)
 
   it("quest_tab_model_keeps_structure_static_without_full_runtime_queries", function()

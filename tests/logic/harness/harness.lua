@@ -104,6 +104,7 @@ function Harness:_installGlobals()
     MINIMAP_FLYOUT_ADVENTURE_JOURNAL_LOCKOUTS_MORE_FMT = self.locale == "enUS" and "+%d more..." or "还有 %d 条未显示",
   }
 
+  local moverRegisterCalls = {} -- mover 拖动登记调用列表
   local toolboxTable = { -- Toolbox 替身
     Runtime = self.runtime,
     L = localeTable,
@@ -117,6 +118,17 @@ function Harness:_installGlobals()
         self.traceList[#self.traceList + 1] = {
           kind = "chat_print",
           text = text,
+        }
+      end,
+    },
+    Mover = {
+      registerCalls = moverRegisterCalls,
+      RegisterFrame = function(frameObject, frameKey, opts)
+        local callList = moverRegisterCalls -- 拖动登记调用列表
+        callList[#callList + 1] = {
+          frame = frameObject,
+          key = frameKey,
+          opts = opts,
         }
       end,
     },
@@ -320,6 +332,12 @@ function Harness:loadQuestModule()
     self.moduleDef.OnModuleLoad()
   end
   return self.moduleDef
+end
+
+function Harness:getMoverRegisterCalls()
+  local moverTable = self.toolboxTable and self.toolboxTable.Mover or nil -- mover 替身
+  local callList = moverTable and moverTable.registerCalls or {} -- 已记录的拖动登记调用
+  return shallowCopyTable(callList)
 end
 
 function Harness:getEventFrame()

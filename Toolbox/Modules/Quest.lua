@@ -28,6 +28,18 @@ local function getQuestView()
   return Internal.QuestlineTreeView
 end
 
+--- 让 quest 宿主框复用 mover 模块的自建窗体拖动与位置记忆。
+---@param hostFrame Frame|nil quest 宿主框
+local function registerQuestFrameDrag(hostFrame)
+  if not hostFrame or not Toolbox or not Toolbox.Mover or type(Toolbox.Mover.RegisterFrame) ~= "function" then
+    return
+  end
+  local dragRegion = hostFrame.TitleContainer or hostFrame -- 标题栏拖动命中区
+  Toolbox.Mover.RegisterFrame(hostFrame, "ToolboxQuestFrame", {
+    dragRegion = dragRegion,
+  })
+end
+
 --- 归一化“最近完成”上限输入值。
 ---@param rawValue string|number|nil
 ---@return number
@@ -88,6 +100,8 @@ local function ensureQuestHostFrame()
       end
     end)
   end
+
+  registerQuestFrameDrag(questHostFrame)
 
   return questHostFrame
 end

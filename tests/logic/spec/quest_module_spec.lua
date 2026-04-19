@@ -1,4 +1,5 @@
 local Harness = dofile("tests/logic/harness/harness.lua")
+local questDumpCallCount = 0 -- 任务详情聊天输出调用次数
 
 local function buildQuestNavigationFixture()
   local mapMode = {
@@ -27,13 +28,14 @@ local function buildQuestNavigationFixture()
 end
 
 local function installQuestDataStubs()
+  questDumpCallCount = 0
   Toolbox.Questlines.GetQuestNavigationModel = function()
     return buildQuestNavigationFixture(), nil
   end
   Toolbox.Questlines.GetCurrentQuestLogEntries = function()
     return {
-      { questID = 81001, name = "觉醒的角兽", status = "active", readyForTurnIn = false },
-      { questID = 81002, name = "立即回报", status = "active", readyForTurnIn = true },
+      { questID = 81001, name = "觉醒的角兽", questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = false },
+      { questID = 81002, name = "立即回报", questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = true },
     }, nil
   end
   Toolbox.Questlines.GetQuestLinesForMap = function(mapID)
@@ -60,8 +62,8 @@ local function installQuestDataStubs()
       return {}, nil
     end
     return {
-      { id = 81001, name = "觉醒的角兽", status = "active", readyForTurnIn = false },
-      { id = 81003, name = "山谷回音", status = "pending", readyForTurnIn = false },
+      { id = 81001, name = "觉醒的角兽", questLineID = 9901, questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = false },
+      { id = 81003, name = "山谷回音", questLineID = 9901, questLineName = "欧恩哈拉开端", status = "pending", readyForTurnIn = false },
     }, nil
   end
   Toolbox.Questlines.GetQuestTabModel = function()
@@ -75,11 +77,19 @@ local function installQuestDataStubs()
     return {
       questID = questID,
       name = "测试任务",
+      questLineName = "欧恩哈拉开端",
       questLineID = 9901,
       UiMapID = 2371,
+      questLineExpansionID = 9,
+      typeID = 12,
+      typeLabel = "Campaign",
+      prerequisiteQuestIDs = { 80001 },
+      nextQuestIDs = { 80002 },
     }, nil
   end
-  Toolbox.Questlines.RequestAndDumpQuestDetailsToChat = function() end
+  Toolbox.Questlines.RequestAndDumpQuestDetailsToChat = function()
+    questDumpCallCount = questDumpCallCount + 1
+  end
 end
 
 describe("Quest module split", function()
@@ -135,6 +145,23 @@ describe("Quest module split", function()
     assert.is_false(questView.tabButton and questView.tabButton:IsShown() or false)
   end)
 
+  it("registers_quest_host_frame_into_mover_with_title_drag_region", function()
+    harness:loadQuestModule()
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(hostFrame)
+    assert.is_truthy(hostFrame.TitleContainer)
+
+    local moverRegisterCalls = harness:getMoverRegisterCalls() -- mover 登记调用列表
+    assert.equals(1, #moverRegisterCalls)
+
+    local firstCall = moverRegisterCalls[1] -- 首次拖动登记调用
+    assert.is_true(firstCall.frame == hostFrame)
+    assert.equals("ToolboxQuestFrame", firstCall.key)
+    assert.is_truthy(type(firstCall.opts) == "table")
+    assert.is_true(firstCall.opts.dragRegion == hostFrame.TitleContainer)
+  end)
+
   it("active_log_uses_stacked_panels_and_registers_root_navigation_node", function()
     harness:loadQuestModule()
     local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
@@ -150,10 +177,44 @@ describe("Quest module split", function()
     local breadcrumbList = questHooks:getBreadcrumbTextList() -- 导航文本列表
     assert.same({ Toolbox.L.QUEST_VIEW_TAB_ACTIVE or "当前任务" }, breadcrumbList)
     assert.equals("NavBarTemplate", questView.breadcrumbFrame.templateName)
-    assert.is_true(questView.breadcrumbFrame.parentFrame == questView.rightContent)
+    assert.is_truthy(questView.headerFrame)
+    assert.is_true(questView.headerFrame.parentFrame == hostFrame)
+    assert.is_true(questView.breadcrumbFrame.parentFrame == questView.headerFrame)
+    assert.is_true(questView.searchBoxFrame.parentFrame == questView.headerFrame)
+    local headerTopLeftPoint = questView.headerFrame._points and questView.headerFrame._points[1] or nil -- 头部带左上锚点
+    assert.is_truthy(headerTopLeftPoint)
+    assert.is_true(headerTopLeftPoint.relativeFrame == hostFrame)
+    assert.equals(58, headerTopLeftPoint.x)
+    assert.equals(-26, headerTopLeftPoint.y)
+    assert.equals(34, questView.headerFrame:GetHeight())
     local navBarLeftPoint = questView.breadcrumbFrame._points and questView.breadcrumbFrame._points[1] or nil -- 顶部路径左锚点
     assert.is_truthy(navBarLeftPoint)
-    assert.is_true(navBarLeftPoint.relativeFrame == questView.rightContent)
+    assert.is_true(navBarLeftPoint.relativeFrame == questView.headerFrame)
+    assert.equals(34, questView.breadcrumbFrame:GetHeight())
+    local navBarRightPoint = questView.breadcrumbFrame._points and questView.breadcrumbFrame._points[2] or nil -- 顶部路径右锚点
+    assert.is_truthy(navBarRightPoint)
+    assert.equals("TOPRIGHT", navBarRightPoint.point)
+    assert.is_true(navBarRightPoint.relativeFrame == questView.searchBoxFrame)
+    assert.equals("TOPLEFT", navBarRightPoint.relativePoint)
+    local firstBreadcrumbButton = questView.breadcrumbButtons[1] -- 第一段导航按钮
+    assert.is_truthy(firstBreadcrumbButton)
+    local firstBreadcrumbPoint = firstBreadcrumbButton._points and firstBreadcrumbButton._points[1] or nil -- 第一段导航按钮锚点
+    assert.is_truthy(firstBreadcrumbPoint)
+    assert.equals("LEFT", firstBreadcrumbPoint.point)
+    assert.is_true(firstBreadcrumbPoint.relativeFrame == questView.breadcrumbFrame)
+    assert.equals("LEFT", firstBreadcrumbPoint.relativePoint)
+    assert.equals("LEFT", firstBreadcrumbButton._justifyH)
+    assert.equals(34, firstBreadcrumbButton:GetHeight())
+    assert.equals("InputBoxTemplate", questView.searchBox.templateName)
+    assert.is_nil(questView.searchBoxFrame._backdrop)
+    assert.is_nil(questView.searchBoxFrame._backdropBorderColor)
+    assert.equals(32, questView.searchBoxFrame:GetHeight())
+    assert.equals(24, questView.searchBox:GetHeight())
+    local activeContentTopPoint = questView.rightContent._points and questView.rightContent._points[1] or nil -- 当前任务视图顶部锚点
+    assert.is_truthy(activeContentTopPoint)
+    assert.is_true(activeContentTopPoint.relativeFrame == questView.panelFrame)
+    assert.equals("TOPLEFT", activeContentTopPoint.relativePoint)
+    assert.equals(-8, activeContentTopPoint.y)
     assert.is_false(questView.leftTree:IsShown())
     assert.is_true(questView.activeLogCurrentPanel:IsShown())
     assert.is_true(questView.activeLogRecentPanel:IsShown())
@@ -165,6 +226,38 @@ describe("Quest module split", function()
     assert.is_true(questView.activeLogRecentCollapsed == true)
     assert.is_false(questView.activeLogRecentPanel:IsShown())
     assert.is_true(questView.activeLogCurrentPanel:IsShown())
+  end)
+
+  it("active_log_task_rows_show_questline_and_expand_inline_without_tooltip_or_chat_dump", function()
+    harness:loadQuestModule()
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local questView = questHooks:getView() -- 任务视图对象
+    installQuestDataStubs()
+
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(hostFrame)
+    hostFrame:Show()
+    questView:setSelected(true)
+    questView:refresh()
+
+    local firstRow = questView.activeLogCurrentRowButtons[1] -- 当前任务第一行
+    assert.is_truthy(firstRow)
+    assert.equals(81002, firstRow.rowData.questID)
+    assert.equals("欧恩哈拉开端", firstRow.questLineFont:GetText())
+
+    firstRow:RunScript("OnEnter")
+    assert.same({}, harness:getTooltipLines())
+
+    firstRow:RunScript("OnClick")
+
+    assert.equals(0, questDumpCallCount)
+    assert.is_false(questView.detailPopupFrame and questView.detailPopupFrame:IsShown() or false)
+
+    local detailRow = questView.activeLogCurrentRowButtons[2] -- 行内展开详情行
+    assert.is_truthy(detailRow)
+    assert.equals("quest_detail", detailRow.rowData.kind)
+    assert.is_true(string.find(detailRow.detailText:GetText() or "", "欧恩哈拉开端", 1, true) ~= nil)
+    assert.is_true(string.find(detailRow.detailText:GetText() or "", "Campaign(12)", 1, true) ~= nil)
   end)
 
   it("standalone_quest_layout_keeps_only_one_inset_view_container", function()
@@ -213,15 +306,30 @@ describe("Quest module split", function()
     assert.equals("BOTTOMRIGHT", activeLogBottomPoint.relativePoint)
     assert.is_true(activeLogBottomPoint.relativeFrame == questView.panelFrame)
     assert.equals(8, activeLogBottomPoint.y)
+    local activeLogTopPoint = questView.rightContent._points and questView.rightContent._points[1] or nil -- 当前任务视图顶部锚点
+    assert.is_truthy(activeLogTopPoint)
+    assert.is_true(activeLogTopPoint.relativeFrame == questView.panelFrame)
+    assert.equals("TOPLEFT", activeLogTopPoint.relativePoint)
+    assert.equals(-8, activeLogTopPoint.y)
 
     local mapButton = questView.modeTabButtonByKey.map_questline -- 任务线页签按钮
     assert.is_truthy(mapButton)
     mapButton:RunScript("OnClick")
 
+    local leftTreeTopPoint = questView.leftTree._points and questView.leftTree._points[1] or nil -- 任务线左树顶部锚点
     local leftTreeBottomPoint = questView.leftTree._points and questView.leftTree._points[2] or nil -- 任务线左树底部锚点
+    local mapViewTopPoint = questView.rightContent._points and questView.rightContent._points[1] or nil -- 任务线主区顶部锚点
     local mapViewBottomPoint = questView.rightContent._points and questView.rightContent._points[2] or nil -- 任务线主区底部锚点
+    assert.is_truthy(leftTreeTopPoint)
     assert.is_truthy(leftTreeBottomPoint)
+    assert.is_truthy(mapViewTopPoint)
     assert.is_truthy(mapViewBottomPoint)
+    assert.is_true(leftTreeTopPoint.relativeFrame == questView.panelFrame)
+    assert.equals("TOPLEFT", leftTreeTopPoint.relativePoint)
+    assert.is_true(mapViewTopPoint.relativeFrame == questView.leftTree)
+    assert.equals("TOPRIGHT", mapViewTopPoint.relativePoint)
+    assert.equals(-8, leftTreeTopPoint.y)
+    assert.equals(0, mapViewTopPoint.y)
     assert.equals(8, leftTreeBottomPoint.y)
     assert.equals(8, mapViewBottomPoint.y)
   end)
@@ -280,8 +388,24 @@ describe("Quest module split", function()
     local navBarRightPoint = questView.breadcrumbFrame._points and questView.breadcrumbFrame._points[2] or nil -- 顶部路径右锚点
     assert.is_truthy(navBarLeftPoint)
     assert.is_truthy(navBarRightPoint)
-    assert.is_true(navBarLeftPoint.relativeFrame == questView.rightContent)
+    assert.is_true(questView.breadcrumbFrame.parentFrame == questView.headerFrame)
+    assert.is_true(navBarLeftPoint.relativeFrame == questView.headerFrame)
     assert.is_true(navBarRightPoint.relativeFrame == questView.searchBoxFrame)
+    assert.equals("TOPRIGHT", navBarRightPoint.point)
+    assert.equals("TOPLEFT", navBarRightPoint.relativePoint)
+    local headerTopLeftPoint = questView.headerFrame._points and questView.headerFrame._points[1] or nil -- 头部带左上锚点
+    assert.is_truthy(headerTopLeftPoint)
+    assert.is_true(headerTopLeftPoint.relativeFrame == hostFrame)
+    assert.equals(58, headerTopLeftPoint.x)
+    assert.equals(-26, headerTopLeftPoint.y)
+    assert.equals(34, questView.headerFrame:GetHeight())
+    local firstQuestlineRow = questView.rightRowButtons[1] -- 主视图第一条任务线行
+    assert.is_truthy(firstQuestlineRow)
+    assert.equals("RIGHT", firstQuestlineRow.rowMetaFont._justifyH)
+    assert.is_false(firstQuestlineRow.rowMetaFont._wordWrap)
+    assert.equals(156, firstQuestlineRow.rowMetaFont:GetWidth())
+    assert.equals("", firstQuestlineRow.rowMetaFont:GetText() or "")
+    assert.equals(37, firstQuestlineRow:GetHeight())
     assert.same({
       Toolbox.L.QUEST_VIEW_TAB_QUESTLINE or "任务线",
       "巨龙时代",
@@ -300,6 +424,234 @@ describe("Quest module split", function()
       Toolbox.L.QUEST_VIEW_TAB_QUESTLINE or "任务线",
       "巨龙时代",
     }, questHooks:getBreadcrumbTextList())
+  end)
+
+  it("direct_questline_in_main_view_toggles_without_disappearing", function()
+    harness:loadQuestModule()
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local questView = questHooks:getView() -- 任务视图对象
+    installQuestDataStubs()
+
+    Toolbox.Questlines.GetQuestNavigationModel = function()
+      local mapMode = {
+        key = "map_questline",
+        name = "地图任务线",
+        entries = {
+          { kind = "questline", id = 9901, name = "欧恩哈拉开端" },
+        },
+      } -- 直连任务线导航
+
+      return {
+        expansionList = {
+          { id = 9, name = "巨龙时代" },
+        },
+        expansionByID = {
+          [9] = {
+            id = 9,
+            name = "巨龙时代",
+            modes = { mapMode },
+            modeByKey = {
+              map_questline = mapMode,
+            },
+          },
+        },
+      }, nil
+    end
+
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(hostFrame)
+    hostFrame:Show()
+    questView:setSelected(true)
+    questView:refresh()
+
+    questView.selectedModeKey = "map_questline"
+    questView.selectedExpansionID = 9
+    questView.selectedMapID = nil
+    questView.expandedQuestLineID = 9901
+    questView.selectedQuestID = nil
+    questView:render()
+
+    local questLineRow = questView.rightRowButtons[1] -- 主区任务线行
+    local firstQuestRow = questView.rightRowButtons[2] -- 展开后的第一条任务行
+    assert.is_truthy(questLineRow)
+    assert.equals("questline", questLineRow.rowData.kind)
+    assert.is_truthy(string.find(questLineRow.rowFont:GetText() or "", "%[-%]"))
+    assert.is_truthy(firstQuestRow)
+    assert.equals("quest", firstQuestRow.rowData.kind)
+    assert.is_true(firstQuestRow:IsShown())
+
+    questLineRow:RunScript("OnClick")
+
+    local collapsedQuestLineRow = questView.rightRowButtons[1] -- 折叠后的任务线行
+    local hiddenQuestRow = questView.rightRowButtons[2] -- 折叠后隐藏的任务行
+    assert.is_truthy(collapsedQuestLineRow)
+    assert.equals("questline", collapsedQuestLineRow.rowData.kind)
+    assert.is_true(collapsedQuestLineRow:IsShown())
+    assert.is_truthy(string.find(collapsedQuestLineRow.rowFont:GetText() or "", "%[%+%]"))
+    assert.is_truthy(hiddenQuestRow)
+    assert.is_false(hiddenQuestRow:IsShown())
+
+    collapsedQuestLineRow:RunScript("OnClick")
+
+    local reexpandedQuestLineRow = questView.rightRowButtons[1] -- 再次展开后的任务线行
+    local restoredQuestRow = questView.rightRowButtons[2] -- 再次展开后的任务行
+    assert.is_truthy(reexpandedQuestLineRow)
+    assert.equals("questline", reexpandedQuestLineRow.rowData.kind)
+    assert.is_truthy(string.find(reexpandedQuestLineRow.rowFont:GetText() or "", "%[-%]"))
+    assert.is_truthy(restoredQuestRow)
+    assert.equals("quest", restoredQuestRow.rowData.kind)
+    assert.is_true(restoredQuestRow:IsShown())
+  end)
+
+  it("map_questline_expanded_rows_use_single_line_quests_and_remove_active_view_button", function()
+    harness:loadQuestModule()
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local questView = questHooks:getView() -- 任务视图对象
+    installQuestDataStubs()
+
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(hostFrame)
+    hostFrame:Show()
+    questView:setSelected(true)
+    questView:refresh()
+
+    questView.selectedModeKey = "map_questline"
+    questView.selectedExpansionID = 9
+    questView.selectedMapID = 2371
+    questView.expandedQuestLineID = 9901
+    questView.selectedQuestID = nil
+    questView:render()
+
+    local firstQuestRow = questView.rightRowButtons[2] -- 展开后的第一条任务行
+    assert.is_truthy(firstQuestRow)
+    assert.equals("quest", firstQuestRow.rowData.kind)
+    assert.equals(21, firstQuestRow:GetHeight())
+    assert.is_false(firstQuestRow.questLineFont:IsShown())
+    assert.equals("", firstQuestRow.questLineFont:GetText() or "")
+
+    firstQuestRow:RunScript("OnClick")
+
+    local detailRow = questView.rightRowButtons[3] -- 行内详情行
+    assert.is_truthy(detailRow)
+    assert.equals("quest_detail", detailRow.rowData.kind)
+    assert.is_true(detailRow.jumpActionButton:IsShown())
+    assert.is_nil(detailRow.activeActionButton)
+  end)
+
+  it("completed_questline_shows_only_short_completed_status", function()
+    harness:loadQuestModule()
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local questView = questHooks:getView() -- 任务视图对象
+    installQuestDataStubs()
+    Toolbox.Questlines.GetQuestLineProgress = function(questLineID)
+      if questLineID == 9901 then
+        return {
+          completed = 2,
+          total = 2,
+          nextQuestName = "不应显示",
+          isCompleted = true,
+        }, nil
+      end
+      return nil, "unknown questLine"
+    end
+
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(hostFrame)
+    hostFrame:Show()
+    questView:setSelected(true)
+    questView:refresh()
+
+    questView.selectedModeKey = "map_questline"
+    questView.selectedExpansionID = 9
+    questView.selectedMapID = 2371
+    questView.expandedQuestLineID = 9901
+    questView.selectedQuestID = nil
+    questView:render()
+
+    local firstQuestlineRow = questView.rightRowButtons[1] -- 已完成任务线行
+    assert.is_truthy(firstQuestlineRow)
+    assert.equals(Toolbox.L.EJ_QUEST_STATUS_COMPLETED or "Completed", firstQuestlineRow.rowMetaFont:GetText())
+  end)
+
+  it("map_questline_long_breadcrumb_stays_within_search_box_boundary", function()
+    harness:loadQuestModule()
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local questView = questHooks:getView() -- 任务视图对象
+    installQuestDataStubs()
+
+    Toolbox.Questlines.GetQuestNavigationModel = function()
+      return {
+        expansionList = {
+          { id = 9, name = "巨龙时代超长资料片标题示例" },
+        },
+        expansionByID = {
+          [9] = {
+            id = 9,
+            name = "巨龙时代超长资料片标题示例",
+            modes = {
+              {
+                key = "map_questline",
+                name = "地图任务线",
+                entries = {
+                  { kind = "map", id = 2371, name = "欧恩哈拉平原超长地图标题示例" },
+                },
+              },
+            },
+            modeByKey = {
+              map_questline = {
+                key = "map_questline",
+                name = "地图任务线",
+                entries = {
+                  { kind = "map", id = 2371, name = "欧恩哈拉平原超长地图标题示例" },
+                },
+              },
+            },
+          },
+        },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestLinesForMap = function(mapID)
+      if mapID ~= 2371 then
+        return {}, nil
+      end
+      return {
+        { id = 9901, name = "欧恩哈拉开端超长任务线标题示例", questCount = 2 },
+      }, nil
+    end
+    Toolbox.Questlines.GetQuestTabModel = function()
+      return {
+        questLineByID = {
+          [9901] = { id = 9901, name = "欧恩哈拉开端超长任务线标题示例", questCount = 2, UiMapID = 2371 },
+        },
+      }, nil
+    end
+
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(hostFrame)
+    hostFrame:Show()
+    questView:setSelected(true)
+    questView:refresh()
+
+    questView.selectedModeKey = "map_questline"
+    questView.selectedExpansionID = 9
+    questView.selectedMapID = 2371
+    questView.expandedQuestLineID = 9901
+    questView:render()
+
+    local breadcrumbFrameWidth = questView.breadcrumbFrame:GetWidth() -- 导航容器宽度
+    assert.is_true(type(breadcrumbFrameWidth) == "number" and breadcrumbFrameWidth > 0)
+
+    local breadcrumbUsedWidth = 0 -- 导航按钮总占用宽度
+    for buttonIndex, buttonObject in ipairs(questView.breadcrumbButtons or {}) do
+      if buttonObject and buttonObject.IsShown and buttonObject:IsShown() then
+        if buttonIndex > 1 then
+          breadcrumbUsedWidth = breadcrumbUsedWidth + 2
+        end
+        breadcrumbUsedWidth = breadcrumbUsedWidth + (buttonObject:GetWidth() or 0)
+      end
+    end
+
+    assert.is_true(breadcrumbUsedWidth <= breadcrumbFrameWidth)
   end)
 
   it("map_questline_breadcrumb_resolves_parent_map_from_expanded_questline_without_error", function()
@@ -370,7 +722,7 @@ describe("Quest module split", function()
     }, questHooks:getBreadcrumbTextList())
   end)
 
-  it("detail_popup_jump_to_questline_updates_expansion_before_switching_view", function()
+  it("inline_detail_jump_to_questline_updates_expansion_before_switching_view", function()
     harness:loadQuestModule()
     local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
     local questView = questHooks:getView() -- 任务视图对象
@@ -444,6 +796,7 @@ describe("Quest module split", function()
         return {
           questID = questID,
           name = "新的召集",
+          questLineName = "多恩诺嘉尔召集",
           questLineID = 9902,
           UiMapID = 2601,
           questLineExpansionID = 10,
@@ -451,7 +804,15 @@ describe("Quest module split", function()
       end
       return nil, nil
     end
-    Toolbox.Questlines.RequestAndDumpQuestDetailsToChat = function() end
+    Toolbox.Questlines.GetCurrentQuestLogEntries = function()
+      return {
+        { questID = 82001, name = "新的召集", questLineName = "多恩诺嘉尔召集", status = "active", readyForTurnIn = false },
+      }, nil
+    end
+    questDumpCallCount = 0
+    Toolbox.Questlines.RequestAndDumpQuestDetailsToChat = function()
+      questDumpCallCount = questDumpCallCount + 1
+    end
 
     local hostFrame = questHooks:getHostFrame() -- quest 主界面
     assert.is_truthy(hostFrame)
@@ -464,10 +825,15 @@ describe("Quest module split", function()
     questView.selectedMapID = nil
     questView.expandedQuestLineID = nil
 
-    questView:showQuestDetailPopup(82001)
-    assert.is_true(questView.detailPopupJumpButton:IsShown())
+    local firstRow = questView.activeLogCurrentRowButtons[1] -- 当前任务第一行
+    assert.is_truthy(firstRow)
+    firstRow:RunScript("OnClick")
+    assert.equals(0, questDumpCallCount)
 
-    questView.detailPopupJumpButton:RunScript("OnClick")
+    local detailRow = questView.activeLogCurrentRowButtons[2] -- 行内详情行
+    assert.is_truthy(detailRow)
+    assert.is_true(detailRow.jumpActionButton:IsShown())
+    detailRow.jumpActionButton:RunScript("OnClick")
 
     assert.equals("map_questline", questView.selectedModeKey)
     assert.equals(10, questView.selectedExpansionID)

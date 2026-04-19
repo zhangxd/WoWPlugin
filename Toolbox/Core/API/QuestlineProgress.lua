@@ -187,6 +187,21 @@ local function getQuestNameByID(questID)
   return nil
 end
 
+--- 解析任务显示名，优先使用运行时 API，失败时再回退到给定标题。
+---@param questID number
+---@param fallbackName string|nil
+---@return string
+local function resolveQuestDisplayName(questID, fallbackName)
+  local runtimeQuestName = getQuestNameByID(questID) -- 运行时任务名称
+  if type(runtimeQuestName) == "string" and runtimeQuestName ~= "" then
+    return runtimeQuestName
+  end
+  if type(fallbackName) == "string" and fallbackName ~= "" then
+    return fallbackName
+  end
+  return "Quest #" .. tostring(questID or "?")
+end
+
 --- 获取当前运行时的任务日志索引查询函数。
 ---@return function|nil
 local function getLiveQuestLogIndexForQuestID()
@@ -1956,7 +1971,7 @@ function Toolbox.Questlines.GetCurrentQuestLogEntries()
 
       questEntryList[#questEntryList + 1] = {
         questID = questID,
-        name = type(questInfo.title) == "string" and questInfo.title or runtimeState.name,
+        name = resolveQuestDisplayName(questID, type(questInfo.title) == "string" and questInfo.title or runtimeState.name),
         status = runtimeState.status,
         readyForTurnIn = runtimeState.readyForTurnIn,
         typeID = runtimeState.typeID,
@@ -2218,6 +2233,7 @@ function Toolbox.Questlines.GetQuestDetailByID(questID, contextOptions)
         readyForTurnIn = runtimeState.readyForTurnIn,
         UiMapID = nil,
         typeID = runtimeState.typeID,
+        typeLabel = type(runtimeState.typeID) == "number" and getQuestTypeLabel(runtimeState.typeID) or nil,
         mapPos = nil,
         npcIDs = runtimeState.npcIDs,
         npcPos = runtimeState.npcPos,
@@ -2234,6 +2250,16 @@ function Toolbox.Questlines.GetQuestDetailByID(questID, contextOptions)
   local resolvedUiMapID = type(questRecord.UiMapID) == "number" and questRecord.UiMapID
     or type(questLineEntry) == "table" and questLineEntry.UiMapID
     or nil -- 详情页使用的地图 ID
+  local resolvedQuestLineName = nil -- 最终任务线显示名
+  if type(questLineID) == "number" and type(Toolbox.Questlines.GetQuestLineDisplayName) == "function" then
+    local displayName, displayError = Toolbox.Questlines.GetQuestLineDisplayName(questLineID) -- API 优先的任务线名
+    if not displayError and type(displayName) == "string" and displayName ~= "" then
+      resolvedQuestLineName = displayName
+    end
+  end
+  if resolvedQuestLineName == nil and type(questLineEntry) == "table" then
+    resolvedQuestLineName = type(questLineEntry.name) == "string" and questLineEntry.name or nil
+  end
 
   return {
     questID = questID,
@@ -2242,11 +2268,12 @@ function Toolbox.Questlines.GetQuestDetailByID(questID, contextOptions)
     readyForTurnIn = runtimeState.readyForTurnIn,
     UiMapID = resolvedUiMapID,
     typeID = runtimeState.typeID,
+    typeLabel = type(runtimeState.typeID) == "number" and getQuestTypeLabel(runtimeState.typeID) or nil,
     mapPos = resolveQuestMapPos(dataTable, questID, questRecord),
     npcIDs = runtimeState.npcIDs,
     npcPos = runtimeState.npcPos,
     questLineID = questLineID,
-    questLineName = questLineEntry and questLineEntry.name or nil,
+    questLineName = resolvedQuestLineName,
     questLineExpansionID = type(questLineEntry) == "table" and questLineEntry.ExpansionID or nil,
     runtime = runtimeState,
   }, nil

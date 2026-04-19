@@ -7,7 +7,7 @@
 - 关联模块：无
 - 关联文档：
   - `docs/designs/instance-questlines-questcompletist-design.md`
-- 最后更新：2026-04-14
+- 最后更新：2026-04-18
 
 ## 1. 背景
 
@@ -58,7 +58,7 @@ QuestPOI.db2
         UiMap.db2
           ID (= UiMapID)
           Name_lang ──→ ZoneName
-          MapID     ──┐   ⚠️ 待验证：MapID 是否外键到 Map.db2.ID
+          MapID     ──┐   主链，可为空或占位
           Type      ──→ 仅保留 Zone(3) / Dungeon(4)
                     ↓
                 Map.db2
@@ -67,7 +67,23 @@ QuestPOI.db2
                   ExpansionID  ──→ 资料片枚举值
 ```
 
-> **⚠️ 待验证**：在 wow.tools.local 中打开 `UiMap.db2`，确认是否存在 `MapID` 字段且其值域与 `Map.db2.ID` 对应。若不存在，需调研替代连接键。
+当前规则固定为“三段式”：
+
+1. 任务范围主链：
+   `QuestLineXQuest.QuestID -> QuestLineXQuest.QuestLineID`
+   当前正式 CSV 不再只导出“有 POI 的任务”，而是导出**所有带任务线的任务**；地图、类型、条件等字段在此基础上按可用信息左联补齐。
+2. 资料片主链：
+   `QuestPOIBlob.MapID -> Map.ID -> Map.ExpansionID`
+3. 资料片 fallback：
+   当 `MapID <= 0`，或者命中明显占位结果时，改走
+   `QuestPOIBlob.UiMapID -> UiMapAssignment.AreaID -> AreaTable.ContentTuningID -> ContentTuning.ExpansionID`
+   若 `UiMapID` 自身拿不到资料片，则允许沿 `UiMap.ParentUiMapID` 向上回退到稳定内容父级地图后再判定。
+
+说明：
+
+- `MapID` 仍然是首选来源，但不能再假设 `UiMap.MapID` 总能直接给出可用的资料片归属。
+- 当前已在实库中验证过 `MapID = 0` 的任务案例，例如 `26122 / 无底海渊 / 瓦丝琪尔`，主链会误落到 `Classic`，fallback 才能稳定修正到 `Cataclysm`。
+- 对完全拿不到地图、也推不出资料片的任务线任务，`MapExpansionID` 与 `ContentExpansionID` 统一回退到 `99 / Unknown Questline`，供插件侧作为资料片级兜底分组使用。
 
 ### 5.1.1 当前 CSV 字段语义
 
@@ -104,6 +120,12 @@ QuestPOI.db2
    - `ClassCondition`
    - `ClassMaskRaw`
 
+补充说明：
+
+- `UiMapID / UiMapType / ZoneName` 现在表示**玩家可见地图层**，不是简单直抄 `QuestPOIBlob.UiMapID`。
+- 若原始 `UiMap` 是洞穴 / 子区域 / 微地图，则导出时沿 `ParentUiMapID` 上溯到最近的可见父地图后再输出。
+- 例如 `33408` 的原始 POI 在 `图格尔的巢穴`，但正式导出地图会提升为玩家可见的 `霜火岭`。
+
 ### 5.1.2 字段消费约定
 
 为避免插件或离线分析脚本把弱条件误当成真实任务树，约定如下：
@@ -126,14 +148,20 @@ QuestPOI.db2
 - 多值 ID 列统一使用 `=` 连接，保持与 `QuestLineID` 一致。
 - 无值统一输出空字符串，避免用 `0` 混淆"无条件"与"原始值就是 0"。
 - 资料片字段拆分为两组：
-  - `MapExpansion*`：当前地图归属行自己的 `map.ExpansionID`
+  - `MapExpansion*`：当前地图归属行自己的资料片；优先取 `map.ExpansionID`，必要时可由 `UiMapAssignment -> AreaTable -> ContentTuning` fallback 修正
   - `ContentExpansion*`：对该任务所属所有任务线，收集线内全部任务的地图资料片，取最大值作为任务资料片
   - 目的：显式区分“任务出现在旧世界地图上”与“任务属于新版本内容”
+- 地图字段也拆为两层理解：
+  - 原始地图：`QuestPOIBlob.UiMapID`
+  - 显示地图：沿 `UiMap.ParentUiMapID` 上溯后的玩家可见地图
+  - 正式 CSV 导出的是显示地图，因为插件导航和列表展示都应与玩家地图界面保持一致
 - `ClassCondition`：
-  - 由 `ClassMask` 解析为职业 token 列表，如 `rogue`、`warrior=paladin`
+  - 由“有效职业掩码”解析为职业 token 列表，如 `rogue`、`warrior=paladin`
+  - 有效职业掩码 = `PlayerCondition.ClassMask` 优先，缺失时回退 `QuestV2CliTask.FiltClasses`
   - 若出现未覆盖位，回退输出原始数值字符串
 - `FactionCondition`：
-  - 基于 `chrraces.PlayableRaceBit + Alliance` 动态归并
+  - 基于“有效种族掩码”结合 `chrraces.PlayableRaceBit + Alliance` 动态归并
+  - 有效种族掩码 = `PlayerCondition.RaceMask` 优先，缺失时回退 `QuestV2CliTask.FiltRaces`
   - 当前可输出 `alliance`、`horde`、`alliance=horde`、`neutral`
   - 若掩码包含未知位，回退输出原始数值字符串
 - `FactionTag`：
@@ -141,6 +169,17 @@ QuestPOI.db2
   - 当前有效值：`alliance`、`horde`、`neutral`、`shared`
   - `FactionCondition = alliance=horde` 时，`FactionTag = shared`
   - 若无法稳定归并则留空，不猜测阵营
+- QuestLine 级别的 `FactionTags / RaceMaskValues / ClassMaskValues`：
+  - 不直接来自 `QuestLine` 表
+  - 由成员 quest 的有效阵营 / 种族 / 职业限制聚合得到
+  - 用途是让插件在运行时先过滤任务，再决定任务线是否还能显示
+- QuestLine 名称：
+  - 正式 Lua 导出会把 `QuestLine.Name_lang` 直接写入 `questLines[*].Name_lang`
+  - 运行时 `C_QuestLine.GetQuestLineInfo` 若能返回 `questLineName` 则优先使用运行时值
+  - 若运行时 API 取不到名称，则回退导出的 `Name_lang`
+- 无地图任务线：
+  - 最终 Lua 仍为 schema v6 保留一个内部占位 `UiMapID`
+  - 但导航层会把这类任务线作为资料片下的**直连任务线**显示，而不是挂在未知地图节点下
 - `StoryCondition`：
   - 当前只汇总 `completed:<ids>`、`active:<questID>`、`non_active:<questID>`
   - 不纳入 `PrevQuestIDs`，避免与主链前置重复
@@ -586,7 +625,7 @@ python build_quest_table.py
 | 风险 | 缓解方式 |
 |------|----------|
 | `UiMap.MapID` 不直接外键到 `Map.db2` | 调研 `AreaTable.db2` 或其他中间表作为连接键 |
-| `QuestPOI.db2` 覆盖率不足 | 后续叠加方案 B（插件 dump）作补充源 |
+| `QuestPOI.db2` 不能覆盖所有任务地图 | 任务范围以 `QuestLineXQuest` 为主，POI 仅负责补地图；完全无地图的任务线任务统一回退到 `99 / Unknown Questline` |
 | DBC2CSV 定义文件落后于新 build | 从 WoWDBDefs 仓库手动更新 `definitions/` 目录 |
 | 列名随 build 变动 | 脚本中统一做列名断言，版本更新时快速定位 |
 
@@ -608,3 +647,8 @@ python build_quest_table.py
 | 2026-04-15 | 固定 `DB -> CSV -> Lua` 三层导出原则，并补充脚本、目录、文件职责边界 |
 | 2026-04-15 | 为 `instance_questlines` 固定快速迭代特例：跳过 `DataContracts`，改由专门脚本直接从 CSV 聚合正式 Lua |
 | 2026-04-15 | 补充 `quest` 模块的资料片优先导航规则，以及“地图或任务线混合列表项”的运行时结构建议 |
+| 2026-04-17 | 固定 `MapID -> ExpansionID` 主链与 `UiMapAssignment -> AreaTable -> ContentTuning` fallback 规则，并记录 `26122 / 无底海渊 / 瓦丝琪尔` 的修正案例 |
+| 2026-04-17 | 固定阵营 / 职业有效掩码规则：`PlayerCondition` 优先，缺失时回退 `QuestV2CliTask.FiltRaces / FiltClasses`，并说明 QuestLine 级标签来自成员任务聚合 |
+| 2026-04-18 | 导出范围扩展为“所有带任务线的任务”；无地图且无法判定资料片的任务统一回退到 `99 / Unknown Questline` |
+| 2026-04-18 | 固定“玩家可见地图”规则：正式 CSV 的 `UiMapID / ZoneName` 输出使用可见父地图层；`33408` 由 `图格尔的巢穴` 提升为 `霜火岭` |
+| 2026-04-18 | 固定任务线名称导出策略：`questLines[*].Name_lang` 写入正式 Lua，运行时 API 查不到时回退导出的静态名称 |
