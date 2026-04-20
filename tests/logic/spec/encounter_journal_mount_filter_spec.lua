@@ -92,7 +92,7 @@ describe("EncounterJournal mount filter", function()
     assert.is_nil(_G.ToolboxEJDetailMountOnlyCheck)
   end)
 
-  it("lockout_label_shows_only_on_instance_title", function()
+  it("lockout_label_shows_only_on_instance_title_when_lockout_exists", function()
     local encounterJournalFrame = _G.EncounterJournal -- 冒险手册根框体
     local encounterFrame = harness.runtime.CreateFrame("Frame", nil, encounterJournalFrame) -- 首领详情面板
     local infoFrame = harness.runtime.CreateFrame("Frame", nil, encounterFrame) -- 首领详情信息面板
@@ -115,8 +115,60 @@ describe("EncounterJournal mount filter", function()
     assert.is_false(lockoutLabel:IsShown())
 
     instanceTitle:Show()
+    local originalGetCurrentInstance = _G.EJ_GetCurrentInstance -- 旧的 EJ 当前副本查询
+    _G.EJ_GetCurrentInstance = function()
+      return 101
+    end
+    Toolbox.EJ.GetSelectedDifficultyID = function()
+      return 16
+    end
+    Toolbox.EJ.GetLockoutForInstanceAndDifficulty = function()
+      return { difficultyID = 16, difficultyName = "史诗", resetTime = 3600 }
+    end
+    Toolbox.EJ.GetAllLockoutsForInstance = function()
+      return {}
+    end
     scheduler:execute()
     assert.is_true(lockoutLabel:IsShown())
+
+    _G.EJ_GetCurrentInstance = originalGetCurrentInstance
+  end)
+
+  it("lockout_label_hides_when_no_lockout", function()
+    local encounterJournalFrame = _G.EncounterJournal -- 冒险手册根框体
+    local encounterFrame = harness.runtime.CreateFrame("Frame", nil, encounterJournalFrame) -- 首领详情面板
+    local infoFrame = harness.runtime.CreateFrame("Frame", nil, encounterFrame) -- 首领详情信息面板
+    local instanceTitle = harness.runtime.CreateFrame("FontString", nil, infoFrame) -- 副本标题控件
+    infoFrame.instanceTitle = instanceTitle
+    encounterFrame.info = infoFrame
+    encounterJournalFrame.encounter = encounterFrame
+
+    infoFrame:Show()
+    encounterFrame:Show()
+    instanceTitle:Show()
+
+    local originalGetCurrentInstance = _G.EJ_GetCurrentInstance -- 旧的 EJ 当前副本查询
+    _G.EJ_GetCurrentInstance = function()
+      return 101
+    end
+    Toolbox.EJ.GetSelectedDifficultyID = function()
+      return 16
+    end
+    Toolbox.EJ.GetLockoutForInstanceAndDifficulty = function()
+      return nil
+    end
+    Toolbox.EJ.GetAllLockoutsForInstance = function()
+      return {}
+    end
+
+    local scheduler = Toolbox.TestHooks.EncounterJournal:getRefreshScheduler() -- 刷新调度器
+    scheduler:execute()
+
+    local lockoutLabel = Toolbox.EncounterJournalInternal.DetailEnhancer.lockoutLabel -- 重置标签
+    assert.is_false(lockoutLabel and lockoutLabel:IsShown() or false)
+    assert.equals("", lockoutLabel and lockoutLabel:GetText() or "")
+
+    _G.EJ_GetCurrentInstance = originalGetCurrentInstance
   end)
 
   it("lockout_label_reanchors_to_instance_title_when_title_appears_late", function()

@@ -445,6 +445,7 @@ function DetailEnhancer:updateLockoutLabel()
   end
   if not isEncounterDetailVisible() or not isModuleEnabled() or not isDetailInstanceTitleVisible() then
     self.lockoutLabel:SetText("")
+    self.lockoutLabel:SetShown(false)
     return
   end
 
@@ -455,8 +456,10 @@ function DetailEnhancer:updateLockoutLabel()
   if lockout and (lockout.resetTime or 0) > 0 then
     local timeText = formatResetTime(lockout.resetTime or 0)
     self.lockoutLabel:SetText(string.format(loc.EJ_DETAIL_LOCKOUT_FMT or "重置：%s", timeText))
+    self.lockoutLabel:SetShown(true)
   else
-    self.lockoutLabel:SetText(loc.EJ_DETAIL_LOCKOUT_NONE or "重置：无")
+    self.lockoutLabel:SetText("")
+    self.lockoutLabel:SetShown(false)
   end
 end
 
