@@ -748,6 +748,15 @@ def validate_result_rows(
     else:
         raise ValueError(f"unsupported root_type: {root_type}")
 
+    validate_rows_against_contract_validation(contract_document, rows)
+
+
+def validate_rows_against_contract_validation(
+    contract_document,
+    rows: list[dict[str, Any]],
+) -> None:
+    """按 validation.non_null_fields / unique_keys 校验结果行。"""
+
     for row in rows:
         for field_name in contract_document.validation.non_null_fields:
             require(row.get(field_name) not in (None, ""), f"{contract_document.contract.contract_id}: non-null field {field_name} is empty")
@@ -760,6 +769,44 @@ def validate_result_rows(
             marker = tuple(row.get(field_name) for field_name in unique_group)
             require(marker not in seen_markers, f"{contract_document.contract.contract_id}: duplicate key group {unique_group}")
             seen_markers.add(marker)
+
+
+def collect_contract_validation_fields(contract_document) -> set[str]:
+    """收集 validation 中涉及的字段名。"""
+
+    field_names: set[str] = set()
+    field_names.update(str(item) for item in contract_document.validation.required_fields)
+    field_names.update(str(item) for item in contract_document.validation.non_null_fields)
+    for unique_group in contract_document.validation.unique_keys:
+        if not isinstance(unique_group, list):
+            continue
+        field_names.update(str(item) for item in unique_group)
+    return field_names
+
+
+def validate_dataset_rows_against_contract_validation(
+    contract_document,
+    dataset_rows_by_name: dict[str, list[dict[str, Any]]],
+    dataset_columns_by_name: dict[str, list[str]],
+) -> None:
+    """在 datasets 导出路径中补齐 validation 行级约束。"""
+
+    validation_fields = collect_contract_validation_fields(contract_document)
+    if not validation_fields:
+        return
+
+    matched_dataset_names = [
+        dataset_name
+        for dataset_name, column_names in dataset_columns_by_name.items()
+        if validation_fields.issubset(set(column_names))
+    ]
+    require(
+        len(matched_dataset_names) > 0,
+        f"{contract_document.contract.contract_id}: no dataset contains validation fields {sorted(validation_fields)}",
+    )
+
+    for dataset_name in matched_dataset_names:
+        validate_rows_against_contract_validation(contract_document, dataset_rows_by_name.get(dataset_name, []))
 
 
 def validate_document_datasets(
@@ -893,6 +940,7 @@ def export_targets(
                     for dataset_name in dataset_rows_by_name
                 }
                 validate_document_datasets(contract_document, dataset_rows_by_name, dataset_columns_by_name)
+                validate_dataset_rows_against_contract_validation(contract_document, dataset_rows_by_name, dataset_columns_by_name)
             else:
                 validate_result_rows(contract_document, rows, column_names)
 

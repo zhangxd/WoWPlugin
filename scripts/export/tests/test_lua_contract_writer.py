@@ -107,6 +107,24 @@ def build_map_scalar_string_contract() -> dict:
     return data
 
 
+def build_map_array_string_value_contract() -> dict:
+    data = build_map_array_contract()
+    data["contract"]["contract_id"] = "instance_tags"
+    data["contract"]["summary"] = "副本标签集合"
+    data["output"]["lua_file"] = "Toolbox/Data/InstanceTags.lua"
+    data["output"]["lua_table"] = "Toolbox.Data.InstanceTags"
+    data["source"]["query"]["select"] = ["journal_instance_id", "tag_name", "instance_name"]
+    data["structure"]["value_field"] = "tag_name"
+    data["validation"]["required_fields"] = ["journal_instance_id", "tag_name"]
+    data["validation"]["non_null_fields"] = ["journal_instance_id", "tag_name"]
+    data["validation"]["unique_keys"] = [["journal_instance_id", "tag_name"]]
+    data["validation"]["sort_rules"] = [
+        {"field": "journal_instance_id", "direction": "asc"},
+        {"field": "tag_name", "direction": "asc"},
+    ]
+    return data
+
+
 def build_document_contract() -> dict:
     return {
         "contract": {
@@ -338,6 +356,34 @@ def build_document_object_comment_contract() -> dict:
     return data
 
 
+def build_document_object_literal_contract() -> dict:
+    data = build_document_contract()
+    data["contract"]["contract_id"] = "instance_questlines_object_literals"
+    data["structure"]["document_blocks"] = [
+        {
+            "name": "metadata",
+            "metadata": {
+                "schemaVersion": 4,
+                "sourceMode": "live",
+                "generatedAt": "@generated_at",
+            },
+        },
+        {
+            "name": "questFlags",
+            "block_type": "map_object",
+            "key_field": "quest_line_id",
+            "required_fields": ["quest_line_id"],
+            "dedupe_by": ["quest_line_id"],
+            "sort_by": ["quest_line_id"],
+            "value_template": {
+                "Enabled": "enabled",
+                "Maybe": "maybe",
+            },
+        },
+    ]
+    return data
+
+
 class LuaContractWriterTests(unittest.TestCase):
     def load_contract(self, raw_data: dict, contract_id: str) -> object:
         with tempfile.TemporaryDirectory() as temp_dir_name:
@@ -405,6 +451,21 @@ class LuaContractWriterTests(unittest.TestCase):
         self.assertIn("Toolbox.Data.MountDrops = {", rendered_text)
         self.assertIn("[76] = { 68823, 68824 }, -- Zul'Gurub", rendered_text)
         self.assertIn("[78] = { 69224 }, -- Firelands", rendered_text)
+
+    def test_render_contract_lua_quotes_string_values_in_map_array(self) -> None:
+        contract_document = self.load_contract(build_map_array_string_value_contract(), "instance_tags")
+        rendered_text = render_contract_lua(
+            contract_document,
+            rows=[
+                {"journal_instance_id": 76, "tag_name": "legacy", "instance_name": "Zul'Gurub"},
+                {"journal_instance_id": 76, "tag_name": "mount", "instance_name": "Zul'Gurub"},
+            ],
+            contract_file=Path("WoWPlugin/DataContracts/instance_tags.json"),
+            contract_snapshot=Path("snapshots/instance_tags.json"),
+            generated_at=datetime(2026, 4, 11, 10, 22, 33, tzinfo=timezone.utc),
+            generated_by="writer-test",
+        )
+        self.assertIn('[76] = { "legacy", "mount" }, -- Zul\'Gurub', rendered_text)
 
     def test_render_contract_lua_supports_string_values_in_map_scalar(self) -> None:
         contract_document = self.load_contract(build_map_scalar_string_contract(), "quest_type_names")
@@ -502,6 +563,20 @@ class LuaContractWriterTests(unittest.TestCase):
             generated_by="writer-test",
         )
         self.assertIn('[5531] = { ID = 5531, UiMapID = 2371 }, -- Name_lang = "Mock QuestLine A"', rendered_text)
+
+    def test_render_contract_lua_uses_lua_literals_in_map_object_templates(self) -> None:
+        contract_document = self.load_contract(build_document_object_literal_contract(), "instance_questlines_object_literals")
+        rendered_text = render_contract_lua(
+            contract_document,
+            rows=[
+                {"quest_line_id": 5531, "enabled": True, "maybe": None},
+            ],
+            contract_file=Path("WoWPlugin/DataContracts/instance_questlines_object_literals.json"),
+            contract_snapshot=Path("snapshots/instance_questlines_object_literals.json"),
+            generated_at=datetime(2026, 4, 11, 10, 22, 33, tzinfo=timezone.utc),
+            generated_by="writer-test",
+        )
+        self.assertIn("[5531] = { Enabled = true, Maybe = nil },", rendered_text)
 
 
 if __name__ == "__main__":

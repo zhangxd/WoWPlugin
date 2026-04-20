@@ -159,7 +159,7 @@ def render_map_array(contract_document: ContractDocument, rows: list[Mapping[str
     ]
     for key_value in sorted(grouped_values):
         bucket = grouped_values[key_value]
-        values_text = ", ".join(str(item) for item in sorted(bucket["values"]))
+        values_text = ", ".join(render_lua_literal(item) for item in sorted(bucket["values"]))
         line_text = f"  [{key_value}] = {{ {values_text} }},"
         if comment_field:
             line_text += f" -- {to_comment_text(bucket['comment'])}"
@@ -191,18 +191,13 @@ def render_object_value_from_template(row: Mapping[str, Any], value_template: Ma
     value_parts: list[str] = []
     for output_key, source_field in value_template.items():
         source_value = row[source_field]
-        if isinstance(source_value, str):
-            rendered_value = f'"{escape_lua_string(source_value)}"'
-        elif isinstance(source_value, list):
+        if isinstance(source_value, list):
             rendered_items: list[str] = []
             for item in source_value:
-                if isinstance(item, str):
-                    rendered_items.append(f'"{escape_lua_string(item)}"')
-                else:
-                    rendered_items.append(str(item))
+                rendered_items.append(render_lua_literal(item))
             rendered_value = "{ " + ", ".join(rendered_items) + " }"
         else:
-            rendered_value = str(source_value)
+            rendered_value = render_lua_literal(source_value)
         value_parts.append(f"{output_key} = {rendered_value}")
     return "{ " + ", ".join(value_parts) + " }"
 
