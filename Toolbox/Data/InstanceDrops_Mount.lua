@@ -2,9 +2,9 @@
 @contract_id instance_drops_mount
 @schema_version 1
 @contract_file WoWPlugin/DataContracts/instance_drops_mount.json
-@contract_snapshot WoWTools/outputs/toolbox/contract_snapshots/instance_drops_mount/instance_drops_mount__schema_v1__20260410T172755Z.json
-@generated_at 2026-04-10T17:27:55Z
-@generated_by WoWTools/scripts/export/export_toolbox_all.py
+@contract_snapshot WoWTools/outputs/toolbox/contract_snapshots/instance_drops_mount/instance_drops_mount__schema_v1__20260420T180952Z.json
+@generated_at 2026-04-20T18:09:52Z
+@generated_by WoWPlugin/scripts/export/export_toolbox_one.py
 @data_source wow.db
 @summary 副本坐骑掉落 itemID 集合
 @overwrite_notice 此文件由工具生成，手改会被覆盖

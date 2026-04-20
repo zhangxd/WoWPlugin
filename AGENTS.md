@@ -82,17 +82,17 @@
 
 ### 脚本位置与入口
 
-- 导出脚本位于上级目录：`../WoWTools/scripts/export/`
+- 导出脚本位于本仓库：`scripts/export/`
 - 一键导出：`export_toolbox_all.py`
 - 单项导出：`export_toolbox_one.py`
 - `one` 的主选择器是 `contract_id`（示例：`instance_map_ids`）；可兼容输出文件名选择器（示例：`InstanceMapIDs.lua`）。
 - 导出时必须显式或隐式指向：
-  - `--contract-dir ../WoWPlugin/DataContracts`
-  - `--data-dir ../WoWPlugin/Toolbox/Data`
+  - `--contract-dir DataContracts`
+  - `--data-dir Toolbox/Data`
 
 ### 契约驱动约定
 
-- `WoWTools` 必须先读取 `DataContracts/<contract_id>.json`，再执行查询与导出。
+- `WoWPlugin/scripts/export` 必须先读取 `DataContracts/<contract_id>.json`，再执行查询与导出。
 - `all` 脚本必须从契约目录加载全部 `active` 契约，不再扫描 `Toolbox/Data/*.lua` 文件头决定导出范围。
 - 契约必须同时定义：
   - `contract`：身份、版本、状态

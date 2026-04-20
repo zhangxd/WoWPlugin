@@ -3,7 +3,7 @@
 - 文档类型：设计
 - 状态：草稿
 - 主题：quest-db2-export-pipeline
-- 适用范围：`WoWTools/scripts/export/**`
+- 适用范围：`scripts/export/**`
 - 关联模块：无
 - 关联文档：
   - `docs/designs/instance-questlines-questcompletist-design.md`
@@ -368,7 +368,7 @@ QuestPOI.db2
 
 ### 5.2.2 脚本、目录、文件职责
 
-#### `WoWTools/scripts/export/`
+#### `scripts/export/`
 
 - `quest_db2_export_pipeline.py`
   - 职责：从 `wow.db` 生成 `quest_expansion_map.csv`
@@ -617,7 +617,7 @@ python build_quest_table.py
 
 - **数据与存档**：输出 `quest_expansion_map.csv`，作为 `DataContracts/` 下静态数据源候选。
 - **API 与模块边界**：不涉及插件运行时 API；仅影响导出工具层。
-- **文件与目录**：新增 `WoWTools/scripts/export/build_quest_table.py`、`update_quest_table.sh`。
+- **文件与目录**：新增 `scripts/export/build_quest_table.py`、`update_quest_table.sh`。
 - **文档回写**：若落地为正式数据源，需更新 `docs/Toolbox-addon-design.md` 中的数据来源说明。
 
 ## 7. 风险与回退
@@ -652,3 +652,4 @@ python build_quest_table.py
 | 2026-04-18 | 导出范围扩展为“所有带任务线的任务”；无地图且无法判定资料片的任务统一回退到 `99 / Unknown Questline` |
 | 2026-04-18 | 固定“玩家可见地图”规则：正式 CSV 的 `UiMapID / ZoneName` 输出使用可见父地图层；`33408` 由 `图格尔的巢穴` 提升为 `霜火岭` |
 | 2026-04-18 | 固定任务线名称导出策略：`questLines[*].Name_lang` 写入正式 Lua，运行时 API 查不到时回退导出的静态名称 |
+

@@ -1594,21 +1594,31 @@ local function appendQuestLineToGroup(groupEntry, questLineEntry)
   groupEntry.questLines[#groupEntry.questLines + 1] = questLineEntry
 end
 
---- 判断任务线是否适合按地图稳定归类。
+--- 解析任务线可用于稳定分组的地图 ID。
+--- 兼容策略：
+--- 1. 若存在 PrimaryUiMapID + PrimaryMapShare，则仅当占比 >= 0.60 视为稳定；
+--- 2. 若缺少 Primary 字段（旧数据或测试注入），回退使用 UiMapID。
 ---@param questLineEntry table|nil
----@return boolean
-local function isQuestLineMapStable(questLineEntry)
+---@return number|nil
+local function resolveStableMapIDForQuestLine(questLineEntry)
   if type(questLineEntry) ~= "table" then
-    return false
+    return nil
   end
-  if type(questLineEntry.PrimaryUiMapID) ~= "number" or questLineEntry.PrimaryUiMapID <= 0 then
-    return false
-  end
+
+  local primaryMapID = questLineEntry.PrimaryUiMapID -- 主地图 ID
   local primaryMapShare = questLineEntry.PrimaryMapShare -- 主地图占比
-  if type(primaryMapShare) ~= "number" then
-    return false
+  if type(primaryMapID) == "number" and primaryMapID > 0 and type(primaryMapShare) == "number" then
+    if primaryMapShare >= 0.60 then
+      return primaryMapID
+    end
+    return nil
   end
-  return primaryMapShare >= 0.60
+
+  local uiMapID = questLineEntry.UiMapID -- 旧结构兼容地图 ID
+  if type(uiMapID) == "number" and uiMapID > 0 then
+    return uiMapID
+  end
+  return nil
 end
 
 --- 向混合导航列表追加直接任务线项。
@@ -1704,9 +1714,10 @@ local function buildQuestNavigationModel()
         local expansionEntry = ensureExpansionEntry(expansionID) -- 资料片分组
         for _, questLineID in ipairs(questLineIDList or {}) do
           local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
-          local mapEntry = type(questLineEntry) == "table" and questTabModel.mapByID and questTabModel.mapByID[questLineEntry.UiMapID] or nil -- 当前地图
+          local stableMapID = resolveStableMapIDForQuestLine(questLineEntry) -- 可稳定归类的地图 ID
+          local mapEntry = type(stableMapID) == "number" and questTabModel.mapByID and questTabModel.mapByID[stableMapID] or nil -- 当前地图
           if type(questLineEntry) == "table" then
-            if isQuestLineMapStable(questLineEntry) and type(mapEntry) == "table" then
+            if type(stableMapID) == "number" and type(mapEntry) == "table" then
               local mapGroup = ensureCategoryGroup(
                 expansionEntry.modeByKey.map_questline.entries,
                 expansionEntry._mapEntryByID,

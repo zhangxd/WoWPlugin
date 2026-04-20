@@ -79,9 +79,9 @@
 | 数据 / API | 来源 | 用途 |
 |------------|------|------|
 | `Toolbox.Data.MountDrops` | 静态数据 | 判断副本是否掉落坐骑，并构建详情页“仅坐骑”集合。 |
-| `Toolbox.Data.InstanceMapIDs` | 静态数据 | 将 `GetSavedInstanceInfo` 返回的实例 ID 反查为 `journalInstanceID`。 |
-| `Toolbox.EJ` | 领域对外 API | 提供锁定查询、锁定摘要与坐骑掉落集合查询。 |
-| `GetSavedInstanceInfo` / `GetNumSavedInstances` | WoW 原生 API | 构建列表叠加文本、详情页重置标签与两处锁定摘要。 |
+| `Toolbox.Data.InstanceMapIDs` | 静态数据 | 提供 `journalInstanceID -> mapID` 单向映射，仅作为运行时 API 不可用时的兜底。 |
+| `Toolbox.EJ` | 领域对外 API | 提供锁定查询、锁定摘要与坐骑掉落集合查询；锁定匹配优先走 `C_EncounterJournal.GetInstanceForGameMap(mapID)`，其次对齐 `EJ_GetInstanceInfo(journalInstanceID)` 的 mapID；若 SavedInstances 的 mapID 不可判定，则按副本名做兜底匹配。详情页读取当前副本时优先 `EJ_GetCurrentInstance()`，无效时回退 `EncounterJournal.instanceID`。 |
+| `GetSavedInstanceInfo` / `GetNumSavedInstances` | WoW 原生 API | 构建列表叠加文本、详情页重置标签与两处锁定摘要；`GetSavedInstanceInfo` 第 14 个返回值按 mapID 处理。 |
 
 ### 5.4 用户可见行为
 
@@ -90,7 +90,7 @@
 - 开启“显示副本 CD”时，列表行内会直接显示重置时间；团队副本同时显示首领进度。
 - 鼠标悬停副本列表项时，tooltip 会补充当前角色的锁定难度、进度、精确重置时间和延长状态。
 - 在掉落页内可切换“仅坐骑”，只保留当前副本掉落列表中的坐骑物品。
-- 详情页标题区会显示当前选中难度的重置时间；若当前难度没有锁定，则显示“重置：无”。
+- 详情页标题区会优先显示当前选中难度的重置时间；若当前难度未命中但该副本存在其他难度锁定，则回退显示最近重置时间；若该副本无任何锁定，显示“重置：无”。
 - 小地图飞出菜单中的“冒险手册”入口和 `EJMicroButton` tooltip 都会显示当前副本锁定摘要。
 
 ### 5.5 设置与存档
@@ -140,3 +140,4 @@
 |------|------|
 | 2026-04-12 | 初稿：按当时代码现状归并冒险指南全部能力 |
 | 2026-04-15 | 对齐当前实现：移除已拆分到 `quest` 模块的任务能力，重写为副本列表、详情页与锁定摘要设计 |
+| 2026-04-21 | 锁定映射策略改为运行时 API 优先（`C_EncounterJournal.GetInstanceForGameMap` + `EJ_GetInstanceInfo` mapID 对齐），`InstanceMapIDs` 仅做单向兜底；当 SavedInstances 的 mapID 不可判定时按副本名兜底匹配；详情页重置时间新增“当前难度未命中时回退可用锁定”规则 |

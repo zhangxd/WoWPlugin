@@ -35,17 +35,17 @@
   Responsibility: Contract source of truth for `InstanceQuestlines.lua`
 - `tests/validate_data_contracts.py`
   Responsibility: Plugin-side static validator for contract filenames, required sections, version metadata, and Lua header alignment
-- `../WoWTools/scripts/export/contract_model.py`
+- `scripts/export/contract_model.py`
   Responsibility: Parse and validate contract JSON into typed runtime objects
-- `../WoWTools/scripts/export/contract_io.py`
+- `scripts/export/contract_io.py`
   Responsibility: Resolve contract directory, load/enumerate contracts, and write immutable snapshots
-- `../WoWTools/scripts/export/lua_contract_writer.py`
+- `scripts/export/lua_contract_writer.py`
   Responsibility: Build tagged Lua headers and render supported root types
-- `../WoWTools/scripts/export/tests/test_contract_model.py`
+- `scripts/export/tests/test_contract_model.py`
   Responsibility: Unit tests for JSON parsing and schema validation
-- `../WoWTools/scripts/export/tests/test_contract_io.py`
+- `scripts/export/tests/test_contract_io.py`
   Responsibility: Unit tests for contract discovery and snapshot writing
-- `../WoWTools/scripts/export/tests/test_lua_contract_writer.py`
+- `scripts/export/tests/test_lua_contract_writer.py`
   Responsibility: Unit tests for header generation and fixed root-type rendering
 
 ### Modify
@@ -66,11 +66,11 @@
   Responsibility: Document `DataContracts/` as the plugin-side source of truth
 - `../WoWTools/README.md`
   Responsibility: Document contract-driven export flow, `--contract-dir`, and snapshot location
-- `../WoWTools/scripts/export/toolbox_db_export.py`
+- `scripts/export/toolbox_db_export.py`
   Responsibility: Replace hard-coded `RULES` registry with contract-driven orchestration
-- `../WoWTools/scripts/export/export_toolbox_all.py`
+- `scripts/export/export_toolbox_all.py`
   Responsibility: Export all active contracts from `WoWPlugin/DataContracts`
-- `../WoWTools/scripts/export/export_toolbox_one.py`
+- `scripts/export/export_toolbox_one.py`
   Responsibility: Export a single contract by `contract_id` (keep output-file fallback only if tests require compatibility)
 
 ## Chunk 1: Plugin Contract Source Of Truth
@@ -231,10 +231,10 @@ git commit -m "测试: 接入数据契约静态校验入口" -m "- [测试] run_
 ### Task 3: Write failing WoWTools unit tests for contract parsing and snapshots
 
 **Files:**
-- Create: `../WoWTools/scripts/export/contract_model.py`
-- Create: `../WoWTools/scripts/export/contract_io.py`
-- Create: `../WoWTools/scripts/export/tests/test_contract_model.py`
-- Create: `../WoWTools/scripts/export/tests/test_contract_io.py`
+- Create: `scripts/export/contract_model.py`
+- Create: `scripts/export/contract_io.py`
+- Create: `scripts/export/tests/test_contract_model.py`
+- Create: `scripts/export/tests/test_contract_io.py`
 
 - [ ] **Step 1: Write failing unit tests for contract parsing**
 
@@ -301,8 +301,8 @@ Because `../WoWTools` is not a git repository in this workspace, do not fabricat
 ### Task 4: Write failing unit tests for tagged headers and fixed root-type writers
 
 **Files:**
-- Create: `../WoWTools/scripts/export/lua_contract_writer.py`
-- Create: `../WoWTools/scripts/export/tests/test_lua_contract_writer.py`
+- Create: `scripts/export/lua_contract_writer.py`
+- Create: `scripts/export/tests/test_lua_contract_writer.py`
 
 - [ ] **Step 1: Write failing unit tests for header generation**
 
@@ -370,9 +370,9 @@ Repeat the same checkpoint rule: save passing test evidence, do not invent a git
 ### Task 5: Replace the hard-coded export registry with contract-driven orchestration
 
 **Files:**
-- Modify: `../WoWTools/scripts/export/toolbox_db_export.py`
-- Modify: `../WoWTools/scripts/export/export_toolbox_all.py`
-- Modify: `../WoWTools/scripts/export/export_toolbox_one.py`
+- Modify: `scripts/export/toolbox_db_export.py`
+- Modify: `scripts/export/export_toolbox_all.py`
+- Modify: `scripts/export/export_toolbox_one.py`
 
 - [ ] **Step 1: Write a failing integration test around single-contract export**
 
@@ -425,13 +425,13 @@ Run from `D:\WoWProject\WoWTools`:
 
 ```bash
 python -m unittest discover -s scripts/export/tests -p "test_*.py"
-python scripts/export/export_toolbox_one.py instance_map_ids --db data/sqlite/wow.db --contract-dir ..\WoWPlugin\DataContracts --data-dir ..\WoWPlugin\Toolbox\Data
+python scripts/export/export_toolbox_one.py instance_map_ids --db data/sqlite/wow.db --contract-dir DataContracts --data-dir Toolbox\Data
 ```
 
 Expected:
 
 - unit tests PASS
-- single-contract export prints an `[OK]` or `[DONE]` line and writes `..\WoWPlugin\Toolbox\Data\InstanceMapIDs.lua`
+- single-contract export prints an `[OK]` or `[DONE]` line and writes `Toolbox\Data\InstanceMapIDs.lua`
 
 - [ ] **Step 6: Checkpoint the non-git WoWTools changes**
 
@@ -482,9 +482,9 @@ Expected: FAIL because the current generated Lua files still use the old free-fo
 Run from `D:\WoWProject\WoWTools`:
 
 ```bash
-python scripts/export/export_toolbox_one.py instance_map_ids --db data/sqlite/wow.db --contract-dir ..\WoWPlugin\DataContracts --data-dir ..\WoWPlugin\Toolbox\Data
-python scripts/export/export_toolbox_one.py instance_drops_mount --db data/sqlite/wow.db --contract-dir ..\WoWPlugin\DataContracts --data-dir ..\WoWPlugin\Toolbox\Data
-python scripts/export/export_toolbox_one.py instance_questlines --db data/sqlite/wow.db --contract-dir ..\WoWPlugin\DataContracts --data-dir ..\WoWPlugin\Toolbox\Data
+python scripts/export/export_toolbox_one.py instance_map_ids --db data/sqlite/wow.db --contract-dir DataContracts --data-dir Toolbox\Data
+python scripts/export/export_toolbox_one.py instance_drops_mount --db data/sqlite/wow.db --contract-dir DataContracts --data-dir Toolbox\Data
+python scripts/export/export_toolbox_one.py instance_questlines --db data/sqlite/wow.db --contract-dir DataContracts --data-dir Toolbox\Data
 ```
 
 Expected: all three commands succeed and snapshots are written under `outputs/toolbox/contract_snapshots/`
@@ -543,7 +543,7 @@ Run from `D:\WoWProject\WoWTools`:
 
 ```bash
 python -m unittest discover -s scripts/export/tests -p "test_*.py"
-python scripts/export/export_toolbox_all.py --db data/sqlite/wow.db --contract-dir ..\WoWPlugin\DataContracts --data-dir ..\WoWPlugin\Toolbox\Data
+python scripts/export/export_toolbox_all.py --db data/sqlite/wow.db --contract-dir DataContracts --data-dir Toolbox\Data
 ```
 
 Expected: PASS and `[DONE]` output covering all active contracts
@@ -579,8 +579,8 @@ git commit -m "文档: 对齐契约驱动的数据导出流程" -m "- [文档] A
 ### WoWTools
 
 - `python -m unittest discover -s scripts/export/tests -p "test_*.py"`
-- `python scripts/export/export_toolbox_one.py instance_map_ids --db data/sqlite/wow.db --contract-dir ..\WoWPlugin\DataContracts --data-dir ..\WoWPlugin\Toolbox\Data`
-- `python scripts/export/export_toolbox_all.py --db data/sqlite/wow.db --contract-dir ..\WoWPlugin\DataContracts --data-dir ..\WoWPlugin\Toolbox\Data`
+- `python scripts/export/export_toolbox_one.py instance_map_ids --db data/sqlite/wow.db --contract-dir DataContracts --data-dir Toolbox\Data`
+- `python scripts/export/export_toolbox_all.py --db data/sqlite/wow.db --contract-dir DataContracts --data-dir Toolbox\Data`
 
 ## Done Definition
 
@@ -590,3 +590,4 @@ git commit -m "文档: 对齐契约驱动的数据导出流程" -m "- [文档] A
 - immutable snapshots are written for each export
 - plugin-side validators catch contract/header drift
 - docs no longer describe the old header-discovery workflow
+

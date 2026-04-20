@@ -3,7 +3,7 @@
 - 文档类型：计划
 - 状态：待执行
 - 主题：quest-db2-export-pipeline
-- 适用范围：`../WoWTools/scripts/export/**`、`../WoWTools/outputs/toolbox/**`、`Toolbox/Data/InstanceQuestlines.lua`
+- 适用范围：`scripts/export/**`、`../WoWTools/outputs/toolbox/**`、`Toolbox/Data/InstanceQuestlines.lua`
 - 关联模块：quest
 - 关联文档：
   - `docs/designs/quest-db2-export-pipeline-design.md`
@@ -31,11 +31,11 @@
   - `docs/plans/quest-db2-export-pipeline-plan.md`
 - 修改：
   - `docs/designs/quest-db2-export-pipeline-design.md`
-  - `../WoWTools/scripts/export/quest_db2_export_pipeline.py`（后续若需补注释或命令帮助）
-  - `../WoWTools/scripts/export/questline_runtime_preview_export.py`（后续若需补注释或命令帮助）
-  - `../WoWTools/scripts/export/toolbox_db_export.py`（后续正式接入 CSV 聚合时）
+  - `scripts/export/quest_db2_export_pipeline.py`（后续若需补注释或命令帮助）
+  - `scripts/export/questline_runtime_preview_export.py`（后续若需补注释或命令帮助）
+  - `scripts/export/toolbox_db_export.py`（后续正式接入 CSV 聚合时）
 - 验证：
-  - `../WoWTools/scripts/export/tests/*`
+  - `scripts/export/tests/*`
 
 ## 4. 执行步骤
 
@@ -76,3 +76,4 @@
 | 日期 | 内容 |
 |------|------|
 | 2026-04-15 | 初稿：固定 `DB -> CSV -> Lua` 三层导出职责，并梳理脚本、目录、文件的角色边界 |
+

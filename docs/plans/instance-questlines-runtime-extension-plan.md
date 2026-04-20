@@ -3,7 +3,7 @@
 - 文档类型：计划
 - 状态：待执行
 - 主题：instance-questlines-runtime-extension
-- 适用范围：`../WoWTools/scripts/export/**`、`Toolbox/Data/InstanceQuestlines.lua`、`Toolbox/Core/API/QuestlineProgress.lua`
+- 适用范围：`scripts/export/**`、`Toolbox/Data/InstanceQuestlines.lua`、`Toolbox/Core/API/QuestlineProgress.lua`
 - 关联模块：quest
 - 关联文档：
   - `docs/designs/quest-db2-export-pipeline-design.md`
@@ -29,8 +29,8 @@
 ## 3. 影响文件
 
 - 新增：
-  - `../WoWTools/scripts/export/tests/test_instance_questlines_runtime_extension.py`
-  - `../WoWTools/scripts/export/export_instance_questlines_runtime.py`
+  - `scripts/export/tests/test_instance_questlines_runtime_extension.py`
+  - `scripts/export/export_instance_questlines_runtime.py`
 - 修改：
   - `Toolbox/Data/InstanceQuestlines.lua`（工具生成）
   - `Toolbox/Core/API/QuestlineProgress.lua`
@@ -38,7 +38,7 @@
   - `tests/logic/spec/questline_progress_spec.lua`
   - `docs/designs/quest-db2-export-pipeline-design.md`
 - 验证：
-  - `../WoWTools/scripts/export/tests/*`
+  - `scripts/export/tests/*`
   - `tests/logic/spec/questline_progress_spec.lua`
 
 ## 4. 执行步骤
@@ -93,3 +93,4 @@
 |------|------|
 | 2026-04-15 | 初稿：规划在兼容 `schema v6` 的前提下接入多地图、任务资料片与阵营/种族/职业限制字段 |
 | 2026-04-15 | 调整实施路径：`instance_questlines` 改走专门脚本直出正式 Lua，不再依赖 `DataContracts` |
+

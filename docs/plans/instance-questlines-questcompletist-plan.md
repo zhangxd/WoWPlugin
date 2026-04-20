@@ -3,7 +3,7 @@
 - 文档类型：计划
 - 状态：执行中
 - 主题：instance-questlines-questcompletist
-- 适用范围：`../WoWTools/scripts/export/**`、`DataContracts/instance_questlines.json`、`Toolbox/Data/InstanceQuestlines.lua`
+- 适用范围：`scripts/export/**`、`DataContracts/instance_questlines.json`、`Toolbox/Data/InstanceQuestlines.lua`
 - 关联模块：quest
 - 关联文档：
   - `docs/specs/instance-questlines-questcompletist-spec.md`
@@ -33,7 +33,7 @@
 ## 3. 影响文件
 
 - 修改：
-  - `../WoWTools/scripts/export/toolbox_db_export.py`
+  - `scripts/export/toolbox_db_export.py`
   - `DataContracts/instance_questlines.json`
   - `Toolbox/Core/API/QuestlineProgress.lua`
   - `Toolbox/Data/InstanceQuestlines.lua`
@@ -43,7 +43,7 @@
   - `docs/Toolbox-addon-design.md`
   - 本需求 / 设计 / 计划文档
 - 新增：
-  - 视导出器现状，按需新增 `../WoWTools/scripts/export/tests/*` 测试文件或测试用例
+  - 视导出器现状，按需新增 `scripts/export/tests/*` 测试文件或测试用例
 
 ## 4. 执行步骤
 
@@ -61,7 +61,7 @@
 - 命令 / 检查点 1：运行 `python tests/run_all.py` 或当前仓库用于逻辑测试的最小命令，至少覆盖 `questline_progress_spec.lua` 与 `questline_progress_live_data_spec.lua`。
 - 命令 / 检查点 2：运行 `python tests/validate_settings_subcategories.py`，确认静态结构校验通过。
 - 命令 / 检查点 3：运行 `python -m unittest scripts.export.tests.test_contract_export` 以及相关 QuestCompletist / 导出测试。
-- 命令 / 检查点 4：运行 `python scripts/export/export_toolbox_one.py instance_questlines --contract-dir ../WoWPlugin/DataContracts --data-dir ../WoWPlugin/Toolbox/Data`，必要时附带 QuestCompletist 路径参数或环境变量。
+- 命令 / 检查点 4：运行 `python scripts/export/export_toolbox_one.py instance_questlines --contract-dir DataContracts --data-dir Toolbox/Data`，必要时附带 QuestCompletist 路径参数或环境变量。
 - 检查点 5：抽查生成的 `InstanceQuestlines.lua` 是否只保留 `quests`、`questLines`、`expansions`，且存在多个资料片分组。
 - 游戏内验证点：本回合以离线导出与静态数据结构验证为主，不直接要求游戏内 UI 点验。
 
@@ -86,3 +86,4 @@
 | 2026-04-13 | 初稿：记录 QuestCompletist 补充源接入的执行步骤与验证口径 |
 | 2026-04-13 | 更新：计划扩展为 schema v6 收敛、插件侧消费适配与经典旧世过滤导出 |
 | 2026-04-13 | 更新：导出范围改为全量资料片，验证口径同步调整 |
+

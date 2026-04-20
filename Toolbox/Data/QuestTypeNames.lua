@@ -2,9 +2,9 @@
 @contract_id quest_type_names
 @schema_version 1
 @contract_file WoWPlugin/DataContracts/quest_type_names.json
-@contract_snapshot WoWTools/outputs/toolbox/contract_snapshots/quest_type_names/quest_type_names__schema_v1__20260419T174746Z.json
-@generated_at 2026-04-19T17:47:46Z
-@generated_by WoWTools/scripts/export/export_toolbox_one.py
+@contract_snapshot WoWTools/outputs/toolbox/contract_snapshots/quest_type_names/quest_type_names__schema_v1__20260420T181030Z.json
+@generated_at 2026-04-20T18:10:30Z
+@generated_by WoWPlugin/scripts/export/export_toolbox_one.py
 @data_source wow.db
 @summary 任务类型 ID 到任务类型名称映射
 @overwrite_notice 此文件由工具生成，手改会被覆盖

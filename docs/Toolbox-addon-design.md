@@ -119,7 +119,7 @@ flowchart TB
 |------|------|------|
 | `Toolbox.Chat` | `Core/API/Chat.lua` | 面向玩家的默认聊天框输出（`PrintAddonMessage`）、插件 TOC 元数据（`GetAddOnMetadata`）。**模块内禁止**直接调用 `DEFAULT_CHAT_FRAME:AddMessage`；新增聊天类能力须先扩展本 API。 |
 | `Toolbox.Tooltip` | `Core/API/Tooltip.lua` | `InstallDefaultAnchorHook()`、`RefreshDriver()`；读取 `modules.tooltip_anchor`。**模块 tooltip_anchor** 仅负责 `RegisterModule` 与设置 UI，不直接 `hooksecurefunc` GameTooltip。 |
-| `Toolbox.EJ` | `Core/API/EncounterJournal.lua` | 冒险指南相关高层查询入口：当前页签语境、坐骑掉落集合、实例锁定、当前难度锁定、当前角色锁定摘要与 tooltip 行文本。业务模块禁止直接复制 `GetSavedInstanceInfo` / `EJ_*` 查询逻辑。 |
+| `Toolbox.EJ` | `Core/API/EncounterJournal.lua` | 冒险指南相关高层查询入口：当前页签语境、坐骑掉落集合、实例锁定、当前难度锁定、当前角色锁定摘要与 tooltip 行文本。锁定匹配优先走运行时 map 映射（`C_EncounterJournal.GetInstanceForGameMap` 与 `EJ_GetInstanceInfo` mapID 对齐），静态 `InstanceMapIDs` 仅作为单向兜底；当 SavedInstances 的 mapID 不可判定时按副本名兜底。业务模块禁止直接复制 `GetSavedInstanceInfo` / `EJ_*` 查询逻辑。 |
 | `Toolbox.Questlines` | `Core/API/QuestlineProgress.lua` | 任务线静态结构缓存、任务线显示名解析、运行时任务字段、任务导航模型、当前任务日志、任务详情、Quest Inspector 快照与任务线进度。`InstanceQuestlines` 在 schema v6 下收敛为 `quests / questLines / expansions` 三块：`questLines` 保留 `ID / UiMapID / QuestIDs`，资料片归属通过顶层 `expansions[expansionID]` 提供；任务线名称不再作为结构化运行时字段导出。任务类型名称基线由 `Toolbox.Data.QuestTypeNames` 提供（契约 `quest_type_names`，来源 `questinfo`），类型名缺失时统一回退为“普通任务”（`EJ_QUEST_TYPE_DEFAULT`）。独立 `quest` 模块与 Quest Inspector 统一通过本 API 获取模型，而不是直接拼装静态数据。 |
 | `Toolbox.MinimapButton` | `Modules/MinimapButton.lua` | `RegisterFlyoutEntry(def)` 供其他模块向小地图按钮悬停菜单追加项；`def` 至少包含 `id` 与 `onClick`，可选 `titleKey`/`tooltipKey`/`icon`/`order`/`augmentTooltip`（用于在悬停提示中追加动态内容）。禁止直接操作 `flyoutRegistry` 或 `flyoutSlotIds`。 |
 
@@ -318,8 +318,9 @@ ToolboxDB = {
 | **目标** | 在不替换暴雪冒险指南主框架的前提下，增强副本列表、详情页与外部入口锁定摘要。 |
 | **模块归属** | 主体 UI 与 hook 落在 `Modules/EncounterJournal.lua`；小地图“冒险手册”飞出项落在 `Modules/MinimapButton.lua`。 |
 | **领域对外 API** | `Toolbox.EJ` 负责锁定、坐骑掉落和锁定摘要。 |
+| **锁定映射策略** | `Toolbox.EJ.GetAllLockoutsForInstance` 以 `GetSavedInstanceInfo` 第 14 返回值（mapID）为输入，优先通过 `C_EncounterJournal.GetInstanceForGameMap` 映射 `journalInstanceID`；若运行时 API 不可用，再与 `EJ_GetInstanceInfo(journalInstanceID)` 的 mapID 对齐，并以 `InstanceMapIDs` 单向表兜底；若 mapID 不可判定，则按副本名兜底匹配。 |
 | **列表增强** | 提供“仅坐骑”筛选、列表行内 CD 叠加、悬停锁定详情。 |
-| **详情页增强** | 在掉落页提供“仅坐骑”筛选；在详情页标题区域显示当前难度的重置时间。 |
+| **详情页增强** | 在掉落页提供“仅坐骑”筛选；在详情页标题区域显示重置时间，优先当前难度，当前难度未命中时回退该副本可用锁定。当前副本 ID 优先读取 `EJ_GetCurrentInstance()`，无效时回退 `EncounterJournal.instanceID`。 |
 | **外部入口** | 小地图飞出菜单中的“冒险手册”项和 `EJMicroButton` tooltip 都会显示当前副本锁定摘要。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
 
 ### 5.7 独立任务模块（quest）
@@ -411,3 +412,4 @@ ToolboxDB = {
 | 2026-04-16 | `quest` 导航与布局重构：底部双视图固定、左上角通用导航路径、`active_log` 上下布局、`map_questline` 左树改为节点驱动并去掉“当前任务”入口 |
 | 2026-04-20 | 任务类型数据与兜底口径更新：`QuestTypeNames` 由 `quest_type_names` 契约（`questinfo`）导出；类型名缺失时统一显示“普通任务”（`EJ_QUEST_TYPE_DEFAULT`） |
 | 2026-04-20 | 任务视图资料片显示口径更新：资料片版本编号在任务界面按 1-based 渲染（经典旧世=1），底层 `ExpansionID` 保持原始值 |
+| 2026-04-21 | `Toolbox.EJ` 锁定映射口径更新：`GetSavedInstanceInfo` 的 mapID 与运行时映射优先对齐（`C_EncounterJournal.GetInstanceForGameMap` / `EJ_GetInstanceInfo`），`InstanceMapIDs` 改为单向兜底；mapID 不可判定时按副本名兜底；详情页重置标签在当前难度未命中时回退显示可用锁定 |

@@ -3,7 +3,7 @@
 - 文档类型：设计
 - 状态：已确认
 - 主题：instance-questlines-questcompletist
-- 适用范围：`../WoWTools/scripts/export/**`、`DataContracts/instance_questlines.json`
+- 适用范围：`scripts/export/**`、`DataContracts/instance_questlines.json`
 - 关联模块：quest
 - 关联文档：
   - `docs/specs/instance-questlines-questcompletist-spec.md`
@@ -93,7 +93,7 @@
   - `Toolbox.Questlines` 内部校验和建模逻辑需适配 schema v6
   - 任务详情不再依赖静态任务地图字段
 - 目录 / 文件：
-  - 主要修改 `../WoWTools/scripts/export/toolbox_db_export.py` 及其测试
+  - 主要修改 `scripts/export/toolbox_db_export.py` 及其测试
   - 需要更新 `DataContracts/instance_questlines.json`
   - 需要更新 `Toolbox/Core/API/QuestlineProgress.lua`
   - 需要更新逻辑测试与静态校验脚本
@@ -131,3 +131,4 @@
 | 2026-04-13 | 初稿：确定 QuestCompletist 作为 `instance_questlines` 的导出补充源接入方案 |
 | 2026-04-13 | 更新：方案扩展为 schema v6 收敛，移除中间块并只保留经典旧世且链路完整的任务线 |
 | 2026-04-13 | 更新：取消经典旧世限定，schema v6 改为导出全量资料片且链路完整的任务线 |
+

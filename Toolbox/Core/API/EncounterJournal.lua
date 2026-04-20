@@ -13,23 +13,110 @@ Toolbox.EJ = Toolbox.EJ or {}
 -- 内部辅助函数
 -- ============================================================================
 
---- 将 instanceID + difficultyID 映射到 journalInstanceID
----@param instanceID number 副本 ID（来自 GetSavedInstanceInfo 第14个返回值）
----@param difficultyID number 难度 ID
----@return number|nil journalInstanceID
-local function mapInstanceIDToJournalID(instanceID, difficultyID)
-  local mapData = Toolbox.Data and Toolbox.Data.InstanceMapIDs
-  if not mapData then return nil end
+--- 读取 journalInstanceID 对应的地图 ID（优先运行时 API，静态表兜底）。
+---@param journalInstanceID number 冒险手册副本 ID
+---@return number|nil mapID
+local function getJournalMapID(journalInstanceID)
+  if type(journalInstanceID) ~= "number" then
+    return nil
+  end
 
-  -- InstanceMapIDs 的结构是 [journalInstanceID] = mapID
-  -- 我们需要反向查找：给定 instanceID (mapID)，找到对应的 journalInstanceID
-  for journalID, mapID in pairs(mapData) do
-    if mapID == instanceID then
-      return journalID
+  -- Blizzard AdventureGuideUtil 使用 select(10, EJ_GetInstanceInfo(journalInstanceID)) 读取 mapID。
+  if type(EJ_GetInstanceInfo) == "function" then
+    local infoSuccess, _, _, _, _, _, _, _, _, _, mapID = pcall(EJ_GetInstanceInfo, journalInstanceID)
+    if infoSuccess and type(mapID) == "number" and mapID > 0 then
+      return mapID
+    end
+  end
+
+  local mapData = Toolbox.Data and Toolbox.Data.InstanceMapIDs
+  local staticMapID = type(mapData) == "table" and mapData[journalInstanceID] or nil
+  if type(staticMapID) == "number" and staticMapID > 0 then
+    return staticMapID
+  end
+
+  return nil
+end
+
+--- 读取 journalInstanceID 对应的副本名称（用于 mapID 不可用时兜底）。
+---@param journalInstanceID number 冒险手册副本 ID
+---@return string|nil instanceName
+local function getJournalInstanceName(journalInstanceID)
+  if type(journalInstanceID) ~= "number" then
+    return nil
+  end
+
+  if type(EJ_GetInstanceInfo) ~= "function" then
+    return nil
+  end
+
+  local infoSuccess, instanceName = pcall(EJ_GetInstanceInfo, journalInstanceID)
+  if infoSuccess and type(instanceName) == "string" and instanceName ~= "" then
+    return instanceName
+  end
+
+  return nil
+end
+
+--- 将地图 ID 映射到 journalInstanceID（运行时权威路径）。
+---@param mapID number 地图 ID（GetSavedInstanceInfo 第14个返回值）
+---@return number|nil journalInstanceID
+local function mapGameMapIDToJournalID(mapID)
+  if type(mapID) ~= "number" then
+    return nil
+  end
+
+  if C_EncounterJournal and type(C_EncounterJournal.GetInstanceForGameMap) == "function" then
+    local mapSuccess, journalInstanceID = pcall(C_EncounterJournal.GetInstanceForGameMap, mapID)
+    if mapSuccess and type(journalInstanceID) == "number" and journalInstanceID > 0 then
+      return journalInstanceID
     end
   end
 
   return nil
+end
+
+local function doesSavedInstanceNameMatch(savedInstanceName, targetInstanceName)
+  if type(savedInstanceName) ~= "string" or savedInstanceName == "" then
+    return false
+  end
+  if type(targetInstanceName) ~= "string" or targetInstanceName == "" then
+    return false
+  end
+  return savedInstanceName == targetInstanceName
+end
+
+--- 判断 SavedInstances 条目是否属于目标 journalInstanceID。
+---@param savedMapID number SavedInstances 的 instanceId（mapID）
+---@param savedInstanceName string|nil SavedInstances 副本名
+---@param journalInstanceID number 目标冒险手册副本 ID
+---@param targetMapID number|nil 目标副本 mapID（可选）
+---@param targetInstanceName string|nil 目标副本名（可选）
+---@return boolean
+local function isSavedInstanceForJournal(savedMapID, savedInstanceName, journalInstanceID, targetMapID, targetInstanceName)
+  if type(journalInstanceID) ~= "number" then
+    return false
+  end
+
+  if type(savedMapID) == "number" and savedMapID > 0 then
+    local runtimeJournalID = mapGameMapIDToJournalID(savedMapID)
+    if type(runtimeJournalID) == "number" then
+      return runtimeJournalID == journalInstanceID
+    end
+
+    if type(targetMapID) == "number" and targetMapID > 0 then
+      return savedMapID == targetMapID
+    end
+
+    -- 运行时 API 不可用时，保留静态表同键对齐兜底（禁止 mapID 反向遍历，避免歧义）。
+    local mapData = Toolbox.Data and Toolbox.Data.InstanceMapIDs
+    if type(mapData) == "table" and mapData[journalInstanceID] == savedMapID then
+      return true
+    end
+  end
+
+  -- mapID 缺失或不可判定时，按副本名称兜底匹配。
+  return doesSavedInstanceNameMatch(savedInstanceName, targetInstanceName)
 end
 
 --- 格式化重置剩余时间（用于 tooltip 文本）。
@@ -78,6 +165,8 @@ function Toolbox.EJ.GetAllLockoutsForInstance(journalInstanceID)
 
   local lockouts = {}
   local numSaved = GetNumSavedInstances()
+  local targetMapID = getJournalMapID(journalInstanceID)
+  local targetInstanceName = getJournalInstanceName(journalInstanceID)
 
   for i = 1, numSaved do
     -- 安全调用（防止 API 变更）
@@ -87,20 +176,18 @@ function Toolbox.EJ.GetAllLockoutsForInstance(journalInstanceID)
           instanceIDMostSig, isRaid, maxPlayers, difficultyName,
           numEncounters, encounterProgress, extendDisabled, instanceId = pcall(GetSavedInstanceInfo, i)
 
-    if success and instanceId then
-      local mappedJID = mapInstanceIDToJournalID(instanceId, difficulty)
-      -- 只添加未过期的锁定（reset > 0 表示还有剩余时间）
-      if mappedJID == journalInstanceID and reset and reset > 0 then
-        table.insert(lockouts, {
-          difficultyID = difficulty,
-          difficultyName = difficultyName or "Unknown",
-          resetTime = reset or 0,
-          encounterProgress = encounterProgress or 0,
-          numEncounters = numEncounters or 0,
-          isRaid = isRaid == true,
-          isExtended = extended == true
-        })
-      end
+    local mappedSuccess = isSavedInstanceForJournal(instanceId, name, journalInstanceID, targetMapID, targetInstanceName)
+    -- 只添加未过期的锁定（reset > 0 表示还有剩余时间）
+    if mappedSuccess and reset and reset > 0 then
+      table.insert(lockouts, {
+        difficultyID = difficulty,
+        difficultyName = difficultyName or "Unknown",
+        resetTime = reset or 0,
+        encounterProgress = encounterProgress or 0,
+        numEncounters = numEncounters or 0,
+        isRaid = isRaid == true,
+        isExtended = extended == true
+      })
     end
   end
 

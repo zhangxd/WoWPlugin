@@ -3,7 +3,7 @@
 - 文档类型：需求
 - 状态：可执行
 - 主题：instance-questlines-questcompletist
-- 适用范围：`DataContracts/instance_questlines.json`、`../WoWTools/scripts/export/**`、`Toolbox/Data/InstanceQuestlines.lua`
+- 适用范围：`DataContracts/instance_questlines.json`、`scripts/export/**`、`Toolbox/Data/InstanceQuestlines.lua`
 - 关联模块：quest
 - 关联文档：
   - `docs/Toolbox-addon-design.md`
@@ -112,3 +112,4 @@
 | 2026-04-13 | 初稿：记录 QuestCompletist 接入 `instance_questlines` 的确认决策与验收标准 |
 | 2026-04-13 | 更新：按用户确认调整为 schema v6，移除中间块并只导出经典旧世且链路完整的任务线 |
 | 2026-04-13 | 更新：按用户追加要求改为导出全量资料片数据，不再限制 `ExpansionID == 0` |
+

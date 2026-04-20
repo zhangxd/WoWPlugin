@@ -18,6 +18,18 @@ local function isMountFilterChecked()
   return Internal.IsMountFilterChecked()
 end
 
+local function getCurrentScrollBox()
+  return Internal.GetCurrentScrollBox()
+end
+
+local function getJournalInstanceID(elementData)
+  return Internal.GetJournalInstanceID(elementData)
+end
+
+local function formatResetTime(seconds)
+  return Internal.FormatResetTime(seconds)
+end
+
 local function getEncounterInfoFrame()
   return Internal.GetEncounterInfoFrame()
 end
@@ -166,20 +178,26 @@ end
 -- 详情页增强对象（仅坐骑筛选 + 标题后锁定文本）
 -- ============================================================================
 
-local function getEncounterInfoFrame()
-  local ej = _G.EncounterJournal
-  local encounterFrame = ej and ej.encounter
-  return encounterFrame and encounterFrame.info or nil
-end
-
 local function getCurrentDetailJournalInstanceID()
   if type(EJ_GetCurrentInstance) ~= "function" then
+    local encounterJournalFrame = _G.EncounterJournal -- 冒险手册根框体
+    local fallbackInstanceID = encounterJournalFrame and encounterJournalFrame.instanceID -- 当前界面记录的副本 ID
+    if type(fallbackInstanceID) == "number" and fallbackInstanceID > 0 then
+      return fallbackInstanceID
+    end
     return nil
   end
   local ok, journalInstanceID = pcall(EJ_GetCurrentInstance)
-  if ok and type(journalInstanceID) == "number" then
+  if ok and type(journalInstanceID) == "number" and journalInstanceID > 0 then
     return journalInstanceID
   end
+
+  local encounterJournalFrame = _G.EncounterJournal -- 冒险手册根框体
+  local fallbackInstanceID = encounterJournalFrame and encounterJournalFrame.instanceID -- 当前界面记录的副本 ID
+  if type(fallbackInstanceID) == "number" and fallbackInstanceID > 0 then
+    return fallbackInstanceID
+  end
+
   return nil
 end
 
@@ -287,84 +305,84 @@ local function getDetailDifficultyControl()
   return info.Difficulty or info.difficulty or _G.EncounterJournalEncounterFrameInfoDifficulty
 end
 
-local function getDetailLootContainer()
-  local info = getEncounterInfoFrame()
+local function getDetailInstanceTitleControl()
+  local info = getEncounterInfoFrame() -- 详情信息面板
   if not info then
     return nil
   end
-  return info.LootContainer or info.lootContainer
+  return info.InstanceTitle or info.instanceTitle or _G.EncounterJournalEncounterFrameInfoInstanceTitle
+end
+
+local function getVisibleTitleTextWidth(titleControl)
+  if not titleControl then
+    return 0
+  end
+  local stringWidth = 0 -- 标题文本宽度
+  if titleControl.GetStringWidth then
+    local stringWidthSuccess, widthValue = pcall(function() return titleControl:GetStringWidth() end)
+    if stringWidthSuccess and type(widthValue) == "number" and widthValue > 0 then
+      stringWidth = widthValue
+    end
+  end
+  if titleControl.GetWidth then
+    local controlWidthSuccess, controlWidth = pcall(function() return titleControl:GetWidth() end)
+    if controlWidthSuccess and type(controlWidth) == "number" and controlWidth > 0 and stringWidth > controlWidth then
+      stringWidth = controlWidth
+    end
+  end
+  return stringWidth
+end
+
+local function isDetailInstanceTitleVisible()
+  local titleControl = getDetailInstanceTitleControl() -- 副本标题控件
+  if not titleControl or not titleControl.IsShown then
+    return false
+  end
+  local shownSuccess, shownValue = pcall(function() return titleControl:IsShown() end)
+  return shownSuccess and shownValue == true
+end
+
+local function pickFallbackLockout(lockoutList)
+  if type(lockoutList) ~= "table" or #lockoutList == 0 then
+    return nil
+  end
+
+  local chosenLockout = nil -- 回退锁定记录
+  for _, lockoutEntry in ipairs(lockoutList) do
+    if type(lockoutEntry) == "table" and (lockoutEntry.resetTime or 0) > 0 then
+      if not chosenLockout or (lockoutEntry.resetTime or math.huge) < (chosenLockout.resetTime or math.huge) then
+        chosenLockout = lockoutEntry
+      end
+    end
+  end
+
+  return chosenLockout or lockoutList[1]
+end
+
+local function resolveDetailLockout(journalInstanceID, difficultyID)
+  local lockoutInfo = nil -- 当前难度锁定信息
+  if Toolbox.EJ and Toolbox.EJ.GetLockoutForInstanceAndDifficulty then
+    lockoutInfo = Toolbox.EJ.GetLockoutForInstanceAndDifficulty(journalInstanceID, difficultyID)
+  end
+  if lockoutInfo then
+    return lockoutInfo
+  end
+
+  -- 当前难度未命中时，回退到该副本已有锁定（优先最近重置）。
+  if Toolbox.EJ and Toolbox.EJ.GetAllLockoutsForInstance then
+    local allLockouts = Toolbox.EJ.GetAllLockoutsForInstance(journalInstanceID)
+    return pickFallbackLockout(allLockouts)
+  end
+
+  return nil
 end
 
 local DetailEnhancer = {
-  mountOnlyCheck = nil,
   lockoutLabel = nil,
 }
 
 function DetailEnhancer:isMountOnlyEnabled()
   return getModuleDb().detailMountOnlyEnabled == true
-end
-
-function DetailEnhancer:syncMountOnlyCheck()
-  if self.mountOnlyCheck then
-    local loc = Toolbox.L or {}
-    if self.mountOnlyCheck.Text and self.mountOnlyCheck.Text.SetText then
-      self.mountOnlyCheck.Text:SetText(loc.EJ_DETAIL_MOUNT_ONLY_LABEL or "")
-    end
-    self.mountOnlyCheck:SetChecked(self:isMountOnlyEnabled())
-  end
-end
-
-function DetailEnhancer:requestLootRefresh()
-  if type(_G.EncounterJournal_LootUpdate) == "function" then
-    pcall(_G.EncounterJournal_LootUpdate)
-  end
-end
-
-function DetailEnhancer:ensureMountOnlyCheck()
-  if self.mountOnlyCheck then
-    return
-  end
-
-  local info = getEncounterInfoFrame()
-  if not info then
-    return
-  end
-
-  local check = CreateFrame("CheckButton", "ToolboxEJDetailMountOnlyCheck", info, "UICheckButtonTemplate")
-  check:SetSize(22, 22)
-  check:SetScript("OnClick", function(btn)
-    local moduleDb = getModuleDb()
-    moduleDb.detailMountOnlyEnabled = btn:GetChecked() and true or false
-    self:syncMountOnlyCheck()
-    self:requestLootRefresh()
-  end)
-  check:SetScript("OnEnter", function(btn)
-    local loc = Toolbox.L or {}
-    if Toolbox.Tooltip and Toolbox.Tooltip.SetSkipAnchorOverride then
-      Toolbox.Tooltip.SetSkipAnchorOverride(GameTooltip, true)
-    end
-    Runtime.TooltipSetOwner(GameTooltip, btn, "ANCHOR_RIGHT")
-    Runtime.TooltipClear(GameTooltip)
-    Runtime.TooltipSetText(GameTooltip, loc.EJ_DETAIL_MOUNT_ONLY_LABEL or "")
-    Runtime.TooltipAddLine(GameTooltip, loc.EJ_DETAIL_MOUNT_ONLY_HINT or "", 1, 1, 1, true)
-    Runtime.TooltipShow(GameTooltip)
-  end)
-  check:SetScript("OnLeave", function()
-    if Toolbox.Tooltip and Toolbox.Tooltip.SetSkipAnchorOverride then
-      Toolbox.Tooltip.SetSkipAnchorOverride(GameTooltip, false)
-    end
-    Runtime.TooltipHide(GameTooltip)
-  end)
-
-  local difficultyControl = getDetailDifficultyControl()
-  if difficultyControl then
-    check:SetPoint("LEFT", difficultyControl, "RIGHT", 10, 0)
-  else
-    check:SetPoint("TOPRIGHT", info, "TOPRIGHT", -12, -10)
-  end
-
-  self.mountOnlyCheck = check
-  self:syncMountOnlyCheck()
 end
 
 function DetailEnhancer:ensureLockoutLabel()
@@ -381,27 +399,43 @@ function DetailEnhancer:ensureLockoutLabel()
   label:SetJustifyH("LEFT")
   label:SetText("")
 
-  local titleAnchor = info.InstanceTitle or info.instanceTitle or _G.EncounterJournalEncounterFrameInfoTitle
-  local difficultyControl = getDetailDifficultyControl()
+  self.lockoutLabel = label
+  self:refreshLockoutLabelAnchor()
+end
+
+function DetailEnhancer:refreshLockoutLabelAnchor()
+  if not self.lockoutLabel then
+    return
+  end
+
+  local info = getEncounterInfoFrame() -- 详情信息面板
+  if not info then
+    return
+  end
+
+  local label = self.lockoutLabel -- 重置时间标签
+  local titleAnchor = getDetailInstanceTitleControl() -- 副本名称锚点（右侧详情区标题）
+  local difficultyControl = getDetailDifficultyControl() -- 难度控件锚点
+
+  if label.ClearAllPoints then
+    label:ClearAllPoints()
+  end
   if titleAnchor and titleAnchor.SetPoint then
-    label:SetPoint("LEFT", titleAnchor, "RIGHT", 8, 0)
+    local textWidth = getVisibleTitleTextWidth(titleAnchor) -- 副本标题可见文本宽度
+    label:SetPoint("LEFT", titleAnchor, "LEFT", textWidth + 8, 0)
   elseif difficultyControl and difficultyControl.SetPoint then
     label:SetPoint("RIGHT", difficultyControl, "LEFT", -12, 0)
   else
     label:SetPoint("TOPLEFT", info, "TOPLEFT", 180, -10)
   end
-
-  self.lockoutLabel = label
 end
 
 function DetailEnhancer:updateVisibility()
   local detailShown = isEncounterDetailVisible()
-  local lootShown = isEncounterLootTabVisible()
-  if self.mountOnlyCheck then
-    self.mountOnlyCheck:SetShown(detailShown and lootShown and isModuleEnabled())
-  end
+  local instanceTitleShown = isDetailInstanceTitleVisible()
   if self.lockoutLabel then
-    self.lockoutLabel:SetShown(detailShown and isModuleEnabled())
+    self:refreshLockoutLabelAnchor()
+    self.lockoutLabel:SetShown(detailShown and instanceTitleShown and isModuleEnabled())
   end
 end
 
@@ -409,7 +443,7 @@ function DetailEnhancer:updateLockoutLabel()
   if not self.lockoutLabel then
     return
   end
-  if not isEncounterDetailVisible() or not isModuleEnabled() then
+  if not isEncounterDetailVisible() or not isModuleEnabled() or not isDetailInstanceTitleVisible() then
     self.lockoutLabel:SetText("")
     return
   end
@@ -417,10 +451,7 @@ function DetailEnhancer:updateLockoutLabel()
   local loc = Toolbox.L or {}
   local journalInstanceID = getCurrentDetailJournalInstanceID()
   local difficultyID = Toolbox.EJ.GetSelectedDifficultyID and Toolbox.EJ.GetSelectedDifficultyID() or nil
-  local lockout = nil
-  if Toolbox.EJ and Toolbox.EJ.GetLockoutForInstanceAndDifficulty then
-    lockout = Toolbox.EJ.GetLockoutForInstanceAndDifficulty(journalInstanceID, difficultyID)
-  end
+  local lockout = resolveDetailLockout(journalInstanceID, difficultyID) -- 展示用锁定信息
   if lockout and (lockout.resetTime or 0) > 0 then
     local timeText = formatResetTime(lockout.resetTime or 0)
     self.lockoutLabel:SetText(string.format(loc.EJ_DETAIL_LOCKOUT_FMT or "重置：%s", timeText))
@@ -482,9 +513,8 @@ function DetailEnhancer:applyMountOnlyFilter()
 end
 
 function DetailEnhancer:refresh()
-  self:ensureMountOnlyCheck()
   self:ensureLockoutLabel()
-  self:syncMountOnlyCheck()
+  -- 详情页右侧“仅坐骑”按钮已移除，避免与列表筛选入口重复。
   self:updateVisibility()
   self:updateLockoutLabel()
   self:applyMountOnlyFilter()

@@ -651,8 +651,8 @@ describe("QuestlineProgress mock data injection", function()
     }, navigationModel.expansionList)
 
     assert.same({
-      { id = 2371, questLineIDs = { 9901 } },
       { id = 2372, questLineIDs = { 9902 } },
+      { id = 2371, questLineIDs = { 9901 } },
     }, collectQuestLineIDs(navigationModel.expansionByID[9].modeByKey.map_questline.entries))
     assert.same({
       { id = 2373, questLineIDs = { 9903 } },
