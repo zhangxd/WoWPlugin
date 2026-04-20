@@ -120,7 +120,7 @@ flowchart TB
 | `Toolbox.Chat` | `Core/API/Chat.lua` | 面向玩家的默认聊天框输出（`PrintAddonMessage`）、插件 TOC 元数据（`GetAddOnMetadata`）。**模块内禁止**直接调用 `DEFAULT_CHAT_FRAME:AddMessage`；新增聊天类能力须先扩展本 API。 |
 | `Toolbox.Tooltip` | `Core/API/Tooltip.lua` | `InstallDefaultAnchorHook()`、`RefreshDriver()`；读取 `modules.tooltip_anchor`。**模块 tooltip_anchor** 仅负责 `RegisterModule` 与设置 UI，不直接 `hooksecurefunc` GameTooltip。 |
 | `Toolbox.EJ` | `Core/API/EncounterJournal.lua` | 冒险指南相关高层查询入口：当前页签语境、坐骑掉落集合、实例锁定、当前难度锁定、当前角色锁定摘要与 tooltip 行文本。业务模块禁止直接复制 `GetSavedInstanceInfo` / `EJ_*` 查询逻辑。 |
-| `Toolbox.Questlines` | `Core/API/QuestlineProgress.lua` | 任务线静态结构缓存、任务线显示名解析、运行时任务字段、任务导航模型、当前任务日志、任务详情、Quest Inspector 快照与任务线进度。`InstanceQuestlines` 在 schema v6 下收敛为 `quests / questLines / expansions` 三块：`questLines` 保留 `ID / UiMapID / QuestIDs`，资料片归属通过顶层 `expansions[expansionID]` 提供；任务线名称不再作为结构化运行时字段导出。独立 `quest` 模块与 Quest Inspector 统一通过本 API 获取模型，而不是直接拼装静态数据。 |
+| `Toolbox.Questlines` | `Core/API/QuestlineProgress.lua` | 任务线静态结构缓存、任务线显示名解析、运行时任务字段、任务导航模型、当前任务日志、任务详情、Quest Inspector 快照与任务线进度。`InstanceQuestlines` 在 schema v6 下收敛为 `quests / questLines / expansions` 三块：`questLines` 保留 `ID / UiMapID / QuestIDs`，资料片归属通过顶层 `expansions[expansionID]` 提供；任务线名称不再作为结构化运行时字段导出。任务类型名称基线由 `Toolbox.Data.QuestTypeNames` 提供（契约 `quest_type_names`，来源 `questinfo`），类型名缺失时统一回退为“普通任务”（`EJ_QUEST_TYPE_DEFAULT`）。独立 `quest` 模块与 Quest Inspector 统一通过本 API 获取模型，而不是直接拼装静态数据。 |
 | `Toolbox.MinimapButton` | `Modules/MinimapButton.lua` | `RegisterFlyoutEntry(def)` 供其他模块向小地图按钮悬停菜单追加项；`def` 至少包含 `id` 与 `onClick`，可选 `titleKey`/`tooltipKey`/`icon`/`order`/`augmentTooltip`（用于在悬停提示中追加动态内容）。禁止直接操作 `flyoutRegistry` 或 `flyoutSlotIds`。 |
 
 **模块间协作原则**
@@ -172,7 +172,7 @@ sequenceDiagram
 | 小地图打开设置按钮 | `minimap_button` | `modules.minimap_button`（`enabled`/`debug`/`showMinimapButton`/`showCoordsOnMinimap`/`minimapCoordsAnchor`/`minimapPos`/`buttonShape`/`flyoutExpand`/`flyoutSlotIds`/`flyoutLauncherGap`/`flyoutPad`/`flyoutGap`） | 独立子页面：启用、调试、清理并重建、是否显示小地图按钮、坐标显示、恢复默认位置；款式（圆/方）、展开方式（纵向/横向）、悬停项顺序与功能池拖放、`flyoutSlotIds`；内置“冒险手册”飞出项会打开冒险指南，并在 tooltip 里追加当前副本锁定摘要。 |
 | 加载聊天提示 | `chat_notify` | `modules.chat_notify`（`enabled`/`debug`） | 独立子页面：启用、调试、清理并重建、说明文案 |
 | 冒险指南增强 | `encounter_journal` | `modules.encounter_journal`（`enabled`/`debug`/`mountFilterEnabled`/`lockoutOverlayEnabled`/`detailMountOnlyEnabled`）+ `Toolbox.Data.MountDrops` + `Toolbox.Data.InstanceMapIDs` + `Toolbox.EJ` | 覆盖副本列表“仅坐骑”、列表锁定叠加、悬停锁定详情、详情页“仅坐骑”、详情页重置标签，以及 `EJMicroButton` / 小地图“冒险手册” tooltip 锁定摘要。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
-| 独立任务浏览 | `quest` | `modules.quest`（`enabled`/`debug`/`questlineTreeEnabled`/`questNavExpansionID`/`questNavModeKey`/`questNavSelectedMapID`/`questNavSelectedTypeKey`/`questNavSearchText`/`questNavSkinPreset`/`questInspectorLastQuestID`/`questRecentCompletedList`/`questRecentCompletedMax`/`questNavExpandedQuestLineID`/`questlineTreeCollapsed`）+ `Toolbox.Data.InstanceQuestlines` + `Toolbox.Data.QuestTypeNames` + `Toolbox.Questlines` | 覆盖独立任务界面、底部 `active_log` / `map_questline` 双视图、左上角通用导航路径、节点驱动的任务线左树、任务搜索、最近完成、任务 tooltip / 详情弹框 / 聊天调试输出，以及 Quest Inspector 设置子页面。详见 [designs/quest-design.md](./designs/quest-design.md)。 |
+| 独立任务浏览 | `quest` | `modules.quest`（`enabled`/`debug`/`questlineTreeEnabled`/`questNavExpansionID`/`questNavModeKey`/`questNavSelectedMapID`/`questNavSelectedTypeKey`/`questNavSearchText`/`questNavSkinPreset`/`questInspectorLastQuestID`/`questRecentCompletedList`/`questRecentCompletedMax`/`questNavExpandedQuestLineID`/`questlineTreeCollapsed`）+ `Toolbox.Data.InstanceQuestlines` + `Toolbox.Data.QuestTypeNames`（`quest_type_names` 契约导出）+ `Toolbox.Questlines` | 覆盖独立任务界面、底部 `active_log` / `map_questline` 双视图、左上角通用导航路径、节点驱动的任务线左树、任务搜索、最近完成、任务 tooltip / 详情弹框 / 聊天调试输出，以及 Quest Inspector 设置子页面。详见 [designs/quest-design.md](./designs/quest-design.md)。 |
 | （核心不提供业务数据） | — | `global` 其余键 | 调试、开发者选项可放 `global` |
 
 新增功能时：**新增一行 + 新文件 + TOC 一条**，不必改核心契约。
@@ -330,7 +330,7 @@ ToolboxDB = {
 | **模块归属** | 主体 UI、设置页与事件入口落在 `Modules/Quest.lua`；导航与主区渲染落在 `Modules/Quest/QuestNavigation.lua`；小地图“任务”飞出项落在 `Modules/MinimapButton.lua`。 |
 | **领域对外 API** | `Toolbox.Questlines` 负责任务导航模型、当前任务日志、任务详情、任务线进度与 Quest Inspector 快照。 |
 | **主界面** | 使用独立 `ToolboxQuestFrame` 作为宿主；底部固定提供 `当前任务` / `任务线` 两个视图页签，左上角显示当前选中节点的通用导航路径。 |
-| **视图模式** | 当前仅保留 `active_log` 与 `map_questline` 两种模式：前者改为上下布局（上方当前任务、下方历史完成，可折叠），后者按节点驱动的资料片 / 地图 / 任务线层级浏览任务。 |
+| **视图模式** | 当前仅保留 `active_log` 与 `map_questline` 两种模式：前者改为上下布局（上方当前任务、下方历史完成，可折叠），后者按节点驱动的资料片 / 地图 / 任务线层级浏览任务。资料片版本编号在任务界面显示层按“从 1 开始”渲染（经典旧世=1），不改静态数据中的原始 `ExpansionID`。 |
 | **任务联动** | 点击任务后显示详情弹框；若存在任务线归属，可回跳到对应地图 / 任务线；同时调用 `Toolbox.Questlines.RequestAndDumpQuestDetailsToChat()` 输出运行时详情到聊天框。 |
 | **Quest Inspector** | 在 `quest` 设置下新增独立子页面：输入 `QuestID` 后，通过 `Toolbox.Questlines.RequestQuestInspectorSnapshot()` 查询运行时字段与任务线字段，并在可复制结果区展示。详见 [designs/quest-design.md](./designs/quest-design.md)。 |
 
@@ -409,3 +409,5 @@ ToolboxDB = {
 | 2026-04-13 | `InstanceQuestlines` 升级到 schema v6：静态数据收敛为 `quests / questLines / expansions`；`questLines[*].QuestIDs` 保留有序任务列表，顶层 `expansions` 作为唯一资料片入口；移除 `questLineXQuest`、`questPOIBlobs`、`questPOIPoints` 与 `quests[*].UiMapID`，并导出全量且链路完整的任务线 |
 | 2026-04-15 | 任务能力拆分为独立 `quest` 模块：总设计回写 `quest` 的模块映射、存档结构、TOC 顺序与 `encounter_journal` / `quest` 边界 |
 | 2026-04-16 | `quest` 导航与布局重构：底部双视图固定、左上角通用导航路径、`active_log` 上下布局、`map_questline` 左树改为节点驱动并去掉“当前任务”入口 |
+| 2026-04-20 | 任务类型数据与兜底口径更新：`QuestTypeNames` 由 `quest_type_names` 契约（`questinfo`）导出；类型名缺失时统一显示“普通任务”（`EJ_QUEST_TYPE_DEFAULT`） |
+| 2026-04-20 | 任务视图资料片显示口径更新：资料片版本编号在任务界面按 1-based 渲染（经典旧世=1），底层 `ExpansionID` 保持原始值 |

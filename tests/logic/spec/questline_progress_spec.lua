@@ -87,7 +87,10 @@ describe("QuestlineProgress mock data injection", function()
       L = {
         EJ_QUEST_TYPE_CAMPAIGN = "Campaign",
         EJ_QUEST_TYPE_SIDE_STORY = "Side Story",
+        EJ_QUEST_TYPE_DEFAULT = "Normal Quest",
         EJ_QUEST_TYPE_UNKNOWN_FMT = "Unknown Type (%s)",
+        EJ_QUEST_EXPANSION_VERSION_FMT = "Expansion %d · %s",
+        EJ_QUEST_EXPANSION_0 = "Classic",
         EJ_QUEST_EXPANSION_9 = "Dragonflight",
         EJ_QUEST_EXPANSION_10 = "The War Within",
         EJ_QUEST_EXPANSION_UNKNOWN_FMT = "Expansion #%s",
@@ -490,7 +493,12 @@ describe("QuestlineProgress mock data injection", function()
   it("quest_type_label_uses_mapping_and_fallback", function()
     assert.is_function(Toolbox.Questlines.GetQuestTypeLabel)
     assert.equals("Campaign", Toolbox.Questlines.GetQuestTypeLabel(12))
-    assert.equals("Unknown Type (999)", Toolbox.Questlines.GetQuestTypeLabel(999))
+    assert.equals("Normal Quest", Toolbox.Questlines.GetQuestTypeLabel(999))
+  end)
+
+  it("quest_type_label_supports_direct_name_mapping", function()
+    Toolbox.Data.QuestTypeNames[88] = "团队（10）"
+    assert.equals("团队（10）", Toolbox.Questlines.GetQuestTypeLabel(88))
   end)
 
   it("quest_detail_includes_type_label_for_inline_display", function()
@@ -554,7 +562,7 @@ describe("QuestlineProgress mock data injection", function()
     assert.is_nil(errorObject)
     assert.same({
       { id = 12, name = "Campaign" },
-      { id = 34, name = "Unknown Type (34)" },
+      { id = 34, name = "Normal Quest" },
     }, typeIndex.typeList)
     assert.same({ 81002 }, typeIndex.typeToQuestIDs[12])
     assert.same({ 81001 }, typeIndex.typeToQuestIDs[34])
@@ -562,6 +570,31 @@ describe("QuestlineProgress mock data injection", function()
     assert.same({ 9901 }, typeIndex.typeToQuestLineIDs[34])
     assert.same({ 2371 }, typeIndex.typeToMapIDs[12])
     assert.same({ 2371 }, typeIndex.typeToMapIDs[34])
+  end)
+
+  it("quest_navigation_expansion_label_uses_plain_expansion_name_without_version_prefix", function()
+    local v6Data = {
+      schemaVersion = 6,
+      sourceMode = "mock",
+      generatedAt = "2026-04-20T00:00:00Z",
+      quests = {
+        [81001] = { ID = 81001 },
+      },
+      questLines = {
+        [9901] = { ID = 9901, UiMapID = 2371, QuestIDs = { 81001 } },
+      },
+      expansions = {
+        [0] = { 9901 },
+      },
+    }
+
+    Toolbox.Questlines.SetDataOverride(v6Data)
+
+    local navigationModel, navigationError = Toolbox.Questlines.GetQuestNavigationModel()
+    assert.is_nil(navigationError)
+    assert.same({
+      { id = 0, name = "Classic" },
+    }, navigationModel.expansionList)
   end)
 
   it("quest_navigation_model_groups_questlines_by_expansion_and_category", function()

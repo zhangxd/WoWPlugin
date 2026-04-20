@@ -27,6 +27,11 @@ EXPECTED_GENERATED_CONTRACTS = {
         "lua_table": "Toolbox.Data.InstanceQuestlines",
         "root_type": "document",
     },
+    "quest_type_names": {
+        "lua_file": "Toolbox/Data/QuestTypeNames.lua",
+        "lua_table": "Toolbox.Data.QuestTypeNames",
+        "root_type": "map_scalar",
+    },
 }
 
 

@@ -59,6 +59,7 @@
 
 - 在冒险手册根页签中增加“任务”页签
 - 任务数据由 `Toolbox.Data.InstanceQuestlines` 提供静态关系数据，再由 `Toolbox.Questlines` 在运行时补齐任务名、状态、类型等动态字段
+- 任务类型名称基线由 `Toolbox.Data.QuestTypeNames` 提供（契约 `quest_type_names`，来源 `questinfo`）；类型名无法解析时默认显示“普通任务”
 - 任务线名称优先通过运行时 API 获取；`InstanceQuestlines.lua` 中只保留同名 Lua 注释，不再把任务线名作为结构化字段导出
 - 当前支持 3 种视图：
   - `状态`：按可交付 / 进行中 / 待解锁组织任务
@@ -96,7 +97,8 @@ Toolbox.toc            # 插件清单
 - `DataContracts/<contract_id>.json` 是生成型 `Toolbox/Data/*.lua` 的唯一权威定义。
 - `Toolbox/Data/*.lua` 中由数据库生成的文件带有 tagged header，记录 `contract_id`、`schema_version`、契约路径与快照路径。
 - `WoWTools` 通过读取这些契约来生成静态 Lua 数据；插件运行时仍只消费 `Toolbox/Data/*.lua`，不会直接读取 JSON 契约。
-- `InstanceQuestlines.lua` 当前采用更贴近 DB 的文档结构（任务线、任务关系、POI 关系）；任务线名称只保留 Lua 注释，任务类型、状态与任务线显示名等不稳定字段改为运行时获取。
+- `QuestTypeNames.lua` 由 `quest_type_names` 契约导出，数据源为 `questinfo` 全量类型名称；缺失类型名时运行时回退“普通任务”。
+- `InstanceQuestlines.lua` 当前采用更贴近 DB 的文档结构（任务线、任务关系、POI 关系）；任务线名称只保留 Lua 注释，状态与任务线显示名等不稳定字段改为运行时获取。
 
 ## 开发
 

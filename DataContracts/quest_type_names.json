@@ -1,0 +1,86 @@
+{
+  "contract": {
+    "contract_id": "quest_type_names",
+    "schema_version": 1,
+    "summary": "任务类型 ID 到任务类型名称映射",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/QuestTypeNames.lua",
+    "lua_table": "Toolbox.Data.QuestTypeNames",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "questinfo"
+    ],
+    "sql": "SELECT\n  CAST(ID AS INTEGER) AS quest_info_id,\n  InfoName_lang AS quest_type_name\nFROM questinfo\nWHERE TRIM(ID) <> ''\n  AND CAST(ID AS INTEGER) > 0\n  AND TRIM(COALESCE(InfoName_lang, '')) <> ''\nORDER BY CAST(ID AS INTEGER), ID",
+    "query": {
+      "from": "questinfo",
+      "joins": [],
+      "select": [
+        "quest_info_id",
+        "quest_type_name"
+      ],
+      "where": [
+        "quest_info_id > 0",
+        "quest_type_name 非空"
+      ],
+      "group_by": [],
+      "order_by": [
+        "quest_info_id ASC"
+      ],
+      "row_granularity": "一行代表一个任务类型 ID 与名称映射"
+    }
+  },
+  "structure": {
+    "root_type": "map_scalar",
+    "lua_shape": "[quest_info_id] = quest_type_name",
+    "key_field": "quest_info_id",
+    "value_field": "quest_type_name",
+    "fields": [
+      {
+        "name": "quest_info_id",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "name": "quest_type_name",
+        "type": "string",
+        "required": true
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [
+      "quest_info_id",
+      "quest_type_name"
+    ],
+    "unique_keys": [
+      [
+        "quest_info_id"
+      ]
+    ],
+    "non_null_fields": [
+      "quest_info_id",
+      "quest_type_name"
+    ],
+    "sort_rules": [
+      {
+        "field": "quest_info_id",
+        "direction": "asc"
+      }
+    ]
+  },
+  "versioning": {
+    "current_schema_version": 1,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约版本，导出 questinfo 全量类型名称"
+      }
+    ]
+  }
+}

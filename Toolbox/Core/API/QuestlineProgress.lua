@@ -306,6 +306,17 @@ local function getQuestTypeNameTable()
   return Toolbox.Data and Toolbox.Data.QuestTypeNames or nil
 end
 
+--- 获取任务类型的默认展示名（类型无法解析时使用）。
+---@return string
+local function getDefaultQuestTypeLabel()
+  local localeTable = Toolbox.L or {} -- 本地化字符串表
+  local defaultLabel = localeTable.EJ_QUEST_TYPE_DEFAULT -- 默认任务类型文案
+  if type(defaultLabel) == "string" and defaultLabel ~= "" then
+    return defaultLabel
+  end
+  return "Normal Quest"
+end
+
 --- 查询任务类型展示名。
 ---@param typeID number|nil
 ---@return string
@@ -313,15 +324,15 @@ local function getQuestTypeLabel(typeID)
   local localeTable = Toolbox.L or {} -- 本地化字符串表
   local mappingTable = getQuestTypeNameTable() -- 类型映射表
   local localeKey = type(mappingTable) == "table" and mappingTable[typeID] or nil -- 本地化键名
-  if type(localeKey) == "string" then
+  if type(localeKey) == "string" and localeKey ~= "" then
     local localizedText = localeTable[localeKey] -- 本地化文案
     if type(localizedText) == "string" and localizedText ~= "" then
       return localizedText
     end
+    return localeKey
   end
 
-  local fallbackFormat = localeTable.EJ_QUEST_TYPE_UNKNOWN_FMT or "Unknown Type (%s)" -- 未知类型兜底格式
-  return string.format(fallbackFormat, tostring(typeID or "?"))
+  return getDefaultQuestTypeLabel()
 end
 
 --- 获取当前角色阵营标记。
@@ -469,9 +480,11 @@ end
 ---@param typeID number|nil
 ---@return string
 local function formatUnknownQuestTypeLabel(typeID)
-  local localeTable = Toolbox.L or {} -- 本地化字符串表
-  local fallbackFormat = localeTable.EJ_QUEST_TYPE_UNKNOWN_FMT or "Unknown Type (%s)" -- 未知类型兜底格式
-  return string.format(fallbackFormat, tostring(typeID or "?"))
+  local ignoredTypeID = typeID -- 该参数仅用于兼容旧调用签名
+  if ignoredTypeID ~= nil then
+    -- 保留条件分支，避免未使用参数警告并维持调用语义稳定。
+  end
+  return getDefaultQuestTypeLabel()
 end
 
 --- 按任务 ID 查询运行时任务类型名称。
@@ -512,7 +525,7 @@ local function getQuestTypeGroupInfo(questID, typeID)
   if type(typeID) == "number" then
     return "type:" .. tostring(typeID), getQuestTypeLabel(typeID)
   end
-  return "other", (Toolbox.L and Toolbox.L.EJ_QUEST_TYPE_UNKNOWN_FMT and string.format(Toolbox.L.EJ_QUEST_TYPE_UNKNOWN_FMT, "?")) or "Unknown Type (?)"
+  return "other", getDefaultQuestTypeLabel()
 end
 
 --- 查询资料片展示名。
