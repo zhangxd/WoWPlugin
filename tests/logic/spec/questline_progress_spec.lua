@@ -661,6 +661,64 @@ describe("QuestlineProgress mock data injection", function()
     assert.is_nil(navigationModel.expansionByID[10].modeByKey.quest_type)
   end)
 
+  it("quest_navigation_model_groups_questlines_by_expansion_and_campaign_for_schema_v7", function()
+    local v7Data = {
+      schemaVersion = 7,
+      sourceMode = "mock",
+      generatedAt = "2026-04-21T00:00:00Z",
+      quests = {
+        [81001] = { ID = 81001 },
+        [81002] = { ID = 81002 },
+        [81003] = { ID = 81003 },
+      },
+      questLines = {
+        [9901] = { ID = 9901, UiMapID = 2371, QuestIDs = { 81001 }, ContentExpansionID = 9 },
+        [9902] = { ID = 9902, UiMapID = 2372, QuestIDs = { 81002 }, ContentExpansionID = 9 },
+        [9903] = { ID = 9903, UiMapID = 2601, QuestIDs = { 81003 }, ContentExpansionID = 10 },
+      },
+      campaigns = {
+        [5001] = { ID = 5001, Name_lang = "Dragonflight Main", QuestLineIDs = { 9901, 9902 } },
+        [6001] = { ID = 6001, Name_lang = "The War Within Main", QuestLineIDs = { 9903 } },
+      },
+      expansions = {
+        [9] = { 9901, 9902 },
+        [10] = { 9903 },
+      },
+      expansionCampaigns = {
+        [9] = { 5001 },
+        [10] = { 6001 },
+      },
+    }
+
+    Toolbox.Questlines.SetDataOverride(v7Data)
+
+    local valid, validationError = Toolbox.Questlines.ValidateInstanceQuestlinesData(v7Data, true)
+    assert.is_true(valid)
+    assert.is_nil(validationError)
+
+    local navigationModel, navigationError = Toolbox.Questlines.GetQuestNavigationModel()
+    assert.is_nil(navigationError)
+    assert.same({
+      { id = 9, name = "Dragonflight" },
+      { id = 10, name = "The War Within" },
+    }, navigationModel.expansionList)
+    assert.same({
+      { id = 2371, questLineIDs = { 9901 } },
+      { id = 2372, questLineIDs = { 9902 } },
+    }, collectQuestLineIDs(navigationModel.expansionByID[9].modeByKey.map_questline.entries))
+    assert.same({
+      { id = 2601, questLineIDs = { 9903 } },
+    }, collectQuestLineIDs(navigationModel.expansionByID[10].modeByKey.map_questline.entries))
+    assert.same({
+      { id = 5001, questLineIDs = { 9901, 9902 } },
+    }, collectQuestLineIDs(navigationModel.expansionByID[9].modeByKey.campaign.entries))
+    assert.same({
+      { id = 6001, questLineIDs = { 9903 } },
+    }, collectQuestLineIDs(navigationModel.expansionByID[10].modeByKey.campaign.entries))
+    assert.equals("campaign", navigationModel.expansionByID[9].modeByKey.campaign.entries[1].kind)
+    assert.equals("Dragonflight Main", navigationModel.expansionByID[9].modeByKey.campaign.entries[1].name)
+  end)
+
   it("GetQuestLinesForMap scopes results to the selected expansion when provided", function()
     local v6Data = {
       schemaVersion = 6,

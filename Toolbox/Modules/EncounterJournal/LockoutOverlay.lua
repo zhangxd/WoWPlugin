@@ -163,7 +163,7 @@ function LockoutOverlay:hookTooltips()
             local progressLabel = string.format(loc.EJ_LOCKOUT_PROGRESS_FMT or "Progress: %d / %d bosses",
               lockout.encounterProgress or 0, lockout.numEncounters or 0)
             Runtime.TooltipAddLine(GameTooltip, progressLabel, 0.8, 0.8, 0.8)
-            local killed = Toolbox.EJ.GetKilledBosses(jid)
+            local killed = Toolbox.EJ.GetKilledBosses(jid, lockout.difficultyID)
             for _, boss in ipairs(killed) do
               Runtime.TooltipAddLine(GameTooltip, "  " .. (boss.name or ""), 0.6, 0.6, 0.6)
             end

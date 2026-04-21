@@ -108,6 +108,14 @@ end
 
 --- 打开 quest 主界面。
 local function openQuestMainFrame()
+  local moduleDb = getModuleDb() -- 模块存档
+  if moduleDb.enabled == false then
+    if Toolbox.SettingsHost and type(Toolbox.SettingsHost.OpenToModulePage) == "function" then
+      Toolbox.SettingsHost:OpenToModulePage(MODULE_ID)
+    end
+    return
+  end
+
   local hostFrame = ensureQuestHostFrame() -- quest 主界面
   hostFrame:Show()
   local questView = getQuestView() -- 任务视图对象
@@ -128,6 +136,14 @@ end
 
 --- 切换 quest 主界面显示状态。
 local function toggleQuestMainFrame()
+  local moduleDb = getModuleDb() -- 模块存档
+  if moduleDb.enabled == false then
+    if Toolbox.SettingsHost and type(Toolbox.SettingsHost.OpenToModulePage) == "function" then
+      Toolbox.SettingsHost:OpenToModulePage(MODULE_ID)
+    end
+    return
+  end
+
   local hostFrame = ensureQuestHostFrame() -- quest 主界面
   if hostFrame.IsShown and hostFrame:IsShown() then
     closeQuestMainFrame()

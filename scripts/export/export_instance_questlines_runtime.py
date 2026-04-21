@@ -55,13 +55,24 @@ class QuestLineRuntimeEntry:
 
 
 @dataclass
+class CampaignRuntimeEntry:
+    """正式战役节点。"""
+
+    campaign_id: int
+    campaign_name: str
+    quest_line_ids: list[int]
+
+
+@dataclass
 class InstanceQuestlinesRuntimeModel:
     """正式运行时模型。"""
 
     generated_at: str
     quests: dict[int, QuestRuntimeEntry]
     quest_lines: dict[int, QuestLineRuntimeEntry]
+    campaigns: dict[int, CampaignRuntimeEntry]
     expansions: dict[int, list[int]]
+    expansion_campaigns: dict[int, list[int]]
 
 
 def script_root() -> Path:
@@ -168,10 +179,52 @@ def load_ordered_quest_line_members(db_path: Path) -> tuple[dict[int, list[int]]
         sqlite_conn.close()
 
 
+def load_campaign_links(db_path: Path) -> list[dict[str, int | str]]:
+    """从 wow.db 读取战役到任务线的关系。"""
+
+    sqlite_conn = sqlite3.connect(str(db_path))
+    sqlite_conn.row_factory = sqlite3.Row
+    try:
+        query = """
+        SELECT
+          CAST(cxq.CampaignID AS INTEGER) AS campaign_id,
+          CAST(cxq.QuestLineID AS INTEGER) AS quest_line_id,
+          CAST(cxq.OrderIndex AS INTEGER) AS order_index,
+          c.Title_lang AS campaign_name
+        FROM campaignxquestline cxq
+        LEFT JOIN campaign c ON c.ID = cxq.CampaignID
+        WHERE TRIM(COALESCE(cxq.CampaignID, '')) <> ''
+          AND TRIM(COALESCE(cxq.QuestLineID, '')) <> ''
+          AND CAST(cxq.CampaignID AS INTEGER) > 0
+          AND CAST(cxq.QuestLineID AS INTEGER) > 0
+        ORDER BY
+          CAST(cxq.CampaignID AS INTEGER),
+          CAST(cxq.OrderIndex AS INTEGER),
+          CAST(cxq.QuestLineID AS INTEGER)
+        """
+        campaign_link_rows = []
+        for row in sqlite_conn.execute(query).fetchall():
+            campaign_link_rows.append(
+                {
+                    "campaign_id": int(row["campaign_id"] or 0),
+                    "quest_line_id": int(row["quest_line_id"] or 0),
+                    "order_index": int(row["order_index"] or 0),
+                    "campaign_name": (row["campaign_name"] or "").strip(),
+                }
+            )
+        return campaign_link_rows
+    except sqlite3.OperationalError:
+        # 兼容缺少战役表的精简数据库（此时不导出战役分组）。
+        return []
+    finally:
+        sqlite_conn.close()
+
+
 def build_instance_questlines_model(
     csv_rows: list[dict[str, str]],
     ordered_quest_ids_by_line: dict[int, list[int]],
     quest_line_name_by_id: dict[int, str],
+    campaign_link_rows: list[dict[str, int | str]] | None = None,
 ) -> InstanceQuestlinesRuntimeModel:
     """从 CSV 行和 DB 顺序构建正式 InstanceQuestlines 运行时模型。"""
 
@@ -311,11 +364,67 @@ def build_instance_questlines_model(
     for expansion_id in expansions:
         expansions[expansion_id].sort()
 
+    valid_quest_line_ids = set(quest_lines.keys())
+    campaign_aggregate: dict[int, dict[str, object]] = {}
+    for campaign_link_row in campaign_link_rows or []:
+        campaign_id = int(campaign_link_row.get("campaign_id") or 0)
+        quest_line_id = int(campaign_link_row.get("quest_line_id") or 0)
+        order_index = int(campaign_link_row.get("order_index") or 0)
+        if campaign_id <= 0 or quest_line_id <= 0 or quest_line_id not in valid_quest_line_ids:
+            continue
+
+        campaign_state = campaign_aggregate.setdefault(
+            campaign_id,
+            {
+                "campaign_name": "",
+                "quest_line_seen": set(),
+                "quest_line_items": [],
+            },
+        )
+        if campaign_state["campaign_name"] == "":
+            campaign_name = str(campaign_link_row.get("campaign_name") or "").strip()
+            campaign_state["campaign_name"] = campaign_name if campaign_name != "" else f"Campaign #{campaign_id}"
+        if quest_line_id in campaign_state["quest_line_seen"]:
+            continue
+        campaign_state["quest_line_seen"].add(quest_line_id)
+        campaign_state["quest_line_items"].append((order_index, quest_line_id))
+
+    campaigns: dict[int, CampaignRuntimeEntry] = {}
+    expansion_campaigns: dict[int, list[int]] = defaultdict(list)
+    for campaign_id, campaign_state in sorted(campaign_aggregate.items()):
+        ordered_quest_line_ids = [
+            quest_line_id
+            for _, quest_line_id in sorted(campaign_state["quest_line_items"], key=lambda item: (item[0], item[1]))
+        ]
+        if not ordered_quest_line_ids:
+            continue
+
+        campaigns[campaign_id] = CampaignRuntimeEntry(
+            campaign_id=campaign_id,
+            campaign_name=str(campaign_state["campaign_name"]),
+            quest_line_ids=ordered_quest_line_ids,
+        )
+
+        expansion_vote_counter: dict[int, int] = {}
+        for quest_line_id in ordered_quest_line_ids:
+            content_expansion_id = quest_lines[quest_line_id].content_expansion_id
+            if content_expansion_id is None:
+                continue
+            expansion_vote_counter[content_expansion_id] = expansion_vote_counter.get(content_expansion_id, 0) + 1
+        if expansion_vote_counter:
+            primary_expansion_id = sorted(expansion_vote_counter.items(), key=lambda item: (-item[1], item[0]))[0][0]
+            expansion_campaigns[primary_expansion_id].append(campaign_id)
+
+    for expansion_id in expansion_campaigns:
+        expansion_campaigns[expansion_id].sort()
+
     return InstanceQuestlinesRuntimeModel(
         generated_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         quests=quests,
         quest_lines=quest_lines,
+        campaigns=campaigns,
         expansions=dict(sorted(expansions.items())),
+        expansion_campaigns=dict(sorted(expansion_campaigns.items())),
     )
 
 
@@ -350,6 +459,7 @@ def write_instance_questlines_lua(
     output_path: Path,
     model: InstanceQuestlinesRuntimeModel,
     data_source: str = "wow.db",
+    generated_by: str = "WoWPlugin/scripts/export/export_instance_questlines_runtime.py",
 ) -> None:
     """写入正式 InstanceQuestlines.lua。"""
 
@@ -357,10 +467,10 @@ def write_instance_questlines_lua(
     lines = [
         "--[[",
         "@contract_id instance_questlines",
-        "@schema_version 6",
+        "@schema_version 7",
         "@contract_file WoWPlugin/DataContracts/instance_questlines.json",
-        "@contract_snapshot runtime-only (generated by export_quest_achievement_merged_from_db.py)",
-        "@generated_by WoWPlugin/scripts/export/export_instance_questlines_runtime.py",
+        f"@contract_snapshot runtime-only (generated by {generated_by})",
+        f"@generated_by {generated_by}",
         f"@generated_at {model.generated_at}",
         f"@data_source {data_source}",
         "@summary 冒险手册任务页签静态任务线文档（CSV 聚合版）",
@@ -370,7 +480,7 @@ def write_instance_questlines_lua(
         "Toolbox.Data = Toolbox.Data or {}",
         "",
         "Toolbox.Data.InstanceQuestlines = {",
-        "  schemaVersion = 6,",
+        "  schemaVersion = 7,",
         '  sourceMode = "live",',
         f'  generatedAt = "{model.generated_at}",',
         "",
@@ -434,11 +544,45 @@ def write_instance_questlines_lua(
         [
             "  },",
             "",
+            "  campaigns = {",
+        ]
+    )
+    for campaign_id, campaign_entry in model.campaigns.items():
+        name_line = (
+            f"      Name_lang = {format_lua_string(campaign_entry.campaign_name)},"
+            if campaign_entry.campaign_name != ""
+            else None
+        )
+        lines.extend(
+            [
+                f"    [{campaign_id}] = {{",
+                f"      ID = {campaign_id},",
+            ]
+            + ([name_line] if name_line is not None else [])
+            + [
+                f"      QuestLineIDs = {format_int_array(campaign_entry.quest_line_ids)},",
+                "    },",
+            ]
+        )
+
+    lines.extend(
+        [
+            "  },",
+            "",
             "  expansions = {",
         ]
     )
     for expansion_id, quest_line_ids in model.expansions.items():
         lines.append(f"    [{expansion_id}] = {format_int_array(quest_line_ids)},")
+    lines.extend(
+        [
+            "  },",
+            "",
+            "  expansionCampaigns = {",
+        ]
+    )
+    for expansion_id, campaign_ids in model.expansion_campaigns.items():
+        lines.append(f"    [{expansion_id}] = {format_int_array(campaign_ids)},")
     lines.extend(
         [
             "  },",
@@ -470,7 +614,13 @@ def main() -> int:
         csv_file.close()
 
     ordered_quest_ids_by_line, quest_line_name_by_id = load_ordered_quest_line_members(args.db)
-    model = build_instance_questlines_model(csv_rows, ordered_quest_ids_by_line, quest_line_name_by_id)
+    campaign_link_rows = load_campaign_links(args.db)
+    model = build_instance_questlines_model(
+        csv_rows,
+        ordered_quest_ids_by_line,
+        quest_line_name_by_id,
+        campaign_link_rows=campaign_link_rows,
+    )
     write_instance_questlines_lua(args.output, model)
     print(args.output)
     return 0

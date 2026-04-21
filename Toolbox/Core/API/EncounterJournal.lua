@@ -332,9 +332,42 @@ end
 
 --- 获取副本已击杀的首领列表
 ---@param journalInstanceID number
+---@param difficultyID number|nil 指定难度 ID；为空时走非难度特定兜底判定
 ---@return table[] bosses 首领列表
 --- 返回格式：[{ name = string, encounterID = number }]
-function Toolbox.EJ.GetKilledBosses(journalInstanceID)
+local function isEncounterKilledForDifficulty(encounterID, difficultyID)
+  if type(encounterID) ~= "number" then
+    return false
+  end
+
+  -- 优先走难度敏感判定：C_RaidLocks.IsEncounterComplete(mapID, dungeonEncounterID, difficultyID)
+  -- mapID / dungeonEncounterID 由 EJ_GetEncounterInfo 返回（参照 Blizzard_EncounterJournal.lua）。
+  if type(difficultyID) == "number"
+      and C_RaidLocks and type(C_RaidLocks.IsEncounterComplete) == "function"
+      and type(EJ_GetEncounterInfo) == "function" then
+    local infoSuccess, _, _, _, _, _, _, dungeonEncounterID, mapID = pcall(EJ_GetEncounterInfo, encounterID)
+    if infoSuccess
+        and type(mapID) == "number" and mapID > 0
+        and type(dungeonEncounterID) == "number" and dungeonEncounterID > 0 then
+      local lockoutSuccess, isComplete = pcall(C_RaidLocks.IsEncounterComplete, mapID, dungeonEncounterID, difficultyID)
+      if lockoutSuccess then
+        return isComplete == true
+      end
+    end
+  end
+
+  -- 兜底：当难度敏感路径不可用时，退回 EncounterJournal 维度的完成判定。
+  if C_EncounterJournal and type(C_EncounterJournal.IsEncounterComplete) == "function" then
+    local completeSuccess, isComplete = pcall(C_EncounterJournal.IsEncounterComplete, encounterID)
+    if completeSuccess then
+      return isComplete == true
+    end
+  end
+
+  return false
+end
+
+function Toolbox.EJ.GetKilledBosses(journalInstanceID, difficultyID)
   if type(journalInstanceID) ~= "number" then
     return {}
   end
@@ -365,16 +398,7 @@ function Toolbox.EJ.GetKilledBosses(journalInstanceID)
   for i = 1, numEncounters do
     local name, _, encounterID = EJ_GetEncounterInfoByIndex(i)
     if name and encounterID then
-      -- 检查是否已击杀
-      local isKilled = false
-      if C_EncounterJournal and C_EncounterJournal.GetEncounterProgress then
-        local progressSuccess, progress = pcall(C_EncounterJournal.GetEncounterProgress, encounterID)
-        if progressSuccess and progress then
-          isKilled = true
-        end
-      end
-
-      if isKilled then
+      if isEncounterKilledForDifficulty(encounterID, difficultyID) then
         table.insert(killed, {
           name = name,
           encounterID = encounterID

@@ -369,6 +369,11 @@ local function registerIntegration()
     end
   end)
 
+  -- 若 EJ 已加载，提前注销一次性 ADDON_LOADED 监听，避免常驻。
+  if Runtime.IsAddOnLoaded("Blizzard_EncounterJournal") then
+    eventFrame:UnregisterEvent("ADDON_LOADED")
+  end
+
   -- 濡傛灉 EJ 宸插姞杞斤紝绔嬪嵆鍒濆鍖?
   if Runtime.IsAddOnLoaded("Blizzard_EncounterJournal") then
     initHooks()

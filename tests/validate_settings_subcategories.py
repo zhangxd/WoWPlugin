@@ -411,8 +411,14 @@ def validate_encounter_journal_questline_tree_feature() -> None:
         raise AssertionError("questline api should not keep legacy GetExpansionTree compatibility")
     if "function Toolbox.Questlines.GetInstanceTree(" in questline_api_text:
         raise AssertionError("questline api should not keep legacy GetInstanceTree compatibility")
-    if "schemaVersion = 3" not in data_text and "schemaVersion = 4" not in data_text and "schemaVersion = 5" not in data_text and "schemaVersion = 6" not in data_text:
-        raise AssertionError("missing questline data schema version: expected schemaVersion = 3, 4, 5 or 6")
+    if (
+        "schemaVersion = 3" not in data_text
+        and "schemaVersion = 4" not in data_text
+        and "schemaVersion = 5" not in data_text
+        and "schemaVersion = 6" not in data_text
+        and "schemaVersion = 7" not in data_text
+    ):
+        raise AssertionError("missing questline data schema version: expected schemaVersion = 3, 4, 5, 6 or 7")
     require_contains(data_text, 'sourceMode = "live"', "questline data source mode")
     require_contains(data_text, "generatedAt = ", "questline data generated timestamp")
     require_contains(data_text, "quests = {", "questline data quests table")

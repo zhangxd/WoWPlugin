@@ -406,6 +406,8 @@ QuestPOI.db2
 
 1. **不再要求通过 `DataContracts/instance_questlines.json` 驱动正式导出。**
 2. 由专门脚本直接读取 `quest_expansion_map.csv`，聚合并输出 `Toolbox/Data/InstanceQuestlines.lua`。
+   - 正式入口固定为：`python scripts/export/export_quest_achievement_merged_from_db.py`
+   - `export_instance_questlines_runtime.py` 仅作为内部聚合 helper，由正式入口调用。
 3. 该脚本的职责是：
    - 把 CSV 分析层收敛为 `quest` / `Toolbox.Questlines` 所需的运行时静态结构
    - 保持现有 `schema v6` 主骨架兼容

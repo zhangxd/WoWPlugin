@@ -957,14 +957,24 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
   else
     requiredRootFields[#requiredRootFields + 1] = "questLineQuestIDs"
   end
+  if dataTable.schemaVersion >= 7 then
+    requiredRootFields[#requiredRootFields + 1] = "campaigns"
+    requiredRootFields[#requiredRootFields + 1] = "expansionCampaigns"
+  end
   for _, fieldName in ipairs(requiredRootFields) do
     if dataTable[fieldName] == nil then
       return false, buildValidationError("E_MISSING_FIELD", fieldName, "required root field missing")
     end
   end
 
-  if strictEnabled and dataTable.schemaVersion ~= 3 and dataTable.schemaVersion ~= 4 and dataTable.schemaVersion ~= 5 and dataTable.schemaVersion ~= 6 then
-    return false, buildValidationError("E_INVALID_SCHEMA", "schemaVersion", "schemaVersion must be 3, 4, 5 or 6")
+  if strictEnabled
+    and dataTable.schemaVersion ~= 3
+    and dataTable.schemaVersion ~= 4
+    and dataTable.schemaVersion ~= 5
+    and dataTable.schemaVersion ~= 6
+    and dataTable.schemaVersion ~= 7
+  then
+    return false, buildValidationError("E_INVALID_SCHEMA", "schemaVersion", "schemaVersion must be 3, 4, 5, 6 or 7")
   end
 
   if type(dataTable.sourceMode) ~= "string" then
@@ -986,6 +996,12 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
   end
   if dataTable.schemaVersion >= 6 and type(dataTable.expansions) ~= "table" then
     return false, buildValidationError("E_TYPE_MISMATCH", "expansions", "table expected")
+  end
+  if dataTable.schemaVersion >= 7 and type(dataTable.campaigns) ~= "table" then
+    return false, buildValidationError("E_TYPE_MISMATCH", "campaigns", "table expected")
+  end
+  if dataTable.schemaVersion >= 7 and type(dataTable.expansionCampaigns) ~= "table" then
+    return false, buildValidationError("E_TYPE_MISMATCH", "expansionCampaigns", "table expected")
   end
   if dataTable.schemaVersion >= 4 and dataTable.schemaVersion < 6 and type(dataTable.questLineXQuest) ~= "table" then
     return false, buildValidationError("E_TYPE_MISMATCH", "questLineXQuest", "table expected")
@@ -1083,6 +1099,74 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
       for listIndex, questLineID in ipairs(questLineIDList or {}) do
         if questLineExistsByID[questLineID] ~= true then
           return false, buildValidationError("E_BAD_REF", "expansions[" .. tostring(expansionID) .. "][" .. tostring(listIndex) .. "]", "questLineID not found in questLines")
+        end
+      end
+    end
+
+    if dataTable.schemaVersion >= 7 then
+      local campaignExistsByID = {} -- 战役存在集合
+      for campaignKey, campaignEntry in pairs(dataTable.campaigns or {}) do
+        local campaignID = tonumber(campaignKey) -- 规范化战役 ID
+        if type(campaignID) ~= "number" or campaignID <= 0 then
+          return false, buildValidationError("E_TYPE_MISMATCH", "campaigns[" .. tostring(campaignKey) .. "]", "positive numeric key required")
+        end
+        if type(campaignEntry) ~= "table" then
+          return false, buildValidationError("E_TYPE_MISMATCH", "campaigns[" .. tostring(campaignID) .. "]", "table expected")
+        end
+        if type(campaignEntry.ID) ~= "number" then
+          return false, buildValidationError("E_MISSING_FIELD", "campaigns[" .. tostring(campaignID) .. "].ID", "number expected")
+        end
+        if campaignEntry.ID ~= campaignID then
+          return false, buildValidationError("E_KEY_VALUE_MISMATCH", "campaigns[" .. tostring(campaignID) .. "].ID", "ID must match key")
+        end
+        if campaignEntry.Name_lang ~= nil and (type(campaignEntry.Name_lang) ~= "string" or campaignEntry.Name_lang == "") then
+          return false, buildValidationError("E_TYPE_MISMATCH", "campaigns[" .. tostring(campaignID) .. "].Name_lang", "non-empty string expected when provided")
+        end
+        local questLineListOk, questLineListError = validateNumberArray(
+          campaignEntry.QuestLineIDs,
+          false,
+          "campaigns[" .. tostring(campaignID) .. "].QuestLineIDs"
+        )
+        if not questLineListOk then
+          return false, questLineListError
+        end
+        for listIndex, questLineID in ipairs(campaignEntry.QuestLineIDs or {}) do
+          if questLineExistsByID[questLineID] ~= true then
+            return false, buildValidationError(
+              "E_BAD_REF",
+              "campaigns[" .. tostring(campaignID) .. "].QuestLineIDs[" .. tostring(listIndex) .. "]",
+              "questLineID not found in questLines"
+            )
+          end
+        end
+        campaignExistsByID[campaignID] = true
+      end
+
+      for expansionKey, campaignIDList in pairs(dataTable.expansionCampaigns or {}) do
+        local expansionID = tonumber(expansionKey) -- 规范化资料片 ID
+        if type(expansionID) ~= "number" or expansionID < 0 then
+          return false, buildValidationError(
+            "E_TYPE_MISMATCH",
+            "expansionCampaigns[" .. tostring(expansionKey) .. "]",
+            "non-negative numeric key required"
+          )
+        end
+        local campaignListOk, campaignListError = validateNumberArray(
+          campaignIDList,
+          false,
+          "expansionCampaigns[" .. tostring(expansionID) .. "]"
+        )
+        if not campaignListOk then
+          return false, campaignListError
+        end
+        for listIndex, campaignID in ipairs(campaignIDList or {}) do
+          if campaignExistsByID[campaignID] ~= true then
+            return false, buildValidationError(
+              "E_BAD_REF",
+              "expansionCampaigns[" .. tostring(expansionID) .. "][" .. tostring(listIndex) .. "]",
+              "campaignID not found in campaigns"
+            )
+          end
         end
       end
     end
@@ -1642,6 +1726,65 @@ local function appendDirectQuestLineToExpansion(expansionEntry, questLineEntry)
   }
 end
 
+--- 构建战役名称（缺失时使用兜底文本）。
+---@param campaignID number|nil
+---@param campaignEntry table|nil
+---@return string
+local function getCampaignLabel(campaignID, campaignEntry)
+  local campaignName = type(campaignEntry) == "table" and campaignEntry.Name_lang or nil -- 静态战役名称
+  if type(campaignName) == "string" and campaignName ~= "" then
+    return campaignName
+  end
+
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local fallbackFormat = localeTable.EJ_QUEST_CAMPAIGN_UNKNOWN_FMT or "Campaign #%s" -- 战役兜底格式
+  return string.format(fallbackFormat, tostring(campaignID or "?"))
+end
+
+--- 确保战役分组对象存在。
+---@param campaignList table[] 战役列表
+---@param campaignByID table<number, table> 战役索引
+---@param campaignID number 战役 ID
+---@param campaignName string 战役名称
+---@return table
+local function ensureCampaignGroup(campaignList, campaignByID, campaignID, campaignName)
+  local existingGroup = campaignByID[campaignID] -- 已存在战役分组
+  if type(existingGroup) == "table" then
+    return existingGroup
+  end
+
+  local campaignGroup = {
+    kind = "campaign",
+    id = campaignID,
+    name = campaignName,
+    questLines = {},
+    _questLineSeen = {},
+  }
+  campaignByID[campaignID] = campaignGroup
+  campaignList[#campaignList + 1] = campaignGroup
+  return campaignGroup
+end
+
+--- 向战役分组追加任务线，避免重复。
+---@param campaignGroup table 战役分组
+---@param questLineEntry table 任务线对象
+local function appendQuestLineToCampaign(campaignGroup, questLineEntry)
+  if type(campaignGroup) ~= "table" or type(questLineEntry) ~= "table" then
+    return
+  end
+
+  local questLineID = questLineEntry.id -- 当前任务线 ID
+  if type(questLineID) ~= "number" then
+    return
+  end
+  if campaignGroup._questLineSeen[questLineID] == true then
+    return
+  end
+
+  campaignGroup._questLineSeen[questLineID] = true
+  campaignGroup.questLines[#campaignGroup.questLines + 1] = questLineEntry
+end
+
 --- 排序混合导航列表：地图先、任务线后，各自按名称。
 ---@param entryList table[]
 local function sortMixedNavigationEntries(entryList)
@@ -1677,6 +1820,11 @@ local function buildQuestNavigationModel()
     expansionByID = {},
   }
   local dataTable = getQuestlineDataTable() -- 根数据表
+  local useCampaignNavigation = type(dataTable) == "table"
+    and type(dataTable.schemaVersion) == "number"
+    and dataTable.schemaVersion >= 7
+    and type(dataTable.campaigns) == "table"
+    and type(dataTable.expansionCampaigns) == "table" -- 是否使用战役导航结构
 
   local function ensureExpansionEntry(expansionID)
     local expansionEntry = navigationModel.expansionByID[expansionID] -- 已存在资料片分组
@@ -1693,9 +1841,17 @@ local function buildQuestNavigationModel()
           name = (Toolbox.L and Toolbox.L.EJ_QUEST_NAV_MODE_MAP_QUESTLINE) or "地图任务线",
           entries = {},
         },
+        {
+          key = "campaign",
+          name = (Toolbox.L and Toolbox.L.EJ_QUEST_NAV_MODE_CAMPAIGN)
+            or (Toolbox.L and Toolbox.L.QUEST_VIEW_TAB_CAMPAIGN)
+            or "战役",
+          entries = {},
+        },
       },
       modeByKey = {},
       _mapEntryByID = {},
+      _campaignEntryByID = {},
     }
     for _, modeEntry in ipairs(expansionEntry.modes) do
       expansionEntry.modeByKey[modeEntry.key] = modeEntry
@@ -1708,28 +1864,66 @@ local function buildQuestNavigationModel()
     return expansionEntry
   end
 
-  if type(dataTable) == "table" and type(dataTable.schemaVersion) == "number" and dataTable.schemaVersion >= 6 then
+  local function appendExpansionMapEntries(expansionEntry, questLineIDList)
+    if type(expansionEntry) ~= "table" then
+      return
+    end
+    for _, questLineID in ipairs(questLineIDList or {}) do
+      local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
+      local stableMapID = resolveStableMapIDForQuestLine(questLineEntry) -- 可稳定归类的地图 ID
+      local mapEntry = type(stableMapID) == "number" and questTabModel.mapByID and questTabModel.mapByID[stableMapID] or nil -- 当前地图
+      if type(questLineEntry) == "table" then
+        if type(stableMapID) == "number" and type(mapEntry) == "table" then
+          local mapGroup = ensureCategoryGroup(
+            expansionEntry.modeByKey.map_questline.entries,
+            expansionEntry._mapEntryByID,
+            mapEntry.id,
+            mapEntry.name or getMapNameByID(mapEntry.id)
+          )
+          appendQuestLineToGroup(mapGroup, questLineEntry)
+        else
+          appendDirectQuestLineToExpansion(expansionEntry, questLineEntry)
+        end
+      end
+    end
+  end
+
+  if useCampaignNavigation then
     for expansionID, questLineIDList in pairs(dataTable.expansions or {}) do
       if type(expansionID) == "number" and expansionID >= 0 then
         local expansionEntry = ensureExpansionEntry(expansionID) -- 资料片分组
-        for _, questLineID in ipairs(questLineIDList or {}) do
-          local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
-          local stableMapID = resolveStableMapIDForQuestLine(questLineEntry) -- 可稳定归类的地图 ID
-          local mapEntry = type(stableMapID) == "number" and questTabModel.mapByID and questTabModel.mapByID[stableMapID] or nil -- 当前地图
-          if type(questLineEntry) == "table" then
-            if type(stableMapID) == "number" and type(mapEntry) == "table" then
-              local mapGroup = ensureCategoryGroup(
-                expansionEntry.modeByKey.map_questline.entries,
-                expansionEntry._mapEntryByID,
-                mapEntry.id,
-                mapEntry.name or getMapNameByID(mapEntry.id)
-              )
-              appendQuestLineToGroup(mapGroup, questLineEntry)
-            else
-              appendDirectQuestLineToExpansion(expansionEntry, questLineEntry)
+        appendExpansionMapEntries(expansionEntry, questLineIDList)
+      end
+    end
+
+    for expansionID, campaignIDList in pairs(dataTable.expansionCampaigns or {}) do
+      if type(expansionID) == "number" and expansionID >= 0 then
+        local expansionEntry = ensureExpansionEntry(expansionID) -- 资料片分组
+        local campaignEntryList = expansionEntry.modeByKey.campaign.entries -- 战役分组列表
+        for _, campaignID in ipairs(campaignIDList or {}) do
+          local campaignRecord = dataTable.campaigns and dataTable.campaigns[campaignID] or nil -- 战役静态记录
+          if type(campaignRecord) == "table" then
+            local campaignGroup = ensureCampaignGroup(
+              campaignEntryList,
+              expansionEntry._campaignEntryByID,
+              campaignID,
+              getCampaignLabel(campaignID, campaignRecord)
+            )
+            for _, questLineID in ipairs(campaignRecord.QuestLineIDs or {}) do
+              local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
+              if type(questLineEntry) == "table" then
+                appendQuestLineToCampaign(campaignGroup, questLineEntry)
+              end
             end
           end
         end
+      end
+    end
+  elseif type(dataTable) == "table" and type(dataTable.schemaVersion) == "number" and dataTable.schemaVersion >= 6 then
+    for expansionID, questLineIDList in pairs(dataTable.expansions or {}) do
+      if type(expansionID) == "number" and expansionID >= 0 then
+        local expansionEntry = ensureExpansionEntry(expansionID) -- 资料片分组
+        appendExpansionMapEntries(expansionEntry, questLineIDList)
       end
     end
   else
@@ -1756,13 +1950,54 @@ local function buildQuestNavigationModel()
   end)
 
   for _, expansionEntry in pairs(navigationModel.expansionByID) do
-    sortMixedNavigationEntries(expansionEntry.modeByKey.map_questline.entries or {})
-    expansionEntry._mapEntryByID = nil
-    expansionEntry._directQuestLineByID = nil
-    for _, groupEntry in ipairs(expansionEntry.modeByKey.map_questline.entries or {}) do
+    local mapModeEntry = expansionEntry.modeByKey and expansionEntry.modeByKey.map_questline or nil -- 地图任务线模式
+    local mapModeEntries = type(mapModeEntry) == "table" and mapModeEntry.entries or {} -- 地图任务线条目
+    sortMixedNavigationEntries(mapModeEntries)
+    for _, groupEntry in ipairs(mapModeEntries) do
       groupEntry._questLineSeen = nil
     end
+
+    local campaignModeEntry = expansionEntry.modeByKey and expansionEntry.modeByKey.campaign or nil -- 战役模式
+    local campaignModeEntries = type(campaignModeEntry) == "table" and campaignModeEntry.entries or {} -- 战役模式条目
+    if useCampaignNavigation then
+      local filteredCampaignList = {} -- 过滤后的战役列表
+      for _, campaignEntry in ipairs(campaignModeEntries) do
+        if type(campaignEntry) == "table" then
+          campaignEntry._questLineSeen = nil
+          if type(campaignEntry.questLines) == "table" and #campaignEntry.questLines > 0 then
+            filteredCampaignList[#filteredCampaignList + 1] = campaignEntry
+          end
+        end
+      end
+      if type(campaignModeEntry) == "table" then
+        campaignModeEntry.entries = filteredCampaignList
+      end
+    else
+      if type(campaignModeEntry) == "table" then
+        campaignModeEntry.entries = {}
+      end
+    end
+    expansionEntry._mapEntryByID = nil
+    expansionEntry._campaignEntryByID = nil
+    expansionEntry._directQuestLineByID = nil
   end
+
+  local filteredExpansionList = {} -- 过滤后的资料片列表
+  for _, expansionSummary in ipairs(navigationModel.expansionList) do
+    local expansionEntry = navigationModel.expansionByID[expansionSummary.id] -- 资料片分组
+    local mapModeEntry = type(expansionEntry) == "table" and expansionEntry.modeByKey and expansionEntry.modeByKey.map_questline or nil -- 地图任务线模式
+    local mapModeEntries = type(mapModeEntry) == "table" and mapModeEntry.entries or nil -- 地图任务线条目列表
+    local campaignModeEntry = type(expansionEntry) == "table" and expansionEntry.modeByKey and expansionEntry.modeByKey.campaign or nil -- 战役模式
+    local campaignModeEntries = type(campaignModeEntry) == "table" and campaignModeEntry.entries or nil -- 战役条目列表
+    local hasMapEntries = type(mapModeEntries) == "table" and #mapModeEntries > 0
+    local hasCampaignEntries = type(campaignModeEntries) == "table" and #campaignModeEntries > 0
+    if hasMapEntries or hasCampaignEntries then
+      filteredExpansionList[#filteredExpansionList + 1] = expansionSummary
+    else
+      navigationModel.expansionByID[expansionSummary.id] = nil
+    end
+  end
+  navigationModel.expansionList = filteredExpansionList
 
   return navigationModel, nil
 end

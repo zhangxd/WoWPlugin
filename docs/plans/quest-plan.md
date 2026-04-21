@@ -11,7 +11,7 @@
   - `docs/designs/quest-design.md`
   - `docs/tests/quest-test.md`
   - `docs/plans/encounter-journal-plan.md`
-- 最后更新：2026-04-18
+- 最后更新：2026-04-21
 
 ## 1. 目标
 
@@ -533,3 +533,52 @@
 
 - `tests/logic/spec/quest_module_spec.lua` 已按 TDD 先红后绿：先暴露“导航按钮文本未显式左对齐”的失败，再在 `QuestNavigation.lua` 中补齐按钮文本左对齐与右边界约束验证。
 - 当前实现继续通过 `breadcrumbFrame:SetPoint("TOPRIGHT", self.searchBoxFrame, "TOPLEFT", -10, 0)` 将导航容器止于搜索框左侧，同时导航按钮文本显式左对齐显示，不再把搜索框覆盖为主要视觉问题。
+
+## 19. 2026-04-21 战役页签（资料片 -> 战役 -> 任务线）实施计划
+
+### 19.1 状态
+
+- 已确认
+- 可执行
+
+### 19.2 目标
+
+- 在 `quest` 模块新增 `campaign_questline` 战役视图页签。
+- 左侧层级改为 `资料片 -> 战役 -> 任务线`，右侧显示当前选中任务线的任务列表。
+- 战役静态结构固定为 `campaigns = { [campaignID] = { ID, Name_lang, QuestLineIDs } }`。
+- 战役分组采用方案 B：同一战役只归一个主资料片（按关联任务线 `ContentExpansionID` 众数，平手取更小 `ExpansionID`）。
+
+### 19.3 影响文件
+
+- 修改：
+  - `docs/specs/quest-spec.md`
+  - `docs/plans/quest-plan.md`
+  - `DataContracts/instance_questlines.json`
+  - `scripts/export/toolbox_db_export.py`
+  - `Toolbox/Data/InstanceQuestlines.lua`（由导出脚本生成）
+  - `Toolbox/Core/API/QuestlineProgress.lua`
+  - `Toolbox/Modules/Quest/QuestNavigation.lua`
+  - `Toolbox/Core/Foundation/Config.lua`
+  - `Toolbox/Core/Foundation/Locales.lua`
+  - `tests/logic/spec/quest_module_spec.lua`
+  - `tests/logic/spec/questline_progress_spec.lua`
+- 验证：
+  - `python scripts/export/export_quest_achievement_merged_from_db.py`
+  - `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/questline_progress_spec.lua`
+  - `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/quest_module_spec.lua`
+
+### 19.4 已确认决策
+
+- 战役视图交互：左侧列表点击战役可展开任务线；点击任务线后右侧显示任务列表。
+- 战役数据来源：`campaign -> campaignxquestline -> questline -> questlinexquest -> quest`。
+- 右侧任务状态继续沿用现有 `completed/active/pending` 口径（`pending` 作为可接候选）。
+- 静态数据缺失时不显示对应节点，不输出玩家可见错误提示。
+
+### 19.5 执行步骤
+
+- [ ] 步骤 1：更新 `instance_questlines` 契约到 schema v7，新增 `campaigns` 与 `expansionCampaigns` 数据块定义。
+- [ ] 步骤 2：扩展导出脚本聚合逻辑，生成 `campaignID -> QuestLineIDs` 与主资料片归属映射（方案 B），并导出最新 `Toolbox/Data/InstanceQuestlines.lua`。
+- [ ] 步骤 3：在 `Toolbox.Questlines` 增加战役导航模型查询接口，提供 `资料片 -> 战役 -> 任务线` 左树数据与右侧任务查询。
+- [ ] 步骤 4：在 `QuestNavigation` 增加 `campaign_questline` 页签与左树三层展开逻辑，右侧接入任务列表渲染。
+- [ ] 步骤 5：补齐 `Config` 默认键迁移与 `Locales` 文案键，保证旧存档与新视图兼容。
+- [ ] 步骤 6：运行导出与 quest 逻辑测试，确认先红后绿并记录结果。

@@ -60,6 +60,19 @@ describe("EncounterJournal event lifecycle", function()
     assert.is_false(harness:isEventRegistered("PLAYER_ENTERING_WORLD"))
   end)
 
+  it("preloaded_ej_unregisters_addon_loaded_listener_immediately", function()
+    harness:teardown()
+    harness = Harness.new({
+      locale = "zhCN",
+      addonLoadedSeed = { Blizzard_EncounterJournal = true },
+    })
+    moduleDef = harness:loadEncounterJournalModule()
+
+    assert.is_false(harness:isEventRegistered("ADDON_LOADED"))
+    assert.is_true(harness:isEventRegistered("PLAYER_ENTERING_WORLD"))
+    assert.is_true(harness:isEventRegistered("UPDATE_INSTANCE_INFO"))
+  end)
+
   it("quest_module_refresh_reloads_saved_navigation_state_after_widgets_exist", function()
     harness:loadQuestModule()
     local questFrame = harness.runtime.CreateFrame("Frame", "ToolboxQuestFrame") -- quest 根框体

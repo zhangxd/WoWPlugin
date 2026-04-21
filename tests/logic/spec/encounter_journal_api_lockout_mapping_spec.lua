@@ -110,4 +110,102 @@ describe("EncounterJournal lockout mapping", function()
     assert.equals(3600, lockouts[1].resetTime)
     assert.equals(16, lockouts[1].difficultyID)
   end)
+
+  it("get_killed_bosses_prefers_raidlocks_difficulty_completion", function()
+    _G.EJ_GetCurrentInstance = function()
+      return 9999
+    end
+
+    local selectedInstanceCalls = {} -- EJ_SelectInstance 调用记录
+    _G.EJ_SelectInstance = function(instanceID)
+      selectedInstanceCalls[#selectedInstanceCalls + 1] = instanceID
+    end
+
+    _G.EJ_GetNumEncounters = function()
+      return 2
+    end
+    _G.EJ_GetEncounterInfoByIndex = function(index)
+      if index == 1 then
+        return "首领甲", "", 101
+      end
+      if index == 2 then
+        return "首领乙", "", 102
+      end
+      return nil
+    end
+    _G.EJ_GetEncounterInfo = function(encounterID)
+      if encounterID == 101 then
+        return "首领甲", "", encounterID, 0, "", 2001, 5001, 9001
+      end
+      if encounterID == 102 then
+        return "首领乙", "", encounterID, 0, "", 2001, 5002, 9001
+      end
+      return nil
+    end
+
+    local raidLockCheckCalls = {} -- C_RaidLocks 判定调用记录
+    _G.C_RaidLocks = {
+      IsEncounterComplete = function(mapID, dungeonEncounterID, difficultyID)
+        raidLockCheckCalls[#raidLockCheckCalls + 1] = {
+          mapID = mapID,
+          dungeonEncounterID = dungeonEncounterID,
+          difficultyID = difficultyID,
+        }
+        return dungeonEncounterID == 5001 and difficultyID == 16
+      end,
+    }
+    _G.C_EncounterJournal = {}
+
+    local killedBosses = Toolbox.EJ.GetKilledBosses(2001, 16)
+
+    assert.equals(1, #killedBosses)
+    assert.equals("首领甲", killedBosses[1].name)
+    assert.equals(101, killedBosses[1].encounterID)
+    assert.same({ 2001, 9999 }, selectedInstanceCalls)
+    assert.equals(2, #raidLockCheckCalls)
+    assert.equals(16, raidLockCheckCalls[1].difficultyID)
+    assert.equals(16, raidLockCheckCalls[2].difficultyID)
+  end)
+
+  it("get_killed_bosses_falls_back_to_encounterjournal_complete_when_raidlocks_unavailable", function()
+    _G.EJ_GetCurrentInstance = function()
+      return 2001
+    end
+    _G.EJ_SelectInstance = function()
+      return true
+    end
+    _G.EJ_GetNumEncounters = function()
+      return 2
+    end
+    _G.EJ_GetEncounterInfoByIndex = function(index)
+      if index == 1 then
+        return "首领甲", "", 101
+      end
+      if index == 2 then
+        return "首领乙", "", 102
+      end
+      return nil
+    end
+    _G.EJ_GetEncounterInfo = function(encounterID)
+      if encounterID == 101 then
+        return "首领甲", "", encounterID, 0, "", 2001, 5001, 9001
+      end
+      if encounterID == 102 then
+        return "首领乙", "", encounterID, 0, "", 2001, 5002, 9001
+      end
+      return nil
+    end
+
+    _G.C_RaidLocks = nil
+    _G.C_EncounterJournal = {
+      IsEncounterComplete = function(encounterID)
+        return encounterID == 102
+      end,
+    }
+
+    local killedBosses = Toolbox.EJ.GetKilledBosses(2001, 16)
+    assert.equals(1, #killedBosses)
+    assert.equals("首领乙", killedBosses[1].name)
+    assert.equals(102, killedBosses[1].encounterID)
+  end)
 end)

@@ -108,7 +108,7 @@ describe("Quest module split", function()
     end
   end)
 
-  it("registers_quest_module_with_two_bottom_tabs", function()
+  it("registers_quest_module_with_three_bottom_tabs", function()
     local moduleDef = harness:loadQuestModule() -- 任务模块定义
     assert.equals("quest", moduleDef.id)
     assert.is_function(moduleDef.GetSettingsPages)
@@ -122,7 +122,7 @@ describe("Quest module split", function()
     assert.equals("active_log", questView.selectedModeKey)
 
     local modeKeyList = questHooks:getBottomTabModeKeys() -- 底部分页签模式键
-    assert.same({ "active_log", "map_questline" }, modeKeyList)
+    assert.same({ "active_log", "map_questline", "campaign" }, modeKeyList)
 
     installQuestDataStubs()
 
@@ -134,14 +134,19 @@ describe("Quest module split", function()
 
     local activeButton = questView.modeTabButtonByKey and questView.modeTabButtonByKey.active_log or nil -- 当前任务页签按钮
     local mapButton = questView.modeTabButtonByKey and questView.modeTabButtonByKey.map_questline or nil -- 任务线页签按钮
+    local campaignButton = questView.modeTabButtonByKey and questView.modeTabButtonByKey.campaign or nil -- 战役页签按钮
     assert.is_truthy(activeButton)
     assert.is_truthy(mapButton)
+    assert.is_truthy(campaignButton)
     assert.is_true(activeButton.parentFrame == hostFrame)
     assert.is_true(mapButton.parentFrame == hostFrame)
+    assert.is_true(campaignButton.parentFrame == hostFrame)
     assert.equals(Toolbox.L.QUEST_VIEW_TAB_ACTIVE or "当前任务", activeButton:GetText())
     assert.equals(Toolbox.L.QUEST_VIEW_TAB_QUESTLINE or "任务线", mapButton:GetText())
+    assert.equals(Toolbox.L.QUEST_VIEW_TAB_CAMPAIGN or "战役", campaignButton:GetText())
     assert.is_true(activeButton:IsShown())
     assert.is_true(mapButton:IsShown())
+    assert.is_true(campaignButton:IsShown())
     assert.is_false(questView.tabButton and questView.tabButton:IsShown() or false)
   end)
 
@@ -160,6 +165,23 @@ describe("Quest module split", function()
     assert.equals("ToolboxQuestFrame", firstCall.key)
     assert.is_truthy(type(firstCall.opts) == "table")
     assert.is_true(firstCall.opts.dragRegion == hostFrame.TitleContainer)
+  end)
+
+  it("open_main_frame_does_not_reopen_when_module_disabled", function()
+    local moduleDef = harness:loadQuestModule() -- 任务模块定义
+    installQuestDataStubs()
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(hostFrame)
+    assert.is_false(hostFrame:IsShown())
+
+    harness.questModuleDb.enabled = false
+    moduleDef.OnEnabledSettingChanged(false)
+
+    assert.has_no.errors(function()
+      Toolbox.Quest.OpenMainFrame()
+    end)
+    assert.is_false(hostFrame:IsShown())
   end)
 
   it("active_log_uses_stacked_panels_and_registers_root_navigation_node", function()

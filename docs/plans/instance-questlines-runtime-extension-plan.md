@@ -30,7 +30,8 @@
 
 - 新增：
   - `scripts/export/tests/test_instance_questlines_runtime_extension.py`
-  - `scripts/export/export_instance_questlines_runtime.py`
+  - `scripts/export/export_instance_questlines_runtime.py`（内部 helper）
+  - `scripts/export/export_quest_achievement_merged_from_db.py`（正式入口）
 - 修改：
   - `Toolbox/Data/InstanceQuestlines.lua`（工具生成）
   - `Toolbox/Core/API/QuestlineProgress.lua`
@@ -44,7 +45,7 @@
 ## 4. 执行步骤
 
 - [ ] 步骤 1：在导出工具测试里先写失败用例，锁定 `schema v6` 扩展版的字段集合。
-- [ ] 步骤 2：新增 `export_instance_questlines_runtime.py`，从 `quest_expansion_map.csv` 聚合正式 `InstanceQuestlines.lua`。
+- [ ] 步骤 2：收口 `export_quest_achievement_merged_from_db.py` 为正式入口，并由其调用 `export_instance_questlines_runtime.py` 从 `quest_expansion_map.csv` 聚合正式 `InstanceQuestlines.lua`。
 - [ ] 步骤 3：在该脚本里让 `quests[*]` 新增 `QuestLineIDs`、`UiMapIDs`、`FactionTags`、`FactionConditions`、`RaceMaskValues`、`ClassMaskValues`、`ContentExpansionID`。
 - [ ] 步骤 4：在该脚本里扩展 `questLines[*]`，新增 `UiMapIDs`、`PrimaryUiMapID`、`PrimaryMapCount`、`PrimaryMapShare`、`FactionTags`、`RaceMaskValues`、`ClassMaskValues`、`ContentExpansionID`，并保持旧字段 `UiMapID` 与 `QuestIDs` 不变。
 - [ ] 步骤 5：在该脚本里按 `questLines[*].ContentExpansionID` 生成顶层 `expansions`。
@@ -64,7 +65,7 @@
 - 命令 / 检查点 2：
   - `python -m unittest scripts.export.tests.test_quest_db2_export_pipeline scripts.export.tests.test_questline_runtime_preview_export -v`
 - 命令 / 检查点 3：
-  - `python scripts/export/export_instance_questlines_runtime.py`
+  - `python scripts/export/export_quest_achievement_merged_from_db.py`
 - 命令 / 检查点 4：
   - 运行 `tests/logic/spec/questline_progress_spec.lua`
 - 游戏内验证点：
@@ -86,6 +87,7 @@
 
 - 2026-04-15：完成方案对齐，已先生成 `InstanceQuestlines.runtime_preview.lua` 作为轻量结构预览，不影响正式导出规则。
 - 2026-04-15：确认 `instance_questlines` 正式导出跳过 `DataContracts`，改由专门脚本从 CSV 聚合生成。
+- 2026-04-22：正式入口明确为 `export_quest_achievement_merged_from_db.py`；`export_instance_questlines_runtime.py` 定位为内部 helper。
 
 ## 8. 修订记录
 
@@ -93,4 +95,5 @@
 |------|------|
 | 2026-04-15 | 初稿：规划在兼容 `schema v6` 的前提下接入多地图、任务资料片与阵营/种族/职业限制字段 |
 | 2026-04-15 | 调整实施路径：`instance_questlines` 改走专门脚本直出正式 Lua，不再依赖 `DataContracts` |
+| 2026-04-22 | 入口收口：`export_quest_achievement_merged_from_db.py` 作为正式脚本，`export_instance_questlines_runtime.py` 改为内部 helper |
 

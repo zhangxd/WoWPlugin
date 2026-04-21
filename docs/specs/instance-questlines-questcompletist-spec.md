@@ -97,7 +97,7 @@
 4. `questLines[*].QuestIDs` 已按 `OrderIndex ASC, QuestID ASC` 稳定排序，且导出结果不再保留 `OrderIndex`。
 5. 只有链路完整且能解析出 `ExpansionID` 的任务线会出现在最终导出结果中。
 6. 未提供 QuestCompletist 路径时，导出脚本仍可按纯 `wow.db` 路径工作，且不会报本地路径相关错误。
-7. `export_toolbox_one.py instance_questlines` 可成功生成带契约头的 [InstanceQuestlines.lua](D:\WoWProject\WoWPlugin\Toolbox\Data\InstanceQuestlines.lua)，并保存契约快照。
+7. `python scripts/export/export_quest_achievement_merged_from_db.py` 可成功生成带 tagged header 的 [InstanceQuestlines.lua](D:\WoWProject\WoWPlugin\Toolbox\Data\InstanceQuestlines.lua)，并在文件头标记 `@contract_snapshot runtime-only (...)`。
 8. 插件侧现有消费代码无需新增额外数据入口即可使用更新后的静态数据结构；任务详情地图信息改为运行时 API 或显式上下文传入。
 
 ## 7. 实施状态

@@ -4,6 +4,8 @@
 Single-entry quest export script:
 1) Export merged quest-achievement CSV for auditing.
 2) Export WoWPlugin InstanceQuestlines.lua runtime data.
+
+`instance_questlines` 正式导出入口。
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import sys
 try:
     from scripts.export.export_instance_questlines_runtime import (
         build_instance_questlines_model,
+        load_campaign_links,
         load_ordered_quest_line_members,
         write_instance_questlines_lua,
     )
@@ -26,6 +29,7 @@ except ModuleNotFoundError:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
     from scripts.export.export_instance_questlines_runtime import (
         build_instance_questlines_model,
+        load_campaign_links,
         load_ordered_quest_line_members,
         write_instance_questlines_lua,
     )
@@ -601,7 +605,7 @@ def write_csv(output_path: Path, rows: list[dict[str, object]]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Merge quest + achievement task data from wow.db and export WoWPlugin InstanceQuestlines.lua."
+        description="【正式入口】从 wow.db 导出任务合并 CSV，并生成 WoWPlugin/Toolbox/Data/InstanceQuestlines.lua。"
     )
     parser.add_argument("--db", type=Path, default=default_db_path(), help="Path to wow.db")
     parser.add_argument("--output-csv", type=Path, default=default_output_path(), help="Merged CSV output path")
@@ -629,8 +633,18 @@ def main() -> int:
     if not args.skip_lua:
         runtime_rows = build_runtime_rows_for_wowplugin(rows, primary_uimap_by_quest)
         ordered_quest_ids_by_line, quest_line_name_by_id = load_ordered_quest_line_members(args.db)
-        runtime_model = build_instance_questlines_model(runtime_rows, ordered_quest_ids_by_line, quest_line_name_by_id)
-        write_instance_questlines_lua(args.output_lua, runtime_model)
+        campaign_link_rows = load_campaign_links(args.db)
+        runtime_model = build_instance_questlines_model(
+            runtime_rows,
+            ordered_quest_ids_by_line,
+            quest_line_name_by_id,
+            campaign_link_rows=campaign_link_rows,
+        )
+        write_instance_questlines_lua(
+            args.output_lua,
+            runtime_model,
+            generated_by="WoWPlugin/scripts/export/export_quest_achievement_merged_from_db.py",
+        )
         print(args.output_lua)
     print(f"rows={len(rows)}")
     return 0

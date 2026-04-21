@@ -121,8 +121,8 @@
   - `QuestIDs` 排序
   - `UiMap` 父链 `type == 3` 过滤
 - 全量资料片导出
-- 再执行 `export_toolbox_one.py instance_questlines` 做端到端验证。
-- 最后检查生成文件头、契约快照以及 schema v6 结构符合预期。
+- 再执行 `python scripts/export/export_quest_achievement_merged_from_db.py` 做端到端验证。
+- 最后检查生成文件头中的 `runtime-only` 快照标记与 schema v6 结构符合预期。
 
 ## 9. 修订记录
 

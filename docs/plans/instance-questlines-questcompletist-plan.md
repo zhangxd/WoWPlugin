@@ -53,7 +53,7 @@
 - [ ] 步骤 4：修改 `DataContracts/instance_questlines.json` 与导出脚本，生成 schema v6 所需聚合结构和过滤规则。
 - [ ] 步骤 5：修改 `Toolbox/Core/API/QuestlineProgress.lua`，适配 `questLines[*].QuestIDs` 和顶层 `expansions`，移除对 `questPOIBlobs`、`questPOIPoints`、`quests[*].UiMapID` 的依赖。
 - [ ] 步骤 6：重新运行测试并修正实现，保证逻辑测试和静态校验通过。
-- [ ] 步骤 7：执行 `export_toolbox_one.py instance_questlines` 重导全量数据，检查契约头、快照和结构。
+- [ ] 步骤 7：执行 `python scripts/export/export_quest_achievement_merged_from_db.py` 重导全量数据，检查 tagged header 与结构。
 - [ ] 步骤 8：根据最终落地结果回写总设计文档，并补记执行记录。
 
 ## 5. 验证
@@ -61,7 +61,7 @@
 - 命令 / 检查点 1：运行 `python tests/run_all.py` 或当前仓库用于逻辑测试的最小命令，至少覆盖 `questline_progress_spec.lua` 与 `questline_progress_live_data_spec.lua`。
 - 命令 / 检查点 2：运行 `python tests/validate_settings_subcategories.py`，确认静态结构校验通过。
 - 命令 / 检查点 3：运行 `python -m unittest scripts.export.tests.test_contract_export` 以及相关 QuestCompletist / 导出测试。
-- 命令 / 检查点 4：运行 `python scripts/export/export_toolbox_one.py instance_questlines --contract-dir DataContracts --data-dir Toolbox/Data`，必要时附带 QuestCompletist 路径参数或环境变量。
+- 命令 / 检查点 4：运行 `python scripts/export/export_quest_achievement_merged_from_db.py --output-lua Toolbox/Data/InstanceQuestlines.lua`，必要时附带 `--db` 路径参数。
 - 检查点 5：抽查生成的 `InstanceQuestlines.lua` 是否只保留 `quests`、`questLines`、`expansions`，且存在多个资料片分组。
 - 游戏内验证点：本回合以离线导出与静态数据结构验证为主，不直接要求游戏内 UI 点验。
 

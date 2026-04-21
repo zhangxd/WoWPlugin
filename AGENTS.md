@@ -86,13 +86,16 @@
 - 一键导出：`export_toolbox_all.py`
 - 单项导出：`export_toolbox_one.py`
 - `one` 的主选择器是 `contract_id`（示例：`instance_map_ids`）；可兼容输出文件名选择器（示例：`InstanceMapIDs.lua`）。
+- `instance_questlines` 的**正式导出入口**：`export_quest_achievement_merged_from_db.py`
+- `export_instance_questlines_runtime.py` 仅作为 `export_quest_achievement_merged_from_db.py` 的内部聚合写盘 helper，不作为人工主入口。
+- 当 `one/all` 命中 `instance_questlines` 时，必须自动或显式切换到 `export_quest_achievement_merged_from_db.py`，禁止再走契约直写覆盖。
 - 导出时必须显式或隐式指向：
   - `--contract-dir DataContracts`
   - `--data-dir Toolbox/Data`
 
 ### 契约驱动约定
 
-- `WoWPlugin/scripts/export` 必须先读取 `DataContracts/<contract_id>.json`，再执行查询与导出。
+- 除 `instance_questlines` 外，`WoWPlugin/scripts/export` 必须先读取 `DataContracts/<contract_id>.json`，再执行查询与导出。
 - `all` 脚本必须从契约目录加载全部 `active` 契约，不再扫描 `Toolbox/Data/*.lua` 文件头决定导出范围。
 - 契约必须同时定义：
   - `contract`：身份、版本、状态
@@ -127,10 +130,12 @@
 
 - 每次导出必须在 `../WoWTools/outputs/toolbox/contract_snapshots/<contract_id>/` 下保存一份契约快照。
 - 快照只用于回溯，不得反向覆盖 `DataContracts/` 中的权威契约。
+- `instance_questlines` 走正式脚本时允许使用 `@contract_snapshot runtime-only (...)` 头注释标记，不要求写入 `contract_snapshots/<contract_id>/`。
 
 ### AI 执行约束
 
-- 用户要求“导出 Data”时，AI 必须优先调用契约驱动导出脚本，而非手写覆盖数据库生成文件。
+- 用户要求“导出 Data”时，AI 必须优先调用正式导出脚本，而非手写覆盖数据库生成文件。
+- 默认优先 `export_toolbox_one.py <contract_id>` / `export_toolbox_all.py`；**但 `instance_questlines` 必须改用 `export_quest_achievement_merged_from_db.py`**。
 - 若新增数据库导出文件，AI 必须同时完成三件事：
   - 在 `DataContracts/<contract_id>.json` 定义契约
   - 通过 `export_toolbox_one.py <contract_id>` 或 `export_toolbox_all.py` 实跑生成 `Toolbox/Data/<file>.lua`

@@ -94,11 +94,12 @@ Toolbox.toc            # 插件清单
 
 ### 静态数据契约
 
-- `DataContracts/<contract_id>.json` 是生成型 `Toolbox/Data/*.lua` 的唯一权威定义。
+- `DataContracts/<contract_id>.json` 是生成型 `Toolbox/Data/*.lua` 的权威定义（`instance_questlines` 见下方特例）。
 - `Toolbox/Data/*.lua` 中由数据库生成的文件带有 tagged header，记录 `contract_id`、`schema_version`、契约路径与快照路径。
 - `WoWPlugin/scripts/export` 通过读取这些契约来生成静态 Lua 数据；插件运行时仍只消费 `Toolbox/Data/*.lua`，不会直接读取 JSON 契约。
 - `QuestTypeNames.lua` 由 `quest_type_names` 契约导出，数据源为 `questinfo` 全量类型名称；缺失类型名时运行时回退“普通任务”。
-- `InstanceQuestlines.lua` 当前采用更贴近 DB 的文档结构（任务线、任务关系、POI 关系）；任务线名称只保留 Lua 注释，状态与任务线显示名等不稳定字段改为运行时获取。
+- `InstanceQuestlines.lua` 为特例：正式入口是 `python scripts/export/export_quest_achievement_merged_from_db.py`（`one/all` 命中 `instance_questlines` 也会转该入口），当前输出 schema v7（`quests / questLines / campaigns / expansions / expansionCampaigns`）并保留运行时扩展字段（`QuestLineIDs / UiMapIDs / FactionTags / FactionConditions / RaceMaskValues / ClassMaskValues / ContentExpansionID`）。
+- `scripts/export/export_instance_questlines_runtime.py` 是内部聚合 helper，不作为人工主入口。
 
 ## 开发
 

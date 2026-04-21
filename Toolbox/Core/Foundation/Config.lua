@@ -77,6 +77,8 @@ local defaults = {
       questlineTreeEnabled = true,
       -- 左侧树：当前资料片（0 表示运行时自动选择首项）
       questNavExpansionID = 0,
+      -- 左侧树：当前战役（0 表示未选中）
+      questNavSelectedCampaignID = 0,
       -- 当前模式（active_log | map_questline）
       questNavModeKey = "active_log",
       -- 左侧树：当前地图（0 表示未选中）
@@ -268,6 +270,8 @@ function Toolbox.Config.Init()
   local legacyModeKey = readQuestField("questNavModeKey", nil) -- 旧版模式键
   if legacyModeKey == "active_log" then
     questDb.questNavModeKey = "active_log"
+  elseif legacyModeKey == "campaign" then
+    questDb.questNavModeKey = "campaign"
   elseif legacyModeKey == "map_questline" then
     questDb.questNavModeKey = "map_questline"
   elseif legacyViewMode == nil then
@@ -284,6 +288,13 @@ function Toolbox.Config.Init()
     questDb.questNavSelectedMapID = math.max(0, math.floor(selectedMapID))
   else
     questDb.questNavSelectedMapID = 0
+  end
+
+  local selectedCampaignID = readQuestField("questNavSelectedCampaignID", 0) -- 当前战役选中 ID
+  if type(selectedCampaignID) == "number" then
+    questDb.questNavSelectedCampaignID = math.max(0, math.floor(selectedCampaignID))
+  else
+    questDb.questNavSelectedCampaignID = 0
   end
 
   local legacyTypeID = readQuestField("questViewSelectedTypeID", nil) -- 旧版类型 ID
@@ -361,6 +372,7 @@ function Toolbox.Config.Init()
     questDb.questNavExpandedQuestLineID = 0
   end
   if questDb.questNavModeKey == "active_log" then
+    questDb.questNavSelectedCampaignID = 0
     questDb.questNavExpandedQuestLineID = 0
   end
 
@@ -399,6 +411,7 @@ function Toolbox.Config.Init()
     encounterJournalDb.questlineTreeEnabled = nil
     encounterJournalDb.questNavExpansionID = nil
     encounterJournalDb.questNavModeKey = nil
+    encounterJournalDb.questNavSelectedCampaignID = nil
     encounterJournalDb.questNavSelectedMapID = nil
     encounterJournalDb.questNavSelectedTypeKey = nil
     encounterJournalDb.questNavSearchText = nil

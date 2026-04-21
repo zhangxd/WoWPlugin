@@ -90,14 +90,16 @@ describe("QuestlineProgress live data validation", function()
     assert.is_truthy(type(model.maps) == "table")
   end)
 
-  it("db_shape_live_data_uses_schema_v6_core_blocks", function()
+  it("db_shape_live_data_uses_schema_v7_core_blocks", function()
     local dataTable = Toolbox.Data and Toolbox.Data.InstanceQuestlines -- live 根数据
     assert.is_truthy(type(dataTable) == "table")
 
-    assert.equals(6, dataTable.schemaVersion)
+    assert.equals(7, dataTable.schemaVersion)
     assert.is_truthy(type(dataTable.quests) == "table")
     assert.is_truthy(type(dataTable.questLines) == "table")
+    assert.is_truthy(type(dataTable.campaigns) == "table")
     assert.is_truthy(type(dataTable.expansions) == "table")
+    assert.is_truthy(type(dataTable.expansionCampaigns) == "table")
     assert.is_nil(dataTable.questLineXQuest)
     assert.is_nil(dataTable.questPOIBlobs)
     assert.is_nil(dataTable.questPOIPoints)

@@ -1,7 +1,7 @@
 {
   "contract": {
     "contract_id": "instance_questlines",
-    "schema_version": 6,
+    "schema_version": 7,
     "summary": "冒险手册任务页签静态任务线文档",
     "source_of_truth": "WoWPlugin",
     "status": "active"
@@ -16,6 +16,8 @@
     "tables": [
       "questline",
       "questlinexquest",
+      "campaign",
+      "campaignxquestline",
       "questpoiblob",
       "uimap",
       "map"
@@ -71,13 +73,13 @@
   },
   "structure": {
     "root_type": "document",
-    "lua_shape": "Toolbox.Data.InstanceQuestlines = { schemaVersion, sourceMode, generatedAt, quests, questLines, expansions }",
+    "lua_shape": "Toolbox.Data.InstanceQuestlines = { schemaVersion, sourceMode, generatedAt, quests, questLines, campaigns, expansions, expansionCampaigns }",
     "fields": [],
     "document_blocks": [
       {
         "name": "metadata",
         "metadata": {
-          "schemaVersion": 6,
+          "schemaVersion": 7,
           "sourceMode": "live",
           "generatedAt": "@generated_at"
         }
@@ -112,6 +114,7 @@
           "quest_line_id",
           "quest_line_name",
           "quest_line_ui_map_id",
+          "quest_line_expansion_id",
           "quest_ids"
         ],
         "sort_by": [
@@ -120,10 +123,33 @@
         "value_template": {
           "ID": "quest_line_id",
           "UiMapID": "quest_line_ui_map_id",
+          "ContentExpansionID": "quest_line_expansion_id",
           "QuestIDs": "quest_ids"
         },
         "comment_template": {
           "Name_lang": "quest_line_name"
+        }
+      },
+      {
+        "name": "campaigns",
+        "dataset": "campaigns",
+        "block_type": "map_object",
+        "key_field": "campaign_id",
+        "dedupe_by": [
+          "campaign_id"
+        ],
+        "required_fields": [
+          "campaign_id",
+          "campaign_name",
+          "quest_line_ids"
+        ],
+        "sort_by": [
+          "campaign_id"
+        ],
+        "value_template": {
+          "ID": "campaign_id",
+          "Name_lang": "campaign_name",
+          "QuestLineIDs": "quest_line_ids"
         }
       },
       {
@@ -143,6 +169,25 @@
         "sort_by": [
           "expansion_id",
           "quest_line_id"
+        ]
+      },
+      {
+        "name": "expansionCampaigns",
+        "dataset": "expansion_campaigns",
+        "block_type": "map_array_grouped",
+        "key_field": "expansion_id",
+        "value_field": "campaign_id",
+        "required_fields": [
+          "expansion_id",
+          "campaign_id"
+        ],
+        "dedupe_by": [
+          "expansion_id",
+          "campaign_id"
+        ],
+        "sort_by": [
+          "expansion_id",
+          "campaign_id"
         ]
       }
     ]
@@ -181,7 +226,7 @@
     ]
   },
   "versioning": {
-    "current_schema_version": 6,
+    "current_schema_version": 7,
     "change_log": [
       {
         "schema_version": 1,
@@ -206,6 +251,10 @@
       {
         "schema_version": 6,
         "summary": "收敛为 quests / questLines / expansions 结构，仅导出经典旧世且链路完整的任务线"
+      },
+      {
+        "schema_version": 7,
+        "summary": "新增 campaigns / expansionCampaigns 结构，支持资料片->战役->任务线导航；战役按主资料片归属输出"
       }
     ]
   }

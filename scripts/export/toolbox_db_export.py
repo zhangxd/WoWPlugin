@@ -351,7 +351,7 @@ def build_instance_questlines_schema_v6_datasets(
     sqlite_conn: sqlite3.Connection,
     core_link_rows: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
-    """将 core_links 聚合为 schema v6 的 quests / questLines / expansions 三块。"""
+    """将 core_links 聚合为 schema v6/v7 数据块。"""
 
     rows_by_quest_line_id: dict[int, list[dict[str, Any]]] = {}
     for row in core_link_rows:
@@ -401,7 +401,10 @@ def build_instance_questlines_schema_v6_datasets(
     quest_rows: list[dict[str, Any]] = []
     quest_line_rows: list[dict[str, Any]] = []
     expansion_rows: list[dict[str, Any]] = []
+    campaign_rows: list[dict[str, Any]] = []
+    expansion_campaign_rows: list[dict[str, Any]] = []
     seen_quest_ids: set[int] = set()
+    quest_line_expansion_by_id: dict[int, int] = {}
 
     for quest_line_id in sorted(rows_by_quest_line_id):
         resolved_map_id = resolved_map_by_quest_line_id.get(quest_line_id)
@@ -431,9 +434,11 @@ def build_instance_questlines_schema_v6_datasets(
                 "quest_line_id": quest_line_id,
                 "quest_line_name": ordered_rows[0].get("quest_line_name"),
                 "quest_line_ui_map_id": resolved_map_id,
+                "quest_line_expansion_id": expansion_id,
                 "quest_ids": ordered_quest_ids,
             }
         )
+        quest_line_expansion_by_id[quest_line_id] = expansion_id
         expansion_rows.append(
             {
                 "expansion_id": expansion_id,
@@ -447,10 +452,101 @@ def build_instance_questlines_schema_v6_datasets(
             seen_quest_ids.add(quest_id)
             quest_rows.append({"quest_id": quest_id})
 
+    valid_quest_line_ids = {int(row["quest_line_id"]) for row in quest_line_rows}
+    campaign_link_rows = sqlite_conn.execute(
+        """
+SELECT
+  CAST(cxq.CampaignID AS INTEGER) AS campaign_id,
+  CAST(cxq.QuestLineID AS INTEGER) AS quest_line_id,
+  CAST(cxq.OrderIndex AS INTEGER) AS order_index,
+  c.Title_lang AS campaign_name
+FROM campaignxquestline cxq
+LEFT JOIN campaign c ON c.ID = cxq.CampaignID
+WHERE TRIM(COALESCE(cxq.CampaignID, '')) <> ''
+  AND TRIM(COALESCE(cxq.QuestLineID, '')) <> ''
+  AND CAST(cxq.CampaignID AS INTEGER) > 0
+  AND CAST(cxq.QuestLineID AS INTEGER) > 0
+ORDER BY
+  CAST(cxq.CampaignID AS INTEGER),
+  CAST(cxq.OrderIndex AS INTEGER),
+  CAST(cxq.QuestLineID AS INTEGER)
+"""
+    ).fetchall()
+
+    campaign_entry_by_id: dict[int, dict[str, Any]] = {}
+    for link_row in campaign_link_rows:
+        campaign_id = int(link_row["campaign_id"] or 0)
+        quest_line_id = int(link_row["quest_line_id"] or 0)
+        if campaign_id <= 0 or quest_line_id <= 0 or quest_line_id not in valid_quest_line_ids:
+            continue
+
+        campaign_entry = campaign_entry_by_id.get(campaign_id)
+        if campaign_entry is None:
+            campaign_name = (link_row["campaign_name"] or "").strip()
+            if campaign_name == "":
+                campaign_name = f"Campaign #{campaign_id}"
+            campaign_entry = {
+                "campaign_id": campaign_id,
+                "campaign_name": campaign_name,
+                "quest_line_items": [],
+                "quest_line_seen": set(),
+            }
+            campaign_entry_by_id[campaign_id] = campaign_entry
+
+        if quest_line_id in campaign_entry["quest_line_seen"]:
+            continue
+        campaign_entry["quest_line_seen"].add(quest_line_id)
+        campaign_entry["quest_line_items"].append(
+            (
+                int(link_row["order_index"] or 0),
+                quest_line_id,
+            )
+        )
+
+    for campaign_id in sorted(campaign_entry_by_id):
+        campaign_entry = campaign_entry_by_id[campaign_id]
+        ordered_quest_line_ids = [
+            quest_line_id
+            for _, quest_line_id in sorted(
+                campaign_entry["quest_line_items"],
+                key=lambda item: (item[0], item[1]),
+            )
+        ]
+        if not ordered_quest_line_ids:
+            continue
+        campaign_rows.append(
+            {
+                "campaign_id": campaign_id,
+                "campaign_name": campaign_entry["campaign_name"],
+                "quest_line_ids": ordered_quest_line_ids,
+            }
+        )
+
+        expansion_vote_counter: dict[int, int] = {}
+        for quest_line_id in ordered_quest_line_ids:
+            expansion_id = quest_line_expansion_by_id.get(quest_line_id)
+            if expansion_id is None:
+                continue
+            expansion_vote_counter[expansion_id] = expansion_vote_counter.get(expansion_id, 0) + 1
+
+        if expansion_vote_counter:
+            primary_expansion_id = sorted(
+                expansion_vote_counter.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[0][0]
+            expansion_campaign_rows.append(
+                {
+                    "expansion_id": primary_expansion_id,
+                    "campaign_id": campaign_id,
+                }
+            )
+
     return {
         "quests": quest_rows,
         "quest_lines": quest_line_rows,
+        "campaigns": campaign_rows,
         "expansions": expansion_rows,
+        "expansion_campaigns": expansion_campaign_rows,
     }
 
 

@@ -51,6 +51,7 @@ local QuestlineTreeView = {
   rowHeight = 21,
   selected = false,
   selectedExpansionID = nil,
+  selectedCampaignID = nil,
   selectedModeKey = "active_log",
   selectedMapID = nil,
   selectedTypeKey = "",
@@ -301,6 +302,10 @@ end
 
 local function buildModeCollapseKey(expansionID, modeKey)
   return "mode:" .. tostring(expansionID or "") .. ":" .. tostring(modeKey or "")
+end
+
+local function buildCampaignCollapseKey(expansionID, campaignID)
+  return "campaign:" .. tostring(expansionID or "") .. ":" .. tostring(campaignID or "")
 end
 
 local function normalizeSearchText(rawText)
@@ -971,6 +976,9 @@ local function normalizeQuestNavModeKey(modeKey)
   if modeKey == "active_log" then
     return "active_log"
   end
+  if modeKey == "campaign" then
+    return "campaign"
+  end
   return "map_questline"
 end
 
@@ -982,11 +990,56 @@ local function getQuestlineRootText(localeTable)
   return localeTable.QUEST_VIEW_TAB_QUESTLINE or "任务线"
 end
 
+local function getCampaignRootText(localeTable)
+  return localeTable.QUEST_VIEW_TAB_CAMPAIGN or "战役"
+end
+
 local function getRecentCompletedToggleText(localeTable, collapsed)
   if collapsed == true then
     return localeTable.QUEST_VIEW_RECENT_TOGGLE_EXPAND or "展开历史完成"
   end
   return localeTable.QUEST_VIEW_RECENT_TOGGLE_COLLAPSE or "折叠历史完成"
+end
+
+local function getMapQuestlineModeEntry(expansionEntry)
+  return expansionEntry and expansionEntry.modeByKey and expansionEntry.modeByKey.map_questline or nil
+end
+
+local function isCampaignEntryList(modeEntry)
+  local entryList = type(modeEntry) == "table" and modeEntry.entries or nil -- 导航条目列表
+  if type(entryList) ~= "table" then
+    return false
+  end
+  for _, entryObject in ipairs(entryList) do
+    if type(entryObject) == "table" then
+      return entryObject.kind == "campaign"
+    end
+  end
+  return false
+end
+
+local function getCampaignModeEntry(expansionEntry)
+  local campaignModeEntry = expansionEntry and expansionEntry.modeByKey and expansionEntry.modeByKey.campaign or nil -- 战役模式
+  if type(campaignModeEntry) == "table" then
+    return campaignModeEntry
+  end
+  local legacyModeEntry = getMapQuestlineModeEntry(expansionEntry) -- 旧版复用模式
+  if isCampaignEntryList(legacyModeEntry) then
+    return legacyModeEntry
+  end
+  return nil
+end
+
+local function findCampaignEntryByID(modeEntry, campaignID)
+  if type(campaignID) ~= "number" then
+    return nil
+  end
+  for _, campaignEntry in ipairs(modeEntry and modeEntry.entries or {}) do
+    if type(campaignEntry) == "table" and campaignEntry.kind == "campaign" and campaignEntry.id == campaignID then
+      return campaignEntry
+    end
+  end
+  return nil
 end
 
 local function setModeTabSelected(tabButton, selected)
@@ -1021,13 +1074,20 @@ end
 function QuestlineTreeView:loadSelection()
   local moduleDb = getModuleDb() -- 模块存档
   self.selectedExpansionID = normalizeSelectionID(moduleDb.questNavExpansionID)
+  self.selectedCampaignID = normalizeSelectionID(moduleDb.questNavSelectedCampaignID)
   self.selectedModeKey = normalizeQuestNavModeKey(moduleDb.questNavModeKey)
   self.selectedMapID = normalizeSelectionID(moduleDb.questNavSelectedMapID)
   self.selectedTypeKey = ""
   self.searchText = type(moduleDb.questNavSearchText) == "string" and moduleDb.questNavSearchText or ""
   self.expandedQuestLineID = normalizeSelectionID(moduleDb.questNavExpandedQuestLineID)
   if self.selectedModeKey == "active_log" then
+    self.selectedCampaignID = nil
+    self.selectedMapID = nil
     self.expandedQuestLineID = nil
+  elseif self.selectedModeKey == "campaign" then
+    self.selectedMapID = nil
+  else
+    self.selectedCampaignID = nil
   end
   self.directQuestLineCollapsed = false
   self.activeLogRecentCollapsed = false
@@ -1038,6 +1098,7 @@ end
 function QuestlineTreeView:saveSelection()
   local moduleDb = getModuleDb() -- 模块存档
   moduleDb.questNavExpansionID = type(self.selectedExpansionID) == "number" and self.selectedExpansionID or 0
+  moduleDb.questNavSelectedCampaignID = type(self.selectedCampaignID) == "number" and self.selectedCampaignID or 0
   moduleDb.questNavModeKey = normalizeQuestNavModeKey(self.selectedModeKey)
   moduleDb.questNavSelectedMapID = type(self.selectedMapID) == "number" and self.selectedMapID or 0
   moduleDb.questNavSelectedTypeKey = ""
@@ -1120,6 +1181,7 @@ function QuestlineTreeView:resolveNavigationDefaults(navigationModel)
   local expansionEntry = type(self.selectedExpansionID) == "number" and expansionByID[self.selectedExpansionID] or nil -- 当前资料片
   if type(expansionEntry) ~= "table" then
     self.selectedMapID = nil
+    self.selectedCampaignID = nil
     self.selectedTypeKey = ""
     self.expandedQuestLineID = nil
     self.directQuestLineCollapsed = false
@@ -1128,8 +1190,30 @@ function QuestlineTreeView:resolveNavigationDefaults(navigationModel)
 
   self.selectedModeKey = normalizeQuestNavModeKey(self.selectedModeKey)
 
-  if self.selectedModeKey == "map_questline" then
-    local mapMode = expansionEntry.modeByKey and expansionEntry.modeByKey.map_questline or nil -- 地图任务线模式
+  if self.selectedModeKey == "campaign" then
+    local campaignMode = getCampaignModeEntry(expansionEntry) -- 战役模式
+    local campaignEntry = findCampaignEntryByID(campaignMode, self.selectedCampaignID) -- 当前战役条目
+    if type(campaignEntry) ~= "table" then
+      local firstCampaignEntry = campaignMode and campaignMode.entries and campaignMode.entries[1] or nil -- 首个战役条目
+      self.selectedCampaignID = type(firstCampaignEntry) == "table" and firstCampaignEntry.id or nil
+      campaignEntry = type(firstCampaignEntry) == "table" and firstCampaignEntry or nil
+    end
+    local hasSelectedQuestLine = false -- 当前任务线是否属于选中战役
+    for _, questLineEntry in ipairs(campaignEntry and campaignEntry.questLines or {}) do
+      if type(questLineEntry) == "table" and questLineEntry.id == self.expandedQuestLineID then
+        hasSelectedQuestLine = true
+        break
+      end
+    end
+    if not hasSelectedQuestLine then
+      self.expandedQuestLineID = nil
+    end
+    self.selectedMapID = nil
+    self.selectedTypeKey = ""
+    self.directQuestLineCollapsed = false
+  elseif self.selectedModeKey == "map_questline" then
+    local mapMode = getMapQuestlineModeEntry(expansionEntry) -- 地图任务线模式
+    self.selectedCampaignID = nil
     local hasSelectedMap = false -- 当前地图是否存在
     local hasSelectedQuestLine = false -- 当前直接任务线是否存在
     for _, mapEntry in ipairs(mapMode and mapMode.entries or {}) do
@@ -1158,6 +1242,7 @@ function QuestlineTreeView:resolveNavigationDefaults(navigationModel)
     self.selectedTypeKey = ""
   else
     self.selectedMapID = nil
+    self.selectedCampaignID = nil
     self.selectedTypeKey = ""
     self.expandedQuestLineID = nil
     self.directQuestLineCollapsed = false
@@ -1185,21 +1270,57 @@ function QuestlineTreeView:buildLeftTreeRows(navigationModel)
     }
     if expansionSelected and not expansionCollapsed then
       local expansionEntry = expansionByID[expansionSummary.id] -- 当前资料片对象
-      local mapMode = expansionEntry and expansionEntry.modeByKey and expansionEntry.modeByKey.map_questline or nil -- 地图任务线模式
-      for _, childEntry in ipairs(mapMode and mapMode.entries or {}) do
-        local childKind = childEntry.kind -- 导航子项类型
-        if type(childKind) ~= "string" or childKind == "" then
-          childKind = "map"
+      if self.selectedModeKey == "campaign" then
+        local campaignMode = getCampaignModeEntry(expansionEntry) -- 战役模式
+        for _, campaignEntry in ipairs(campaignMode and campaignMode.entries or {}) do
+          local campaignID = type(campaignEntry) == "table" and campaignEntry.id or nil -- 当前战役 ID
+          if type(campaignID) == "number" then
+            local campaignCollapseKey = buildCampaignCollapseKey(expansionSummary.id, campaignID) -- 战役折叠键
+            local campaignCollapsed = isTreeNodeCollapsed(collapseState, campaignCollapseKey) -- 战役是否折叠
+            local campaignSelected = self.selectedCampaignID == campaignID -- 战役是否选中
+            rowDataList[#rowDataList + 1] = {
+              kind = "campaign",
+              text = string.format("%s %s", campaignCollapsed and "[+]" or "[-]", tostring(campaignEntry.name or "")),
+              selected = campaignSelected,
+              expansionID = expansionSummary.id,
+              campaignID = campaignID,
+              collapseKey = campaignCollapseKey,
+              collapsed = campaignCollapsed,
+            }
+            if campaignSelected and not campaignCollapsed then
+              for _, questLineEntry in ipairs(campaignEntry.questLines or {}) do
+                local questLineID = type(questLineEntry) == "table" and questLineEntry.id or nil -- 当前任务线 ID
+                if type(questLineID) == "number" then
+                  rowDataList[#rowDataList + 1] = {
+                    kind = "questline",
+                    text = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(questLineID)),
+                    selected = self.expandedQuestLineID == questLineID,
+                    expansionID = expansionSummary.id,
+                    campaignID = campaignID,
+                    questLineID = questLineID,
+                  }
+                end
+              end
+            end
+          end
         end
-        rowDataList[#rowDataList + 1] = {
-          kind = childKind,
-          text = childEntry.name,
-          selected = (childKind == "map" and self.selectedMapID == childEntry.id)
-            or (childKind == "questline" and self.selectedMapID == nil and self.expandedQuestLineID == childEntry.id),
-          expansionID = expansionSummary.id,
-          mapID = childKind == "map" and childEntry.id or nil,
-          questLineID = childKind == "questline" and childEntry.id or nil,
-        }
+      else
+        local mapMode = getMapQuestlineModeEntry(expansionEntry) -- 地图任务线模式
+        for _, childEntry in ipairs(mapMode and mapMode.entries or {}) do
+          local childKind = childEntry.kind -- 导航子项类型
+          if type(childKind) ~= "string" or childKind == "" then
+            childKind = "map"
+          end
+          rowDataList[#rowDataList + 1] = {
+            kind = childKind,
+            text = childEntry.name,
+            selected = (childKind == "map" and self.selectedMapID == childEntry.id)
+              or (childKind == "questline" and self.selectedMapID == nil and self.expandedQuestLineID == childEntry.id),
+            expansionID = expansionSummary.id,
+            mapID = childKind == "map" and childEntry.id or nil,
+            questLineID = childKind == "questline" and childEntry.id or nil,
+          }
+        end
       end
     end
   end
@@ -1245,7 +1366,24 @@ function QuestlineTreeView:getOrCreateRowButton(rowIndex)
         setTreeNodeCollapsed(collapseState, collapseKey, not isTreeNodeCollapsed(collapseState, collapseKey))
       else
         self.selectedExpansionID = rowData.expansionID
-        self.selectedModeKey = "map_questline"
+        self.selectedModeKey = self.selectedModeKey == "campaign" and "campaign" or "map_questline"
+        self.selectedCampaignID = nil
+        self.selectedMapID = nil
+        self.selectedTypeKey = ""
+        self.expandedQuestLineID = nil
+        self.directQuestLineCollapsed = false
+        if type(collapseKey) == "string" then
+          setTreeNodeCollapsed(collapseState, collapseKey, false)
+        end
+      end
+    elseif rowData.kind == "campaign" and type(rowData.campaignID) == "number" then
+      local collapseKey = rowData.collapseKey -- 当前战役折叠键
+      if self.selectedCampaignID == rowData.campaignID and type(collapseKey) == "string" then
+        setTreeNodeCollapsed(collapseState, collapseKey, not isTreeNodeCollapsed(collapseState, collapseKey))
+      else
+        self.selectedExpansionID = rowData.expansionID
+        self.selectedModeKey = "campaign"
+        self.selectedCampaignID = rowData.campaignID
         self.selectedMapID = nil
         self.selectedTypeKey = ""
         self.expandedQuestLineID = nil
@@ -1256,13 +1394,18 @@ function QuestlineTreeView:getOrCreateRowButton(rowIndex)
       end
     elseif rowData.kind == "map" and type(rowData.mapID) == "number" then
       self.selectedModeKey = "map_questline"
+      self.selectedCampaignID = nil
       self.selectedMapID = rowData.mapID
       self.selectedTypeKey = ""
       self.expandedQuestLineID = nil
       self.directQuestLineCollapsed = false
     elseif rowData.kind == "questline" and type(rowData.questLineID) == "number" then
-      self.selectedModeKey = "map_questline"
-      self.selectedMapID = nil
+      local inCampaignMode = type(rowData.campaignID) == "number" -- 是否战役上下文
+      self.selectedModeKey = inCampaignMode and "campaign" or "map_questline"
+      self.selectedCampaignID = inCampaignMode and rowData.campaignID or nil
+      if type(rowData.campaignID) == "number" then
+        self.selectedMapID = nil
+      end
       self.selectedTypeKey = ""
       self.expandedQuestLineID = rowData.questLineID
       self.directQuestLineCollapsed = false
@@ -1349,6 +1492,33 @@ local function buildQuestDetailContextOptions(questLineID, mapID, expansionID)
     return nil
   end
   return contextOptions
+end
+
+--- 在导航模型中按任务线反查资料片/战役定位。
+---@param navigationModel table|nil 导航模型
+---@param questLineID number|nil 任务线 ID
+---@return number|nil expansionID
+---@return number|nil campaignID
+local function findCampaignSelectionByQuestLineID(navigationModel, questLineID)
+  if type(navigationModel) ~= "table" or type(questLineID) ~= "number" then
+    return nil, nil
+  end
+
+  for _, expansionSummary in ipairs(navigationModel.expansionList or {}) do
+    local expansionID = type(expansionSummary) == "table" and expansionSummary.id or nil -- 当前资料片 ID
+    local expansionEntry = type(expansionID) == "number" and navigationModel.expansionByID and navigationModel.expansionByID[expansionID] or nil -- 当前资料片对象
+    local campaignMode = getCampaignModeEntry(expansionEntry) -- 当前资料片战役模式
+    for _, campaignEntry in ipairs(campaignMode and campaignMode.entries or {}) do
+      local campaignID = type(campaignEntry) == "table" and campaignEntry.id or nil -- 当前战役 ID
+      for _, questLineEntry in ipairs(campaignEntry and campaignEntry.questLines or {}) do
+        if type(questLineEntry) == "table" and questLineEntry.id == questLineID then
+          return expansionID, campaignID
+        end
+      end
+    end
+  end
+
+  return nil, nil
 end
 
 --- 计算主区任务行高度。
@@ -1466,13 +1636,32 @@ function QuestlineTreeView:getOrCreateRightRowButton(rowIndex, rowButtonList, sc
     if type(detailObject) ~= "table" then
       return
     end
-    if type(detailObject.questLineExpansionID) == "number" then
+    local resolvedExpansionID = nil -- 反查得到的资料片 ID
+    local resolvedCampaignID = nil -- 反查得到的战役 ID
+    if type(detailObject.questLineID) == "number"
+      and Toolbox.Questlines
+      and type(Toolbox.Questlines.GetQuestNavigationModel) == "function"
+    then
+      local navigationModel = select(1, Toolbox.Questlines.GetQuestNavigationModel()) -- 当前导航模型
+      resolvedExpansionID, resolvedCampaignID = findCampaignSelectionByQuestLineID(navigationModel, detailObject.questLineID)
+    end
+    if type(resolvedExpansionID) == "number" then
+      self.selectedExpansionID = resolvedExpansionID
+    elseif type(detailObject.questLineExpansionID) == "number" then
       self.selectedExpansionID = detailObject.questLineExpansionID
     end
-    if type(detailObject.UiMapID) == "number" then
+    if type(resolvedCampaignID) == "number" then
+      self.selectedModeKey = "campaign"
+      self.selectedCampaignID = resolvedCampaignID
+      self.selectedMapID = nil
+    elseif type(detailObject.UiMapID) == "number" then
       self.selectedModeKey = "map_questline"
+      self.selectedCampaignID = nil
       self.selectedMapID = detailObject.UiMapID
-      self.directQuestLineCollapsed = false
+    else
+      self.selectedModeKey = "map_questline"
+      self.selectedCampaignID = nil
+      self.selectedMapID = nil
     end
     if type(detailObject.questLineID) == "number" then
       self.expandedQuestLineID = detailObject.questLineID
@@ -1562,8 +1751,9 @@ function QuestlineTreeView:buildMainRowsForMap()
   local rowDataList = {} -- 地图模式主区行
   local localeTable = Toolbox.L or {} -- 本地化文案
   local searchKeyword = normalizeSearchText(self.searchText) -- 搜索关键词
+  local useCampaignSelection = self.selectedModeKey == "campaign" and type(self.selectedCampaignID) == "number" -- 当前是否战役任务线模式
   local questLineList = nil -- 当前主区任务线列表
-  if type(self.selectedMapID) == "number" then
+  if type(self.selectedMapID) == "number" and not useCampaignSelection then
     local errorObject = nil -- 地图查询错误
     questLineList, errorObject = Toolbox.Questlines.GetQuestLinesForMap(self.selectedMapID, self.selectedExpansionID) -- 当前资料片地图下任务线
     if errorObject then
@@ -1589,7 +1779,9 @@ function QuestlineTreeView:buildMainRowsForMap()
     local questLineName = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(questLineID or "?")) -- 任务线显示名
     local progressInfo, progressError = Toolbox.Questlines.GetQuestLineProgress(questLineID) -- 任务线进度
     local progressText = not progressError and formatProgressText(progressInfo, localeTable) or nil -- 进度文本
-    local shouldQueryQuestList = self.expandedQuestLineID == questLineID or searchKeyword ~= "" -- 是否需要查询任务列表
+    local shouldQueryQuestList = useCampaignSelection
+      or self.expandedQuestLineID == questLineID
+      or searchKeyword ~= "" -- 是否需要查询任务列表
     local questList = nil -- 任务线下任务列表
     if shouldQueryQuestList then
       local listError = nil -- 任务列表查询错误
@@ -1624,35 +1816,75 @@ function QuestlineTreeView:buildMainRowsForMap()
 
     local questLineMatched = searchKeyword == "" or textContainsKeyword(questLineName, searchKeyword) -- 任务线名是否匹配搜索
     if searchKeyword == "" or questLineMatched or hasQuestMatch then
-      local isDirectQuestLineContext = type(self.selectedMapID) ~= "number"
-        and self.expandedQuestLineID == questLineID -- 当前是否处于直连任务线上下文
-      local shouldExpand = ((self.expandedQuestLineID == questLineID)
-        and not (isDirectQuestLineContext and self.directQuestLineCollapsed == true))
-        or (searchKeyword ~= "" and hasQuestMatch) -- 当前任务线是否展开
-      local linePrefix = shouldExpand and "[-]" or "[+]" -- 展开前缀
-      local lineText = string.format("%s %s", linePrefix, questLineName) -- 任务线主文本
-      if type(progressText) == "string" then
-        lineText = string.format("%s  %s", lineText, progressText)
-      end
-      if type(questLineEntry.questCount) == "number" then
-        lineText = string.format("%s · " .. (localeTable.EJ_QUEST_CARD_QUEST_COUNT_FMT or "%d quests"), lineText, questLineEntry.questCount)
-      end
+      if useCampaignSelection then
+        local sectionText = questLineName -- 战役视图标题文本
+        if type(progressText) == "string" then
+          sectionText = string.format("%s  %s", sectionText, progressText)
+        end
+        if type(questLineEntry.questCount) == "number" then
+          sectionText = string.format("%s · " .. (localeTable.EJ_QUEST_CARD_QUEST_COUNT_FMT or "%d quests"), sectionText, questLineEntry.questCount)
+        end
+        rowDataList[#rowDataList + 1] = {
+          kind = "section_header",
+          text = sectionText,
+          metaText = buildQuestlineMetaText(progressInfo, localeTable),
+        }
+        if #matchQuestRows == 0 then
+          rowDataList[#rowDataList + 1] = {
+            kind = "section_empty",
+            text = localeTable.EJ_QUEST_FILTER_EMPTY or "当前筛选下没有可显示的任务。",
+          }
+        else
+          for _, questRow in ipairs(matchQuestRows) do
+            rowDataList[#rowDataList + 1] = questRow
+            self:appendInlineQuestDetailRow(rowDataList, questRow)
+          end
+        end
+      else
+        local isDirectQuestLineContext = type(self.selectedMapID) ~= "number"
+          and self.expandedQuestLineID == questLineID -- 当前是否处于直连任务线上下文
+        local shouldExpand = ((self.expandedQuestLineID == questLineID)
+          and not (isDirectQuestLineContext and self.directQuestLineCollapsed == true))
+          or (searchKeyword ~= "" and hasQuestMatch) -- 当前任务线是否展开
+        local linePrefix = shouldExpand and "[-]" or "[+]" -- 展开前缀
+        local lineText = string.format("%s %s", linePrefix, questLineName) -- 任务线主文本
+        if type(progressText) == "string" then
+          lineText = string.format("%s  %s", lineText, progressText)
+        end
+        if type(questLineEntry.questCount) == "number" then
+          lineText = string.format("%s · " .. (localeTable.EJ_QUEST_CARD_QUEST_COUNT_FMT or "%d quests"), lineText, questLineEntry.questCount)
+        end
 
-      rowDataList[#rowDataList + 1] = {
-        kind = "questline",
-        text = lineText,
-        questLineID = questLineID,
-        selected = shouldExpand,
-        progressInfo = progressInfo,
-        metaText = buildQuestlineMetaText(progressInfo, localeTable),
-      }
+        rowDataList[#rowDataList + 1] = {
+          kind = "questline",
+          text = lineText,
+          questLineID = questLineID,
+          selected = shouldExpand,
+          progressInfo = progressInfo,
+          metaText = buildQuestlineMetaText(progressInfo, localeTable),
+        }
 
-      if shouldExpand then
-        for _, questRow in ipairs(matchQuestRows) do
-          rowDataList[#rowDataList + 1] = questRow
-          self:appendInlineQuestDetailRow(rowDataList, questRow)
+        if shouldExpand then
+          for _, questRow in ipairs(matchQuestRows) do
+            rowDataList[#rowDataList + 1] = questRow
+            self:appendInlineQuestDetailRow(rowDataList, questRow)
+          end
         end
       end
+    end
+  end
+
+  if useCampaignSelection and #rowDataList == 0 then
+    if type(self.expandedQuestLineID) == "number" then
+      rowDataList[#rowDataList + 1] = {
+        kind = "section_empty",
+        text = localeTable.EJ_QUEST_FILTER_EMPTY or "当前筛选下没有可显示的任务。",
+      }
+    else
+      rowDataList[#rowDataList + 1] = {
+        kind = "section_empty",
+        text = localeTable.EJ_QUEST_CAMPAIGN_QUESTLINE_EMPTY or "请在左侧选择任务线后查看任务列表。",
+      }
     end
   end
 
@@ -1773,7 +2005,17 @@ function QuestlineTreeView:renderLeftRows(rowDataList)
     local rowHeight = rowData.kind == "expansion" and (self.rowHeight + VIEW_STYLE.expansionExtraHeight) or self.rowHeight -- 当前行高度
     rowButton:SetHeight(rowHeight)
     local indentLevel = 0 -- 缩进层级
-    if rowData.kind == "map" or rowData.kind == "questline" then
+    if rowData.kind == "campaign" then
+      indentLevel = 1
+    elseif rowData.kind == "map" then
+      indentLevel = 1
+    elseif rowData.kind == "questline" then
+      if type(rowData.campaignID) == "number" then
+        indentLevel = 2
+      else
+        indentLevel = 1
+      end
+    elseif rowData.kind == "mode" then
       indentLevel = 1
     end
     rowButton.rowFont:SetText(string.rep("  ", indentLevel) .. tostring(rowData.text or ""))
@@ -1789,6 +2031,10 @@ function QuestlineTreeView:renderLeftRows(rowDataList)
       rowButton.rowFont:SetTextColor(0.9, 0.85, 0.72)
       rowButton:SetBackdropBorderColor(0.34, 0.3, 0.22, 0.55)
       rowButton:SetBackdropColor(0.11, 0.1, 0.09, 0.7)
+    elseif rowData.kind == "campaign" then
+      rowButton.rowFont:SetTextColor(0.9, 0.85, 0.72)
+      rowButton:SetBackdropBorderColor(0.36, 0.31, 0.2, 0.6)
+      rowButton:SetBackdropColor(0.12, 0.1, 0.08, 0.72)
     else
       rowButton.rowFont:SetTextColor(1, 1, 1)
       rowButton:SetBackdropBorderColor(0.3, 0.3, 0.32, 0.5)
@@ -1875,7 +2121,7 @@ function QuestlineTreeView:renderRowList(scrollFrame, scrollChild, rowButtonList
           and type(detailObject.UiMapID) == "number" -- 是否显示跳转按钮
         rowButton.jumpActionButton.detailRowData = rowData
         rowButton.jumpActionButton:SetPoint("BOTTOMLEFT", rowButton, "BOTTOMLEFT", 10, 8)
-        rowButton.jumpActionButton:SetText(localeTable.EJ_QUEST_JUMP_TO_QUESTLINE or "跳转到对应地图/任务线")
+        rowButton.jumpActionButton:SetText(localeTable.EJ_QUEST_JUMP_TO_QUESTLINE or "跳转到对应战役/任务线")
         rowButton.jumpActionButton:SetShown(canJump)
       end
     else
@@ -2085,12 +2331,23 @@ function QuestlineTreeView:showQuestDetailPopup(questID)
     self.detailPopupText:SetText(table.concat(buildQuestDetailLines(detailObject, localeTable), "\n"))
   end
   if self.detailPopupJumpButton then
-    local canJump = type(detailObject.questLineID) == "number" and type(detailObject.UiMapID) == "number" -- 是否可回跳
+    local resolvedExpansionID = nil -- 反查得到的资料片 ID
+    local resolvedCampaignID = nil -- 反查得到的战役 ID
+    if type(detailObject.questLineID) == "number"
+      and Toolbox.Questlines
+      and type(Toolbox.Questlines.GetQuestNavigationModel) == "function"
+    then
+      local navigationModel = select(1, Toolbox.Questlines.GetQuestNavigationModel()) -- 当前导航模型
+      resolvedExpansionID, resolvedCampaignID = findCampaignSelectionByQuestLineID(navigationModel, detailObject.questLineID)
+    end
+    local canJump = type(detailObject.questLineID) == "number"
+      and (type(resolvedCampaignID) == "number" or type(detailObject.UiMapID) == "number") -- 是否可回跳
     self.detailPopupJumpButton.questLineID = detailObject.questLineID
     self.detailPopupJumpButton.mapID = detailObject.UiMapID
-    self.detailPopupJumpButton.expansionID = detailObject.questLineExpansionID
+    self.detailPopupJumpButton.expansionID = type(resolvedExpansionID) == "number" and resolvedExpansionID or detailObject.questLineExpansionID
+    self.detailPopupJumpButton.campaignID = resolvedCampaignID
     self.detailPopupJumpButton:SetShown(canJump)
-    self.detailPopupJumpButton:SetText(localeTable.EJ_QUEST_JUMP_TO_QUESTLINE or "跳转到对应地图/任务线")
+    self.detailPopupJumpButton:SetText(localeTable.EJ_QUEST_JUMP_TO_QUESTLINE or "跳转到对应战役/任务线")
   end
   if self.detailPopupActiveButton then
     self.detailPopupActiveButton.questID = detailObject.questID
@@ -2114,10 +2371,14 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
       text = getActiveLogRootText(localeTable),
     }
   elseif type(expansionEntry) == "table" then
+    local mapMode = getMapQuestlineModeEntry(expansionEntry) -- 地图任务线模式
+    local campaignMode = getCampaignModeEntry(expansionEntry) -- 战役模式
+    local useCampaignMode = self.selectedModeKey == "campaign" -- 当前是否战役页签
     breadcrumbList[#breadcrumbList + 1] = {
-      text = getQuestlineRootText(localeTable),
+      text = useCampaignMode and getCampaignRootText(localeTable) or getQuestlineRootText(localeTable),
       onClick = function()
-        self.selectedModeKey = "map_questline"
+        self.selectedModeKey = useCampaignMode and "campaign" or "map_questline"
+        self.selectedCampaignID = nil
         self.selectedMapID = nil
         self.expandedQuestLineID = nil
         self.directQuestLineCollapsed = false
@@ -2130,7 +2391,8 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
     breadcrumbList[#breadcrumbList + 1] = {
       text = tostring(expansionEntry.name or ""),
       onClick = function()
-        self.selectedModeKey = "map_questline"
+        self.selectedModeKey = useCampaignMode and "campaign" or "map_questline"
+        self.selectedCampaignID = nil
         self.expandedQuestLineID = nil
         self.selectedMapID = nil
         self.directQuestLineCollapsed = false
@@ -2139,56 +2401,82 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
         self:render()
       end,
     }
-    if type(self.selectedMapID) == "number" then
-      local mapMode = expansionEntry.modeByKey and expansionEntry.modeByKey.map_questline or nil -- 地图模式
-      for _, mapEntry in ipairs(mapMode and mapMode.entries or {}) do
-        if mapEntry.id == self.selectedMapID then
-          breadcrumbList[#breadcrumbList + 1] = {
-            text = tostring(mapEntry.name or ""),
-            onClick = function()
-              self.expandedQuestLineID = nil
-              self.directQuestLineCollapsed = false
-              self:hideQuestDetailPopup()
-              self:saveSelection()
-              self:render()
-            end,
-          }
-          break
+
+    if useCampaignMode then
+      local campaignEntry = findCampaignEntryByID(campaignMode, self.selectedCampaignID) -- 当前战役条目
+      if type(campaignEntry) == "table" then
+        breadcrumbList[#breadcrumbList + 1] = {
+          text = tostring(campaignEntry.name or ""),
+          onClick = function()
+            self.expandedQuestLineID = nil
+            self.directQuestLineCollapsed = false
+            self:hideQuestDetailPopup()
+            self:saveSelection()
+            self:render()
+          end,
+        }
+        if type(self.expandedQuestLineID) == "number" then
+          for _, questLineEntry in ipairs(campaignEntry.questLines or {}) do
+            if type(questLineEntry) == "table" and questLineEntry.id == self.expandedQuestLineID then
+              breadcrumbList[#breadcrumbList + 1] = {
+                text = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(self.expandedQuestLineID)),
+              }
+              break
+            end
+          end
         end
       end
-    end
-    if type(self.expandedQuestLineID) == "number" and Toolbox.Questlines and type(Toolbox.Questlines.GetQuestTabModel) == "function" then
-      local questTabModel = select(1, Toolbox.Questlines.GetQuestTabModel()) -- 任务页签模型
-      local questLineEntry = questTabModel and questTabModel.questLineByID and questTabModel.questLineByID[self.expandedQuestLineID] or nil -- 当前任务线
-      if type(questLineEntry) ~= "table" and type(self.selectedMapID) == "number" and Toolbox.Questlines and type(Toolbox.Questlines.GetQuestLinesForMap) == "function" then
-        local questLineList = select(1, Toolbox.Questlines.GetQuestLinesForMap(self.selectedMapID)) -- 当前地图任务线列表
-        for _, currentQuestLineEntry in ipairs(questLineList or {}) do
-          if type(currentQuestLineEntry) == "table" and currentQuestLineEntry.id == self.expandedQuestLineID then
-            questLineEntry = currentQuestLineEntry
+    else
+      if type(self.selectedMapID) == "number" then
+        for _, mapEntry in ipairs(mapMode and mapMode.entries or {}) do
+          if mapEntry.id == self.selectedMapID then
+            breadcrumbList[#breadcrumbList + 1] = {
+              text = tostring(mapEntry.name or ""),
+              onClick = function()
+                self.expandedQuestLineID = nil
+                self.directQuestLineCollapsed = false
+                self:hideQuestDetailPopup()
+                self:saveSelection()
+                self:render()
+              end,
+            }
             break
           end
         end
       end
-      if type(questLineEntry) == "table" then
-        local mapID = type(questLineEntry.UiMapID) == "number" and questLineEntry.UiMapID
-          or type(questLineEntry.PrimaryUiMapID) == "number" and questLineEntry.PrimaryUiMapID
-          or nil -- 任务线所属地图 ID
-        if type(self.selectedMapID) ~= "number" and type(mapID) == "number" then
+      if type(self.expandedQuestLineID) == "number" and Toolbox.Questlines and type(Toolbox.Questlines.GetQuestTabModel) == "function" then
+        local questTabModel = select(1, Toolbox.Questlines.GetQuestTabModel()) -- 任务页签模型
+        local questLineEntry = questTabModel and questTabModel.questLineByID and questTabModel.questLineByID[self.expandedQuestLineID] or nil -- 当前任务线
+        if type(questLineEntry) ~= "table" and type(self.selectedMapID) == "number" and Toolbox.Questlines and type(Toolbox.Questlines.GetQuestLinesForMap) == "function" then
+          local questLineList = select(1, Toolbox.Questlines.GetQuestLinesForMap(self.selectedMapID)) -- 当前地图任务线列表
+          for _, currentQuestLineEntry in ipairs(questLineList or {}) do
+            if type(currentQuestLineEntry) == "table" and currentQuestLineEntry.id == self.expandedQuestLineID then
+              questLineEntry = currentQuestLineEntry
+              break
+            end
+          end
+        end
+        if type(questLineEntry) == "table" then
+          local mapID = type(questLineEntry.UiMapID) == "number" and questLineEntry.UiMapID
+            or type(questLineEntry.PrimaryUiMapID) == "number" and questLineEntry.PrimaryUiMapID
+            or nil -- 任务线所属地图 ID
+          if type(self.selectedMapID) ~= "number" and type(mapID) == "number" then
+            breadcrumbList[#breadcrumbList + 1] = {
+              text = getMapNameByID(mapID),
+              onClick = function()
+                self.selectedMapID = mapID
+                self.expandedQuestLineID = nil
+                self.directQuestLineCollapsed = false
+                self:hideQuestDetailPopup()
+                self:saveSelection()
+                self:render()
+              end,
+            }
+          end
           breadcrumbList[#breadcrumbList + 1] = {
-            text = getMapNameByID(mapID),
-            onClick = function()
-              self.selectedMapID = mapID
-              self.expandedQuestLineID = nil
-              self.directQuestLineCollapsed = false
-              self:hideQuestDetailPopup()
-              self:saveSelection()
-              self:render()
-            end,
+            text = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(self.expandedQuestLineID)),
           }
         end
-        breadcrumbList[#breadcrumbList + 1] = {
-          text = resolveQuestLineDisplayName(questLineEntry) or ("QuestLine #" .. tostring(self.expandedQuestLineID)),
-        }
       end
     end
   else
@@ -2226,6 +2514,18 @@ function QuestlineTreeView:applyContentLayout()
     end
     setModeTabSelected(self.modeTabButtonByKey.map_questline, activeModeKey == "map_questline")
     self.modeTabButtonByKey.map_questline:Show()
+  end
+  if self.modeTabButtonByKey.campaign then
+    self.modeTabButtonByKey.campaign:ClearAllPoints()
+    if self.modeTabButtonByKey.map_questline then
+      self.modeTabButtonByKey.campaign:SetPoint("LEFT", self.modeTabButtonByKey.map_questline, "RIGHT", VIEW_STYLE.modeTabGap, 0)
+    elseif self.modeTabButtonByKey.active_log then
+      self.modeTabButtonByKey.campaign:SetPoint("LEFT", self.modeTabButtonByKey.active_log, "RIGHT", VIEW_STYLE.modeTabGap, 0)
+    else
+      self.modeTabButtonByKey.campaign:SetPoint("TOPLEFT", self.hostJournalFrame or self.panelFrame, "BOTTOMLEFT", 126, 2)
+    end
+    setModeTabSelected(self.modeTabButtonByKey.campaign, activeModeKey == "campaign")
+    self.modeTabButtonByKey.campaign:Show()
   end
 
   self.headerFrame:ClearAllPoints()
@@ -2488,10 +2788,15 @@ function QuestlineTreeView:render()
   end
   if self.rightTitle then
     local titleText = localeTable.EJ_QUESTLINE_LIST_TITLE or "Questlines" -- 主区标题文本
-    local titleCount = #mainRows -- 标题计数
+    local titleCount = 0 -- 标题计数
+    local countKind = "questline" -- 计数行类型
+    if self.selectedModeKey == "campaign" and type(self.selectedCampaignID) == "number" then
+      titleText = localeTable.EJ_QUEST_TASK_LIST_TITLE or "Quests"
+      countKind = "quest"
+    end
     for _, rowData in ipairs(mainRows) do
-      if type(rowData) ~= "table" or rowData.kind ~= "questline" then
-        titleCount = titleCount - 1
+      if type(rowData) == "table" and rowData.kind == countKind then
+        titleCount = titleCount + 1
       end
     end
     self.rightTitle:SetText(string.format("%s (%d)", titleText, titleCount))
@@ -2514,6 +2819,7 @@ function QuestlineTreeView:ensureWidgets()
     and self.headerFrame
     and self.modeTabButtonByKey.active_log
     and self.modeTabButtonByKey.map_questline
+    and self.modeTabButtonByKey.campaign
     and self.leftTree
     and self.rightContent
     and self.scrollFrame
@@ -2543,7 +2849,7 @@ function QuestlineTreeView:ensureWidgets()
     end
     if self.searchPlaceholder then
       local localeTable = Toolbox.L or {} -- 本地化文案
-      self.searchPlaceholder:SetText(localeTable.EJ_QUEST_SEARCH_PLACEHOLDER or "Search questlines / quests...")
+      self.searchPlaceholder:SetText(localeTable.EJ_QUEST_SEARCH_PLACEHOLDER or "Search campaigns / questlines / quests...")
       self.searchPlaceholder:SetShown((self.searchText or "") == "")
     end
     local localeTable = Toolbox.L or {} -- 本地化文案
@@ -2554,6 +2860,10 @@ function QuestlineTreeView:ensureWidgets()
     if self.modeTabButtonByKey.map_questline then
       self.modeTabButtonByKey.map_questline:SetText(getQuestlineRootText(localeTable))
       self.modeTabButtonByKey.map_questline:SetWidth(92)
+    end
+    if self.modeTabButtonByKey.campaign then
+      self.modeTabButtonByKey.campaign:SetText(getCampaignRootText(localeTable))
+      self.modeTabButtonByKey.campaign:SetWidth(92)
     end
     if self.activeLogRecentToggleButton then
       self.activeLogRecentToggleButton:SetText(getRecentCompletedToggleText(localeTable, self.activeLogRecentCollapsed))
@@ -2592,6 +2902,7 @@ function QuestlineTreeView:ensureWidgets()
     activeButton:SetHeight(VIEW_STYLE.modeTabHeight)
     activeButton:SetScript("OnClick", function()
       self.selectedModeKey = "active_log"
+      self.selectedCampaignID = nil
       self.selectedMapID = nil
       self.expandedQuestLineID = nil
       self.directQuestLineCollapsed = false
@@ -2607,12 +2918,26 @@ function QuestlineTreeView:ensureWidgets()
     mapButton:SetHeight(VIEW_STYLE.modeTabHeight)
     mapButton:SetScript("OnClick", function()
       self.selectedModeKey = "map_questline"
+      self.selectedCampaignID = nil
       self.selectedQuestID = nil
       self:hideQuestDetailPopup()
       self:saveSelection()
       self:render()
     end)
     self.modeTabButtonByKey.map_questline = mapButton
+  end
+  if not self.modeTabButtonByKey.campaign then
+    local campaignButton = CreateFrame("Button", nil, journalFrame, "PanelTabButtonTemplate") -- 战役视图页签
+    campaignButton:SetHeight(VIEW_STYLE.modeTabHeight)
+    campaignButton:SetScript("OnClick", function()
+      self.selectedModeKey = "campaign"
+      self.selectedMapID = nil
+      self.selectedQuestID = nil
+      self:hideQuestDetailPopup()
+      self:saveSelection()
+      self:render()
+    end)
+    self.modeTabButtonByKey.campaign = campaignButton
   end
   if not self.leftTree then
     self.leftTree = CreateFrame("Frame", nil, self.panelFrame)
@@ -2830,10 +3155,18 @@ function QuestlineTreeView:ensureWidgets()
       if type(button.expansionID) == "number" then
         self.selectedExpansionID = button.expansionID
       end
-      if type(button.mapID) == "number" then
+      if type(button.campaignID) == "number" then
+        self.selectedModeKey = "campaign"
+        self.selectedCampaignID = button.campaignID
+        self.selectedMapID = nil
+      elseif type(button.mapID) == "number" then
         self.selectedModeKey = "map_questline"
+        self.selectedCampaignID = nil
         self.selectedMapID = button.mapID
-        self.directQuestLineCollapsed = false
+      else
+        self.selectedModeKey = "map_questline"
+        self.selectedCampaignID = nil
+        self.selectedMapID = nil
       end
       if type(button.questLineID) == "number" then
         self.expandedQuestLineID = button.questLineID
@@ -2853,6 +3186,8 @@ function QuestlineTreeView:ensureWidgets()
     activeButton:SetPoint("BOTTOMRIGHT", self.detailPopupFrame, "BOTTOMRIGHT", -12, 12)
     activeButton:SetScript("OnClick", function(button)
       self.selectedModeKey = "active_log"
+      self.selectedCampaignID = nil
+      self.selectedMapID = nil
       self.selectedQuestID = button.questID
       self:hideQuestDetailPopup()
       self:saveSelection()
@@ -2875,7 +3210,7 @@ function QuestlineTreeView:ensureWidgets()
   end
   if self.searchPlaceholder then
     local localeTable = Toolbox.L or {} -- 本地化文案
-    self.searchPlaceholder:SetText(localeTable.EJ_QUEST_SEARCH_PLACEHOLDER or "Search questlines / quests...")
+    self.searchPlaceholder:SetText(localeTable.EJ_QUEST_SEARCH_PLACEHOLDER or "Search campaigns / questlines / quests...")
     self.searchPlaceholder:SetShown((self.searchText or "") == "")
   end
   local localeTable = Toolbox.L or {} -- 本地化文案
@@ -2886,6 +3221,10 @@ function QuestlineTreeView:ensureWidgets()
   if self.modeTabButtonByKey.map_questline then
     self.modeTabButtonByKey.map_questline:SetText(getQuestlineRootText(localeTable))
     self.modeTabButtonByKey.map_questline:SetWidth(92)
+  end
+  if self.modeTabButtonByKey.campaign then
+    self.modeTabButtonByKey.campaign:SetText(getCampaignRootText(localeTable))
+    self.modeTabButtonByKey.campaign:SetWidth(92)
   end
   if self.activeLogRecentToggleButton then
     self.activeLogRecentToggleButton:SetText(getRecentCompletedToggleText(localeTable, self.activeLogRecentCollapsed))
@@ -2971,6 +3310,7 @@ function QuestlineTreeView:getBottomTabModeKeys()
   return {
     "active_log",
     "map_questline",
+    "campaign",
   }
 end
 

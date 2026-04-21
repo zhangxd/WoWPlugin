@@ -87,7 +87,7 @@ class ExportInstanceQuestlinesRuntimeTests(unittest.TestCase):
         self.assertEqual(model.quest_lines[601].class_mask_values, [8])
         self.assertEqual(model.expansions, {9: [601]})
 
-    def test_write_instance_questlines_lua_outputs_extended_schema_v6(self) -> None:
+    def test_write_instance_questlines_lua_outputs_extended_schema_v7(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_name:
             db_path = Path(temp_dir_name) / "wow.db"
             sqlite_conn = sqlite3.connect(db_path)
@@ -114,7 +114,7 @@ class ExportInstanceQuestlinesRuntimeTests(unittest.TestCase):
             output_text = output_path.read_text(encoding="utf-8")
 
         self.assertIn("Toolbox.Data.InstanceQuestlines = {", output_text)
-        self.assertIn("schemaVersion = 6", output_text)
+        self.assertIn("schemaVersion = 7", output_text)
         self.assertIn('[2001] = { -- First Quest', output_text)
         self.assertIn("QuestLineIDs = { 601 }", output_text)
         self.assertIn('FactionConditions = { "alliance" }', output_text)
@@ -123,7 +123,9 @@ class ExportInstanceQuestlinesRuntimeTests(unittest.TestCase):
         self.assertIn('Name_lang = "Shared Line"', output_text)
         self.assertIn("UiMapID = 21", output_text)
         self.assertIn("PrimaryUiMapID = 21, -- Silverpine Forest", output_text)
+        self.assertIn("campaigns = {", output_text)
         self.assertIn("[9] = { 601 }", output_text)
+        self.assertIn("expansionCampaigns = {", output_text)
 
     def test_build_instance_questlines_model_assigns_unknown_map_to_mapless_lines(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_name:
@@ -192,6 +194,26 @@ class ExportInstanceQuestlinesRuntimeTests(unittest.TestCase):
 
         self.assertIn("[901] = { -- 未命名任务线", output_text)
         self.assertNotIn('Name_lang = ""', output_text)
+
+    def test_build_instance_questlines_model_groups_campaigns_by_primary_expansion(self) -> None:
+        model = build_instance_questlines_model(
+            build_csv_rows(),
+            {601: [2001, 2002]},
+            {601: "Shared Line"},
+            campaign_link_rows=[
+                {
+                    "campaign_id": 301,
+                    "quest_line_id": 601,
+                    "order_index": 5,
+                    "campaign_name": "Main Campaign",
+                }
+            ],
+        )
+
+        self.assertIn(301, model.campaigns)
+        self.assertEqual([601], model.campaigns[301].quest_line_ids)
+        self.assertEqual("Main Campaign", model.campaigns[301].campaign_name)
+        self.assertEqual({9: [301]}, model.expansion_campaigns)
 
 
 if __name__ == "__main__":
