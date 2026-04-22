@@ -1030,6 +1030,36 @@ local function getAchievementRootText(localeTable)
   return localeTable.QUEST_VIEW_TAB_ACHIEVEMENT or "成就"
 end
 
+local function getFactionLabelByTag(localeTable, factionTag)
+  if factionTag == "alliance" then
+    return localeTable.EJ_QUEST_FACTION_LABEL_ALLIANCE or "联盟"
+  end
+  if factionTag == "horde" then
+    return localeTable.EJ_QUEST_FACTION_LABEL_HORDE or "部落"
+  end
+  if factionTag == "shared" then
+    return localeTable.EJ_QUEST_FACTION_LABEL_SHARED or "通用"
+  end
+  return ""
+end
+
+local function buildFactionBadgeText(localeTable, factionTagList)
+  if type(factionTagList) ~= "table" or #factionTagList == 0 then
+    return ""
+  end
+  local factionLabelList = {} -- 阵营标签文本列表
+  for _, factionTag in ipairs(factionTagList) do
+    local factionLabel = getFactionLabelByTag(localeTable, factionTag) -- 当前阵营标签
+    if type(factionLabel) == "string" and factionLabel ~= "" then
+      factionLabelList[#factionLabelList + 1] = factionLabel
+    end
+  end
+  if #factionLabelList == 0 then
+    return ""
+  end
+  return string.format("[%s]", table.concat(factionLabelList, "/"))
+end
+
 local function getRecentCompletedToggleText(localeTable, collapsed)
   if collapsed == true then
     return localeTable.QUEST_VIEW_RECENT_TOGGLE_EXPAND or "展开历史完成"
@@ -1342,6 +1372,7 @@ end
 
 function QuestlineTreeView:buildLeftTreeRows(navigationModel)
   local rowDataList = {} -- 左侧树行
+  local localeTable = Toolbox.L or {} -- 本地化文案
   local expansionList = navigationModel and navigationModel.expansionList or {} -- 资料片列表
   local expansionByID = navigationModel and navigationModel.expansionByID or {} -- 资料片索引
   local collapseState = getQuestlineCollapsedTable() -- 左树折叠状态
@@ -1398,9 +1429,12 @@ function QuestlineTreeView:buildLeftTreeRows(navigationModel)
         for _, achievementEntry in ipairs(achievementMode and achievementMode.entries or {}) do
           local achievementID = type(achievementEntry) == "table" and achievementEntry.id or nil -- 当前成就 ID
           if type(achievementID) == "number" then
+            local achievementName = tostring(achievementEntry.name or "") -- 成就显示名称
+            local factionBadgeText = buildFactionBadgeText(localeTable, achievementEntry.factionTags) -- 成就阵营标识
+            local displayText = factionBadgeText ~= "" and string.format("%s %s", achievementName, factionBadgeText) or achievementName -- 左侧树显示文本
             rowDataList[#rowDataList + 1] = {
               kind = "achievement",
-              text = tostring(achievementEntry.name or ""),
+              text = displayText,
               selected = self.selectedAchievementID == achievementID,
               expansionID = expansionSummary.id,
               achievementID = achievementID,
@@ -1430,6 +1464,71 @@ function QuestlineTreeView:buildLeftTreeRows(navigationModel)
   return rowDataList
 end
 
+--- 判断左侧树行文本是否发生截断。
+---@param rowButton table|nil
+---@return boolean
+local function isLeftRowTextTruncated(rowButton)
+  if type(rowButton) ~= "table" then
+    return false
+  end
+  local rowFont = rowButton.rowFont -- 左树行文本对象
+  if type(rowFont) ~= "table" then
+    return false
+  end
+  if type(rowFont.IsTruncated) == "function" then
+    local success, isTruncated = pcall(rowFont.IsTruncated, rowFont) -- 直接截断检测结果
+    return success == true and isTruncated == true
+  end
+  local textWidth = type(rowFont.GetStringWidth) == "function" and rowFont:GetStringWidth() or nil -- 文本实际像素宽度
+  local availableWidth = type(rowFont.GetWidth) == "function" and rowFont:GetWidth() or nil -- 文本可用像素宽度
+  if (type(availableWidth) ~= "number" or availableWidth <= 0)
+    and type(rowButton.GetWidth) == "function"
+  then
+    availableWidth = (rowButton:GetWidth() or 0) - 14
+  end
+  if type(textWidth) ~= "number" or textWidth <= 0 then
+    return false
+  end
+  if type(availableWidth) ~= "number" or availableWidth <= 0 then
+    return false
+  end
+  return textWidth > (availableWidth + 1)
+end
+
+--- 显示左侧树行截断提示。
+---@param rowButton table|nil
+local function showLeftRowOverflowTooltip(rowButton)
+  if type(rowButton) ~= "table" or not GameTooltip then
+    return
+  end
+  local tooltipText = rowButton.leftRowTooltipText -- 行完整文本
+  if type(tooltipText) ~= "string" or tooltipText == "" then
+    return
+  end
+  if not isLeftRowTextTruncated(rowButton) then
+    return
+  end
+  GameTooltip:SetOwner(rowButton, "ANCHOR_RIGHT")
+  GameTooltip:ClearLines()
+  GameTooltip:SetText(tooltipText)
+  GameTooltip:Show()
+end
+
+--- 隐藏左侧树行截断提示。
+---@param rowButton table|nil
+local function hideLeftRowOverflowTooltip(rowButton)
+  if not GameTooltip then
+    return
+  end
+  if type(GameTooltip.IsOwned) == "function"
+    and type(rowButton) == "table"
+    and not GameTooltip:IsOwned(rowButton)
+  then
+    return
+  end
+  GameTooltip:Hide()
+end
+
 function QuestlineTreeView:getOrCreateRowButton(rowIndex)
   local rowButton = self.rowButtons[rowIndex] -- 左树行按钮
   if rowButton then
@@ -1455,7 +1554,23 @@ function QuestlineTreeView:getOrCreateRowButton(rowIndex)
   rowFont:SetPoint("RIGHT", rowButton, "RIGHT", -6, 0)
   rowFont:SetJustifyH("LEFT")
   rowFont:SetJustifyV("MIDDLE")
+  rowFont:SetWordWrap(false)
+  if rowFont.SetNonSpaceWrap then
+    rowFont:SetNonSpaceWrap(false)
+  end
+  if rowFont.SetMaxLines then
+    rowFont:SetMaxLines(1)
+  end
+  if rowFont.SetTextTruncateMode then
+    rowFont:SetTextTruncateMode("END")
+  end
   rowButton.rowFont = rowFont
+  rowButton:SetScript("OnEnter", function(button)
+    showLeftRowOverflowTooltip(button)
+  end)
+  rowButton:SetScript("OnLeave", function(button)
+    hideLeftRowOverflowTooltip(button)
+  end)
   rowButton:SetScript("OnClick", function(button)
     local rowData = button.rowData -- 当前行数据
     if type(rowData) ~= "table" then
@@ -2178,7 +2293,10 @@ function QuestlineTreeView:renderLeftRows(rowDataList)
     elseif rowData.kind == "mode" then
       indentLevel = 1
     end
-    rowButton.rowFont:SetText(string.rep("  ", indentLevel) .. tostring(rowData.text or ""))
+    local rowText = tostring(rowData.text or "") -- 行完整文本
+    local displayText = string.rep("  ", indentLevel) .. rowText -- 含缩进的显示文本
+    rowButton.leftRowTooltipText = rowText
+    rowButton.rowFont:SetText(displayText)
     if rowData.selected == true then
       rowButton.rowFont:SetTextColor(0.35, 0.85, 1)
       rowButton:SetBackdropBorderColor(0.86, 0.68, 0.28, 0.95)
@@ -2208,7 +2326,9 @@ function QuestlineTreeView:renderLeftRows(rowDataList)
     currentOffsetY = currentOffsetY + rowHeight + VIEW_STYLE.leftRowGap
   end
   for hideIndex = rowIndex + 1, #self.rowButtons do
-    self.rowButtons[hideIndex]:Hide()
+    local hiddenRowButton = self.rowButtons[hideIndex] -- 待隐藏行按钮
+    hiddenRowButton:Hide()
+    hideLeftRowOverflowTooltip(hiddenRowButton)
   end
   local contentHeight = math.max(currentOffsetY + 4, 10) -- 左树内容高度
   self.scrollChild:SetSize(rowWidth, contentHeight)

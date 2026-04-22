@@ -873,6 +873,42 @@ local function validateNumberArray(value, requiredNonEmpty, pathText)
   return true, nil
 end
 
+--- 检查 string 数组类型，并可选检查是否非空。
+---@param value any 待校验值
+---@param requiredNonEmpty boolean 是否要求非空
+---@param pathText string 字段路径
+---@return boolean ok
+---@return table|nil errorObject
+local function validateStringArray(value, requiredNonEmpty, pathText)
+  if value == nil then
+    if requiredNonEmpty then
+      return false, buildValidationError("E_MISSING_FIELD", pathText, "missing string array")
+    end
+    return true, nil
+  end
+
+  if type(value) ~= "table" then
+    return false, buildValidationError("E_TYPE_MISMATCH", pathText, "string array expected")
+  end
+
+  if requiredNonEmpty and #value == 0 then
+    return false, buildValidationError("E_EMPTY_ARRAY", pathText, "array cannot be empty")
+  end
+
+  local seenStringSet = {} -- 数组去重集合
+  for arrayIndex, stringValue in ipairs(value) do
+    if type(stringValue) ~= "string" or stringValue == "" then
+      return false, buildValidationError("E_TYPE_MISMATCH", pathText .. "[" .. tostring(arrayIndex) .. "]", "non-empty string expected")
+    end
+    if seenStringSet[stringValue] == true then
+      return false, buildValidationError("E_DUPLICATE_VALUE", pathText, "duplicate string value")
+    end
+    seenStringSet[stringValue] = true
+  end
+
+  return true, nil
+end
+
 --- 检查任务线链接对象数组。
 ---@param value any 待校验值
 ---@param requiredNonEmpty boolean 是否要求非空
@@ -978,8 +1014,9 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     and dataTable.schemaVersion ~= 6
     and dataTable.schemaVersion ~= 7
     and dataTable.schemaVersion ~= 8
+    and dataTable.schemaVersion ~= 9
   then
-    return false, buildValidationError("E_INVALID_SCHEMA", "schemaVersion", "schemaVersion must be 3, 4, 5, 6, 7 or 8")
+    return false, buildValidationError("E_INVALID_SCHEMA", "schemaVersion", "schemaVersion must be 3, 4, 5, 6, 7, 8 or 9")
   end
 
   if type(dataTable.sourceMode) ~= "string" then
@@ -1243,6 +1280,34 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
               "achievements[" .. tostring(achievementID) .. "].ContentExpansionID",
               "non-negative number expected"
             )
+          end
+          if dataTable.schemaVersion >= 9 then
+            local factionTagListOk, factionTagListError = validateStringArray(
+              achievementEntry.FactionTags,
+              false,
+              "achievements[" .. tostring(achievementID) .. "].FactionTags"
+            )
+            if not factionTagListOk then
+              return false, factionTagListError
+            end
+            local factionTagSeen = {} -- 成就阵营标记集合
+            for _, factionTag in ipairs(achievementEntry.FactionTags or {}) do
+              factionTagSeen[factionTag] = true
+              if factionTag ~= "alliance" and factionTag ~= "horde" and factionTag ~= "shared" then
+                return false, buildValidationError(
+                  "E_INVALID_ENUM",
+                  "achievements[" .. tostring(achievementID) .. "].FactionTags",
+                  "faction tag must be alliance/horde/shared"
+                )
+              end
+            end
+            if next(factionTagSeen) == nil then
+              return false, buildValidationError(
+                "E_MISSING_FIELD",
+                "achievements[" .. tostring(achievementID) .. "].FactionTags",
+                "at least one faction tag required"
+              )
+            end
           end
           achievementExistsByID[achievementID] = true
         end
@@ -1906,13 +1971,48 @@ local function appendQuestLineToCampaign(campaignGroup, questLineEntry)
   campaignGroup.questLines[#campaignGroup.questLines + 1] = questLineEntry
 end
 
+--- 规范化成就导航使用的阵营标记。
+---@param factionTag any
+---@return string|nil
+local function normalizeAchievementFactionTag(factionTag)
+  if factionTag == "alliance" or factionTag == "horde" or factionTag == "shared" then
+    return factionTag
+  end
+  return nil
+end
+
+--- 归一化成就阵营标记列表（缺失时返回 shared）。
+---@param factionTagList table|nil
+---@return string[]
+local function normalizeAchievementFactionTagList(factionTagList)
+  local normalizedTagSeen = {} -- 归一化阵营去重索引
+  local orderedTagList = { "alliance", "horde", "shared" } -- 阵营展示顺序
+  for _, factionTag in ipairs(factionTagList or {}) do
+    local normalizedTag = normalizeAchievementFactionTag(factionTag) -- 当前归一化阵营标记
+    if type(normalizedTag) == "string" and normalizedTag ~= "" then
+      normalizedTagSeen[normalizedTag] = true
+    end
+  end
+  if next(normalizedTagSeen) == nil then
+    return { "shared" }
+  end
+  local normalizedTagList = {} -- 归一化后的阵营标记列表
+  for _, factionTag in ipairs(orderedTagList) do
+    if normalizedTagSeen[factionTag] == true then
+      normalizedTagList[#normalizedTagList + 1] = factionTag
+    end
+  end
+  return normalizedTagList
+end
+
 --- 确保成就分组对象存在。
 ---@param achievementList table[] 成就列表
 ---@param achievementByID table<number, table> 成就索引
 ---@param achievementID number 成就 ID
 ---@param achievementName string 成就名称
+---@param factionTagList string[] 成就阵营标记列表
 ---@return table
-local function ensureAchievementGroup(achievementList, achievementByID, achievementID, achievementName)
+local function ensureAchievementGroup(achievementList, achievementByID, achievementID, achievementName, factionTagList)
   local existingGroup = achievementByID[achievementID] -- 已存在成就分组
   if type(existingGroup) == "table" then
     return existingGroup
@@ -1922,6 +2022,7 @@ local function ensureAchievementGroup(achievementList, achievementByID, achievem
     kind = "achievement",
     id = achievementID,
     name = achievementName,
+    factionTags = factionTagList or { "shared" },
     questLines = {},
     _questLineSeen = {},
   }
@@ -2131,16 +2232,20 @@ local function buildQuestNavigationModel()
         for _, achievementID in ipairs(achievementIDList or {}) do
           local achievementRecord = dataTable.achievements and dataTable.achievements[achievementID] or nil -- 成就静态记录
           if type(achievementRecord) == "table" then
-            local achievementGroup = ensureAchievementGroup(
-              achievementEntryList,
-              expansionEntry._achievementEntryByID,
-              achievementID,
-              getAchievementLabel(achievementID, achievementRecord)
-            )
-            for _, questLineID in ipairs(achievementRecord.QuestLineIDs or {}) do
-              local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
-              if type(questLineEntry) == "table" then
-                appendQuestLineToAchievement(achievementGroup, questLineEntry)
+            local achievementFactionTagList = normalizeAchievementFactionTagList(achievementRecord.FactionTags) -- 成就阵营标记
+            if matchesFactionTags(achievementFactionTagList) then
+              local achievementGroup = ensureAchievementGroup(
+                achievementEntryList,
+                expansionEntry._achievementEntryByID,
+                achievementID,
+                getAchievementLabel(achievementID, achievementRecord),
+                achievementFactionTagList
+              )
+              for _, questLineID in ipairs(achievementRecord.QuestLineIDs or {}) do
+                local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
+                if type(questLineEntry) == "table" then
+                  appendQuestLineToAchievement(achievementGroup, questLineEntry)
+                end
               end
             end
           end

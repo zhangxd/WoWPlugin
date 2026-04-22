@@ -719,6 +719,62 @@ describe("QuestlineProgress mock data injection", function()
     assert.equals("Dragonflight Main", navigationModel.expansionByID[9].modeByKey.campaign.entries[1].name)
   end)
 
+  it("quest_navigation_model_filters_achievement_entries_by_player_faction_for_schema_v9", function()
+    local v9Data = {
+      schemaVersion = 9,
+      sourceMode = "mock",
+      generatedAt = "2026-04-23T00:00:00Z",
+      quests = {
+        [81001] = { ID = 81001 },
+        [81002] = { ID = 81002 },
+        [81003] = { ID = 81003 },
+      },
+      questLines = {
+        [9901] = { ID = 9901, UiMapID = 2371, QuestIDs = { 81001 }, FactionTags = { "alliance" }, ContentExpansionID = 9 },
+        [9902] = { ID = 9902, UiMapID = 2372, QuestIDs = { 81002 }, FactionTags = { "horde" }, ContentExpansionID = 9 },
+        [9903] = { ID = 9903, UiMapID = 2373, QuestIDs = { 81003 }, FactionTags = { "shared" }, ContentExpansionID = 9 },
+      },
+      campaigns = {},
+      expansions = {
+        [9] = { 9901, 9902, 9903 },
+      },
+      expansionCampaigns = {},
+      achievements = {
+        [7001] = { ID = 7001, Name_lang = "Alliance Achievement", QuestLineIDs = { 9901 }, FactionTags = { "alliance" }, ContentExpansionID = 9 },
+        [7002] = { ID = 7002, Name_lang = "Horde Achievement", QuestLineIDs = { 9902 }, FactionTags = { "horde" }, ContentExpansionID = 9 },
+        [7003] = { ID = 7003, Name_lang = "Shared Achievement", QuestLineIDs = { 9903 }, FactionTags = { "shared" }, ContentExpansionID = 9 },
+        [7004] = { ID = 7004, Name_lang = "Mixed Achievement", QuestLineIDs = { 9901, 9902 }, FactionTags = { "alliance", "horde" }, ContentExpansionID = 9 },
+      },
+      expansionAchievements = {
+        [9] = { 7001, 7002, 7003, 7004 },
+      },
+    }
+
+    Toolbox.Questlines.SetDataOverride(v9Data)
+
+    local valid, validationError = Toolbox.Questlines.ValidateInstanceQuestlinesData(v9Data, true)
+    assert.is_true(valid)
+    assert.is_nil(validationError)
+
+    local navigationModel, navigationError = Toolbox.Questlines.GetQuestNavigationModel()
+    assert.is_nil(navigationError)
+
+    local achievementEntryList = navigationModel.expansionByID[9].modeByKey.achievement.entries -- 成就条目列表
+    local achievementIDList = {} -- 成就 ID 列表
+    local factionTagListByAchievementID = {} -- 成就阵营标记集合
+    for _, achievementEntry in ipairs(achievementEntryList or {}) do
+      achievementIDList[#achievementIDList + 1] = achievementEntry.id
+      factionTagListByAchievementID[achievementEntry.id] = achievementEntry.factionTags
+    end
+    table.sort(achievementIDList)
+
+    -- 当前测试角色阵营固定为联盟，仅显示联盟/通用成就
+    assert.same({ 7001, 7003, 7004 }, achievementIDList)
+    assert.same({ "alliance" }, factionTagListByAchievementID[7001])
+    assert.same({ "shared" }, factionTagListByAchievementID[7003])
+    assert.same({ "alliance", "horde" }, factionTagListByAchievementID[7004])
+  end)
+
   it("GetQuestLinesForMap scopes results to the selected expansion when provided", function()
     local v6Data = {
       schemaVersion = 6,

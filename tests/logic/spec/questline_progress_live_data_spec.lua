@@ -90,11 +90,11 @@ describe("QuestlineProgress live data validation", function()
     assert.is_truthy(type(model.maps) == "table")
   end)
 
-  it("db_shape_live_data_uses_schema_v8_core_blocks", function()
+  it("db_shape_live_data_uses_schema_v9_core_blocks", function()
     local dataTable = Toolbox.Data and Toolbox.Data.InstanceQuestlines -- live 根数据
     assert.is_truthy(type(dataTable) == "table")
 
-    assert.equals(8, dataTable.schemaVersion)
+    assert.equals(9, dataTable.schemaVersion)
     assert.is_truthy(type(dataTable.quests) == "table")
     assert.is_truthy(type(dataTable.questLines) == "table")
     assert.is_truthy(type(dataTable.campaigns) == "table")
@@ -117,6 +117,13 @@ describe("QuestlineProgress live data validation", function()
       assert.is_truthy(type(questLineEntry.ID) == "number")
       assert.is_truthy(type(questLineEntry.UiMapID) == "number")
       assert.is_truthy(type(questLineEntry.QuestIDs) == "table")
+    end
+
+    for _, achievementEntry in pairs(dataTable.achievements or {}) do
+      assert.is_truthy(type(achievementEntry) == "table")
+      assert.is_truthy(type(achievementEntry.ID) == "number")
+      assert.is_truthy(type(achievementEntry.FactionTags) == "table")
+      assert.is_true(#achievementEntry.FactionTags > 0)
     end
   end)
 

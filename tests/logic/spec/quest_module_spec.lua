@@ -171,6 +171,7 @@ describe("Quest module split", function()
           kind = "achievement",
           id = 7001,
           name = "群岛探险家",
+          factionTags = { "alliance" },
           questLines = {
             { id = 9901, name = "欧恩哈拉开端", questCount = 2, UiMapID = 2371 },
           },
@@ -259,7 +260,10 @@ describe("Quest module split", function()
       if rowData.kind == "expansion" and string.find(tostring(rowData.text or ""), "巨龙时代", 1, true) ~= nil then
         foundExpansionNode = true
       end
-      if rowData.kind == "achievement" and rowData.text == "群岛探险家" then
+      if rowData.kind == "achievement"
+        and string.find(tostring(rowData.text or ""), "群岛探险家", 1, true) ~= nil
+        and string.find(tostring(rowData.text or ""), "联盟", 1, true) ~= nil
+      then
         foundAchievementNode = true
       end
     end
@@ -991,6 +995,86 @@ describe("Quest module split", function()
     end
 
     assert.is_true(breadcrumbUsedWidth <= breadcrumbFrameWidth)
+  end)
+
+  it("left_tree_overflow_text_is_truncated_and_shows_full_name_tooltip_on_hover", function()
+    harness:loadQuestModule()
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local questView = questHooks:getView() -- 任务视图对象
+    installQuestDataStubs()
+
+    local longMapName = "欧恩哈拉平原超长地图标题示例用于验证左侧树文本截断后悬浮完整名称提示" -- 超长地图名称
+    local mapMode = {
+      key = "map_questline",
+      name = "地图任务线",
+      entries = {
+        { kind = "map", id = 2371, name = longMapName },
+      },
+    } -- 地图任务线模式
+    local expansionEntry = {
+      id = 9,
+      name = "巨龙时代",
+      modes = { mapMode },
+      modeByKey = {
+        map_questline = mapMode,
+      },
+    } -- 资料片导航详情
+
+    Toolbox.Questlines.GetQuestNavigationModel = function()
+      return {
+        expansionList = {
+          { id = 9, name = "巨龙时代" },
+        },
+        expansionByID = {
+          [9] = expansionEntry,
+        },
+      }, nil
+    end
+
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(hostFrame)
+    hostFrame:Show()
+    questView:setSelected(true)
+    questView:refresh()
+
+    questView.selectedModeKey = "map_questline"
+    questView.selectedExpansionID = 9
+    questView.selectedMapID = nil
+    questView:render()
+
+    local expansionRowButton = nil -- 资料片行按钮
+    local mapRowButton = nil -- 长文本地图行按钮
+    for _, rowButton in ipairs(questView.rowButtons or {}) do
+      local rowData = rowButton and rowButton.rowData or nil -- 当前行数据
+      if rowButton and rowButton.IsShown and rowButton:IsShown() and type(rowData) == "table" then
+        if rowData.kind == "expansion" and rowData.expansionID == 9 then
+          expansionRowButton = rowButton
+        elseif rowData.kind == "map" and rowData.mapID == 2371 then
+          mapRowButton = rowButton
+        end
+      end
+    end
+    assert.is_truthy(expansionRowButton)
+    assert.is_truthy(mapRowButton)
+    assert.is_false(mapRowButton.rowFont._wordWrap)
+    assert.equals(longMapName, mapRowButton.leftRowTooltipText)
+
+    local tooltipObject = harness.runtime.tooltip -- 假 tooltip 对象
+    assert.is_truthy(tooltipObject)
+    local initialShowCount = tooltipObject.showCount -- 初始显示次数
+    local initialHideCount = tooltipObject.hideCount -- 初始隐藏次数
+
+    expansionRowButton:RunScript("OnEnter")
+    assert.equals(initialShowCount, tooltipObject.showCount)
+
+    mapRowButton:RunScript("OnEnter")
+    assert.equals(initialShowCount + 1, tooltipObject.showCount)
+    assert.equals(longMapName, tooltipObject.titleText)
+    assert.is_true(tooltipObject.ownerFrame == mapRowButton)
+    assert.equals("ANCHOR_RIGHT", tooltipObject.ownerAnchor)
+
+    mapRowButton:RunScript("OnLeave")
+    assert.equals(initialHideCount + 1, tooltipObject.hideCount)
   end)
 
   it("map_questline_breadcrumb_resolves_parent_map_from_expanded_questline_without_error", function()

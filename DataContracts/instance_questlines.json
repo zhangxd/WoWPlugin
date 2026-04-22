@@ -1,8 +1,8 @@
 {
   "contract": {
     "contract_id": "instance_questlines",
-    "schema_version": 8,
-    "summary": "冒险手册任务页签静态任务线与成就文档",
+    "schema_version": 9,
+    "summary": "冒险手册任务页签静态任务线与成就文档（含成就阵营标识）",
     "source_of_truth": "WoWPlugin",
     "status": "active"
   },
@@ -79,7 +79,7 @@
       {
         "name": "metadata",
         "metadata": {
-          "schemaVersion": 7,
+          "schemaVersion": 9,
           "sourceMode": "live",
           "generatedAt": "@generated_at"
         }
@@ -200,7 +200,8 @@
         ],
         "required_fields": [
           "achievement_id",
-          "quest_line_ids"
+          "quest_line_ids",
+          "faction_tags"
         ],
         "sort_by": [
           "achievement_id"
@@ -209,6 +210,7 @@
           "ID": "achievement_id",
           "Name_lang": "achievement_name",
           "QuestLineIDs": "quest_line_ids",
+          "FactionTags": "faction_tags",
           "ContentExpansionID": "content_expansion_id"
         }
       },
@@ -267,7 +269,7 @@
     ]
   },
   "versioning": {
-    "current_schema_version": 8,
+    "current_schema_version": 9,
     "change_log": [
       {
         "schema_version": 1,
@@ -300,6 +302,10 @@
       {
         "schema_version": 8,
         "summary": "新增 achievements / expansionAchievements 结构，支持资料片->成就->任务线导航"
+      },
+      {
+        "schema_version": 9,
+        "summary": "achievements 结构新增 FactionTags 导出字段，成就页签可按当前角色阵营过滤"
       }
     ]
   }
