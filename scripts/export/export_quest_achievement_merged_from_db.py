@@ -436,6 +436,10 @@ def fetch_rows(sqlite_conn: sqlite3.Connection) -> list[dict[str, object]]:
         line_id, quest_id = pair_key
         achievement_ids = sorted(pair_achievement_ids.get(pair_key, set()))
         achievement_names = [achievement_name_by_id.get(achievement_id, "") for achievement_id in achievement_ids]
+        achievement_expansion_ids = [
+            achievement_expansion_by_id.get(achievement_id)
+            for achievement_id in achievement_ids
+        ]
 
         achievement_expansion_values = [
             achievement_expansion_by_id[achievement_id]
@@ -487,6 +491,10 @@ def fetch_rows(sqlite_conn: sqlite3.Connection) -> list[dict[str, object]]:
                 "成就数量": len(achievement_ids),
                 "成就id列表": "=".join(str(achievement_id) for achievement_id in achievement_ids),
                 "成就名字列表": "=".join(achievement_names),
+                "成就资料片id列表": "=".join(
+                    "" if expansion_id is None else str(expansion_id)
+                    for expansion_id in achievement_expansion_ids
+                ),
             }
         )
 
@@ -574,6 +582,9 @@ def build_runtime_rows_for_wowplugin(
                 "FactionMaskRaw": "",
                 "ClassMaskRaw": "",
                 "ContentExpansionID": content_expansion_text,
+                "AchievementIDs": str(merged_row.get("成就id列表") or ""),
+                "AchievementNames": str(merged_row.get("成就名字列表") or ""),
+                "AchievementExpansionIDs": str(merged_row.get("成就资料片id列表") or ""),
             }
         )
     return runtime_rows
@@ -596,6 +607,7 @@ def write_csv(output_path: Path, rows: list[dict[str, object]]) -> None:
         "成就数量",
         "成就id列表",
         "成就名字列表",
+        "成就资料片id列表",
     ]
     with output_path.open("w", encoding="utf-8-sig", newline="") as output_file:
         writer = csv.DictWriter(output_file, fieldnames=fieldnames)

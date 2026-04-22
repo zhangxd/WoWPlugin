@@ -1,8 +1,8 @@
 {
   "contract": {
     "contract_id": "instance_questlines",
-    "schema_version": 7,
-    "summary": "冒险手册任务页签静态任务线文档",
+    "schema_version": 8,
+    "summary": "冒险手册任务页签静态任务线与成就文档",
     "source_of_truth": "WoWPlugin",
     "status": "active"
   },
@@ -189,6 +189,47 @@
           "expansion_id",
           "campaign_id"
         ]
+      },
+      {
+        "name": "achievements",
+        "dataset": "achievements",
+        "block_type": "map_object",
+        "key_field": "achievement_id",
+        "dedupe_by": [
+          "achievement_id"
+        ],
+        "required_fields": [
+          "achievement_id",
+          "quest_line_ids"
+        ],
+        "sort_by": [
+          "achievement_id"
+        ],
+        "value_template": {
+          "ID": "achievement_id",
+          "Name_lang": "achievement_name",
+          "QuestLineIDs": "quest_line_ids",
+          "ContentExpansionID": "content_expansion_id"
+        }
+      },
+      {
+        "name": "expansionAchievements",
+        "dataset": "expansion_achievements",
+        "block_type": "map_array_grouped",
+        "key_field": "expansion_id",
+        "value_field": "achievement_id",
+        "required_fields": [
+          "expansion_id",
+          "achievement_id"
+        ],
+        "dedupe_by": [
+          "expansion_id",
+          "achievement_id"
+        ],
+        "sort_by": [
+          "expansion_id",
+          "achievement_id"
+        ]
       }
     ]
   },
@@ -226,7 +267,7 @@
     ]
   },
   "versioning": {
-    "current_schema_version": 7,
+    "current_schema_version": 8,
     "change_log": [
       {
         "schema_version": 1,
@@ -255,6 +296,10 @@
       {
         "schema_version": 7,
         "summary": "新增 campaigns / expansionCampaigns 结构，支持资料片->战役->任务线导航；战役按主资料片归属输出"
+      },
+      {
+        "schema_version": 8,
+        "summary": "新增 achievements / expansionAchievements 结构，支持资料片->成就->任务线导航"
       }
     ]
   }

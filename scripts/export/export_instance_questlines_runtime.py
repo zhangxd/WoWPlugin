@@ -64,6 +64,16 @@ class CampaignRuntimeEntry:
 
 
 @dataclass
+class AchievementRuntimeEntry:
+    """正式成就节点。"""
+
+    achievement_id: int
+    achievement_name: str
+    quest_line_ids: list[int]
+    content_expansion_id: int
+
+
+@dataclass
 class InstanceQuestlinesRuntimeModel:
     """正式运行时模型。"""
 
@@ -73,6 +83,8 @@ class InstanceQuestlinesRuntimeModel:
     campaigns: dict[int, CampaignRuntimeEntry]
     expansions: dict[int, list[int]]
     expansion_campaigns: dict[int, list[int]]
+    achievements: dict[int, AchievementRuntimeEntry]
+    expansion_achievements: dict[int, list[int]]
 
 
 def script_root() -> Path:
@@ -230,6 +242,7 @@ def build_instance_questlines_model(
 
     quest_aggregate: dict[int, dict[str, object]] = {}
     quest_line_aggregate: dict[int, dict[str, object]] = {}
+    achievement_aggregate: dict[int, dict[str, object]] = {}
 
     for row in csv_rows:
         quest_line_id_text = row.get("QuestLineID") or ""
@@ -248,6 +261,9 @@ def build_instance_questlines_model(
 
         quest_line_ids = collect_positive_ints((row.get("QuestLineID") or "").split("="))
         quest_line_names = (row.get("QuestLineNames") or "").split("=")
+        achievement_id_texts = (row.get("AchievementIDs") or "").split("=")
+        achievement_names = (row.get("AchievementNames") or "").split("=")
+        achievement_expansion_texts = (row.get("AchievementExpansionIDs") or "").split("=")
 
         quest_state = quest_aggregate.setdefault(
             quest_id,
@@ -302,6 +318,39 @@ def build_instance_questlines_model(
                 line_state["class_mask_values"] = collect_positive_ints(list(line_state["class_mask_values"]) + [class_mask_value])
             if line_state["content_expansion_id"] is None and content_expansion_id is not None:
                 line_state["content_expansion_id"] = content_expansion_id
+
+        for index, achievement_id_text in enumerate(achievement_id_texts):
+            if achievement_id_text in ("", None):
+                continue
+            achievement_id = int(achievement_id_text)
+            if achievement_id <= 0:
+                continue
+
+            achievement_name = achievement_names[index] if index < len(achievement_names) else ""
+            achievement_expansion_text = achievement_expansion_texts[index] if index < len(achievement_expansion_texts) else ""
+            achievement_expansion_id = int(achievement_expansion_text) if achievement_expansion_text not in ("", None) else None
+            if achievement_expansion_id is not None and achievement_expansion_id < 0:
+                achievement_expansion_id = None
+
+            achievement_state = achievement_aggregate.setdefault(
+                achievement_id,
+                {
+                    "name": "",
+                    "quest_line_ids": [],
+                    "category_expansion_counter": Counter(),
+                    "fallback_expansion_counter": Counter(),
+                },
+            )
+
+            if achievement_state["name"] == "" and achievement_name != "":
+                achievement_state["name"] = achievement_name
+            achievement_state["quest_line_ids"] = collect_positive_ints(
+                list(achievement_state["quest_line_ids"]) + quest_line_ids
+            )
+            if achievement_expansion_id is not None:
+                achievement_state["category_expansion_counter"][achievement_expansion_id] += 1
+            if content_expansion_id is not None:
+                achievement_state["fallback_expansion_counter"][content_expansion_id] += 1
 
     quests = {
         quest_id: QuestRuntimeEntry(
@@ -418,6 +467,34 @@ def build_instance_questlines_model(
     for expansion_id in expansion_campaigns:
         expansion_campaigns[expansion_id].sort()
 
+    achievements: dict[int, AchievementRuntimeEntry] = {}
+    expansion_achievements: dict[int, list[int]] = defaultdict(list)
+    for achievement_id, achievement_state in sorted(achievement_aggregate.items()):
+        category_expansion_counter = achievement_state["category_expansion_counter"]
+        fallback_expansion_counter = achievement_state["fallback_expansion_counter"]
+        if category_expansion_counter:
+            content_expansion_id = sorted(category_expansion_counter.items(), key=lambda item: (-item[1], item[0]))[0][0]
+        elif fallback_expansion_counter:
+            content_expansion_id = sorted(fallback_expansion_counter.items(), key=lambda item: (-item[1], item[0]))[0][0]
+        else:
+            content_expansion_id = UNKNOWN_EXPANSION_ID
+
+        quest_line_ids = collect_positive_ints(list(achievement_state["quest_line_ids"]))
+        achievement_name = str(achievement_state["name"] or "").strip()
+        if achievement_name == "":
+            achievement_name = f"Achievement #{achievement_id}"
+
+        achievements[achievement_id] = AchievementRuntimeEntry(
+            achievement_id=achievement_id,
+            achievement_name=achievement_name,
+            quest_line_ids=quest_line_ids,
+            content_expansion_id=content_expansion_id,
+        )
+        expansion_achievements[content_expansion_id].append(achievement_id)
+
+    for expansion_id in expansion_achievements:
+        expansion_achievements[expansion_id].sort()
+
     return InstanceQuestlinesRuntimeModel(
         generated_at=datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         quests=quests,
@@ -425,6 +502,8 @@ def build_instance_questlines_model(
         campaigns=campaigns,
         expansions=dict(sorted(expansions.items())),
         expansion_campaigns=dict(sorted(expansion_campaigns.items())),
+        achievements=achievements,
+        expansion_achievements=dict(sorted(expansion_achievements.items())),
     )
 
 
@@ -467,20 +546,20 @@ def write_instance_questlines_lua(
     lines = [
         "--[[",
         "@contract_id instance_questlines",
-        "@schema_version 7",
+        "@schema_version 8",
         "@contract_file WoWPlugin/DataContracts/instance_questlines.json",
         f"@contract_snapshot runtime-only (generated by {generated_by})",
         f"@generated_by {generated_by}",
         f"@generated_at {model.generated_at}",
         f"@data_source {data_source}",
-        "@summary 冒险手册任务页签静态任务线文档（CSV 聚合版）",
+        "@summary 冒险手册任务页签静态任务线与成就文档（CSV 聚合版）",
         "@overwrite_notice 此文件由工具生成，手改会被覆盖",
         "]]",
         "",
         "Toolbox.Data = Toolbox.Data or {}",
         "",
         "Toolbox.Data.InstanceQuestlines = {",
-        "  schemaVersion = 7,",
+        "  schemaVersion = 8,",
         '  sourceMode = "live",',
         f'  generatedAt = "{model.generated_at}",',
         "",
@@ -583,6 +662,40 @@ def write_instance_questlines_lua(
     )
     for expansion_id, campaign_ids in model.expansion_campaigns.items():
         lines.append(f"    [{expansion_id}] = {format_int_array(campaign_ids)},")
+    lines.extend(
+        [
+            "  },",
+            "",
+            "  achievements = {",
+        ]
+    )
+    for achievement_id, achievement_entry in model.achievements.items():
+        name_line = (
+            f"      Name_lang = {format_lua_string(achievement_entry.achievement_name)},"
+            if achievement_entry.achievement_name != ""
+            else None
+        )
+        lines.extend(
+            [
+                f"    [{achievement_id}] = {{",
+                f"      ID = {achievement_id},",
+            ]
+            + ([name_line] if name_line is not None else [])
+            + [
+                f"      QuestLineIDs = {format_int_array(achievement_entry.quest_line_ids)},",
+                f"      ContentExpansionID = {achievement_entry.content_expansion_id},",
+                "    },",
+            ]
+        )
+    lines.extend(
+        [
+            "  },",
+            "",
+            "  expansionAchievements = {",
+        ]
+    )
+    for expansion_id, achievement_ids in model.expansion_achievements.items():
+        lines.append(f"    [{expansion_id}] = {format_int_array(achievement_ids)},")
     lines.extend(
         [
             "  },",

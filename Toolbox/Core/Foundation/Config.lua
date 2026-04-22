@@ -79,7 +79,9 @@ local defaults = {
       questNavExpansionID = 0,
       -- 左侧树：当前战役（0 表示未选中）
       questNavSelectedCampaignID = 0,
-      -- 当前模式（active_log | map_questline）
+      -- 左侧树：当前成就（0 表示未选中）
+      questNavSelectedAchievementID = 0,
+      -- 当前模式（active_log | map_questline | campaign | achievement）
       questNavModeKey = "active_log",
       -- 左侧树：当前地图（0 表示未选中）
       questNavSelectedMapID = 0,
@@ -272,6 +274,8 @@ function Toolbox.Config.Init()
     questDb.questNavModeKey = "active_log"
   elseif legacyModeKey == "campaign" then
     questDb.questNavModeKey = "campaign"
+  elseif legacyModeKey == "achievement" then
+    questDb.questNavModeKey = "achievement"
   elseif legacyModeKey == "map_questline" then
     questDb.questNavModeKey = "map_questline"
   elseif legacyViewMode == nil then
@@ -295,6 +299,13 @@ function Toolbox.Config.Init()
     questDb.questNavSelectedCampaignID = math.max(0, math.floor(selectedCampaignID))
   else
     questDb.questNavSelectedCampaignID = 0
+  end
+
+  local selectedAchievementID = readQuestField("questNavSelectedAchievementID", 0) -- 当前成就选中 ID
+  if type(selectedAchievementID) == "number" then
+    questDb.questNavSelectedAchievementID = math.max(0, math.floor(selectedAchievementID))
+  else
+    questDb.questNavSelectedAchievementID = 0
   end
 
   local legacyTypeID = readQuestField("questViewSelectedTypeID", nil) -- 旧版类型 ID
@@ -373,7 +384,12 @@ function Toolbox.Config.Init()
   end
   if questDb.questNavModeKey == "active_log" then
     questDb.questNavSelectedCampaignID = 0
+    questDb.questNavSelectedAchievementID = 0
     questDb.questNavExpandedQuestLineID = 0
+  elseif questDb.questNavModeKey == "campaign" then
+    questDb.questNavSelectedAchievementID = 0
+  elseif questDb.questNavModeKey == "achievement" then
+    questDb.questNavSelectedCampaignID = 0
   end
 
   if type(readQuestField("questlineTreeEnabled", nil)) == "boolean" then
@@ -412,6 +428,7 @@ function Toolbox.Config.Init()
     encounterJournalDb.questNavExpansionID = nil
     encounterJournalDb.questNavModeKey = nil
     encounterJournalDb.questNavSelectedCampaignID = nil
+    encounterJournalDb.questNavSelectedAchievementID = nil
     encounterJournalDb.questNavSelectedMapID = nil
     encounterJournalDb.questNavSelectedTypeKey = nil
     encounterJournalDb.questNavSearchText = nil

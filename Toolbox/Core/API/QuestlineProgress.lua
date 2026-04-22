@@ -961,6 +961,10 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     requiredRootFields[#requiredRootFields + 1] = "campaigns"
     requiredRootFields[#requiredRootFields + 1] = "expansionCampaigns"
   end
+  if dataTable.schemaVersion >= 8 then
+    requiredRootFields[#requiredRootFields + 1] = "achievements"
+    requiredRootFields[#requiredRootFields + 1] = "expansionAchievements"
+  end
   for _, fieldName in ipairs(requiredRootFields) do
     if dataTable[fieldName] == nil then
       return false, buildValidationError("E_MISSING_FIELD", fieldName, "required root field missing")
@@ -973,8 +977,9 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
     and dataTable.schemaVersion ~= 5
     and dataTable.schemaVersion ~= 6
     and dataTable.schemaVersion ~= 7
+    and dataTable.schemaVersion ~= 8
   then
-    return false, buildValidationError("E_INVALID_SCHEMA", "schemaVersion", "schemaVersion must be 3, 4, 5, 6 or 7")
+    return false, buildValidationError("E_INVALID_SCHEMA", "schemaVersion", "schemaVersion must be 3, 4, 5, 6, 7 or 8")
   end
 
   if type(dataTable.sourceMode) ~= "string" then
@@ -1002,6 +1007,12 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
   end
   if dataTable.schemaVersion >= 7 and type(dataTable.expansionCampaigns) ~= "table" then
     return false, buildValidationError("E_TYPE_MISMATCH", "expansionCampaigns", "table expected")
+  end
+  if dataTable.schemaVersion >= 8 and type(dataTable.achievements) ~= "table" then
+    return false, buildValidationError("E_TYPE_MISMATCH", "achievements", "table expected")
+  end
+  if dataTable.schemaVersion >= 8 and type(dataTable.expansionAchievements) ~= "table" then
+    return false, buildValidationError("E_TYPE_MISMATCH", "expansionAchievements", "table expected")
   end
   if dataTable.schemaVersion >= 4 and dataTable.schemaVersion < 6 and type(dataTable.questLineXQuest) ~= "table" then
     return false, buildValidationError("E_TYPE_MISMATCH", "questLineXQuest", "table expected")
@@ -1166,6 +1177,101 @@ function Toolbox.Questlines.ValidateInstanceQuestlinesData(dataTable, strictMode
               "expansionCampaigns[" .. tostring(expansionID) .. "][" .. tostring(listIndex) .. "]",
               "campaignID not found in campaigns"
             )
+          end
+        end
+      end
+
+      if dataTable.schemaVersion >= 8 then
+        local achievementExistsByID = {} -- 成就存在集合
+        for achievementKey, achievementEntry in pairs(dataTable.achievements or {}) do
+          local achievementID = tonumber(achievementKey) -- 规范化成就 ID
+          if type(achievementID) ~= "number" or achievementID <= 0 then
+            return false, buildValidationError(
+              "E_TYPE_MISMATCH",
+              "achievements[" .. tostring(achievementKey) .. "]",
+              "positive numeric key required"
+            )
+          end
+          if type(achievementEntry) ~= "table" then
+            return false, buildValidationError(
+              "E_TYPE_MISMATCH",
+              "achievements[" .. tostring(achievementID) .. "]",
+              "table expected"
+            )
+          end
+          if type(achievementEntry.ID) ~= "number" then
+            return false, buildValidationError(
+              "E_MISSING_FIELD",
+              "achievements[" .. tostring(achievementID) .. "].ID",
+              "number expected"
+            )
+          end
+          if achievementEntry.ID ~= achievementID then
+            return false, buildValidationError(
+              "E_KEY_VALUE_MISMATCH",
+              "achievements[" .. tostring(achievementID) .. "].ID",
+              "ID must match key"
+            )
+          end
+          if achievementEntry.Name_lang ~= nil and (type(achievementEntry.Name_lang) ~= "string" or achievementEntry.Name_lang == "") then
+            return false, buildValidationError(
+              "E_TYPE_MISMATCH",
+              "achievements[" .. tostring(achievementID) .. "].Name_lang",
+              "non-empty string expected when provided"
+            )
+          end
+          local questLineListOk, questLineListError = validateNumberArray(
+            achievementEntry.QuestLineIDs,
+            false,
+            "achievements[" .. tostring(achievementID) .. "].QuestLineIDs"
+          )
+          if not questLineListOk then
+            return false, questLineListError
+          end
+          for listIndex, questLineID in ipairs(achievementEntry.QuestLineIDs or {}) do
+            if questLineExistsByID[questLineID] ~= true then
+              return false, buildValidationError(
+                "E_BAD_REF",
+                "achievements[" .. tostring(achievementID) .. "].QuestLineIDs[" .. tostring(listIndex) .. "]",
+                "questLineID not found in questLines"
+              )
+            end
+          end
+          if type(achievementEntry.ContentExpansionID) ~= "number" or achievementEntry.ContentExpansionID < 0 then
+            return false, buildValidationError(
+              "E_TYPE_MISMATCH",
+              "achievements[" .. tostring(achievementID) .. "].ContentExpansionID",
+              "non-negative number expected"
+            )
+          end
+          achievementExistsByID[achievementID] = true
+        end
+
+        for expansionKey, achievementIDList in pairs(dataTable.expansionAchievements or {}) do
+          local expansionID = tonumber(expansionKey) -- 规范化资料片 ID
+          if type(expansionID) ~= "number" or expansionID < 0 then
+            return false, buildValidationError(
+              "E_TYPE_MISMATCH",
+              "expansionAchievements[" .. tostring(expansionKey) .. "]",
+              "non-negative numeric key required"
+            )
+          end
+          local achievementListOk, achievementListError = validateNumberArray(
+            achievementIDList,
+            false,
+            "expansionAchievements[" .. tostring(expansionID) .. "]"
+          )
+          if not achievementListOk then
+            return false, achievementListError
+          end
+          for listIndex, achievementID in ipairs(achievementIDList or {}) do
+            if achievementExistsByID[achievementID] ~= true then
+              return false, buildValidationError(
+                "E_BAD_REF",
+                "expansionAchievements[" .. tostring(expansionID) .. "][" .. tostring(listIndex) .. "]",
+                "achievementID not found in achievements"
+              )
+            end
           end
         end
       end
@@ -1741,6 +1847,21 @@ local function getCampaignLabel(campaignID, campaignEntry)
   return string.format(fallbackFormat, tostring(campaignID or "?"))
 end
 
+--- 构建成就名称（缺失时使用兜底文本）。
+---@param achievementID number|nil
+---@param achievementEntry table|nil
+---@return string
+local function getAchievementLabel(achievementID, achievementEntry)
+  local achievementName = type(achievementEntry) == "table" and achievementEntry.Name_lang or nil -- 静态成就名称
+  if type(achievementName) == "string" and achievementName ~= "" then
+    return achievementName
+  end
+
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local fallbackFormat = localeTable.EJ_QUEST_ACHIEVEMENT_UNKNOWN_FMT or "Achievement #%s" -- 成就兜底格式
+  return string.format(fallbackFormat, tostring(achievementID or "?"))
+end
+
 --- 确保战役分组对象存在。
 ---@param campaignList table[] 战役列表
 ---@param campaignByID table<number, table> 战役索引
@@ -1785,6 +1906,50 @@ local function appendQuestLineToCampaign(campaignGroup, questLineEntry)
   campaignGroup.questLines[#campaignGroup.questLines + 1] = questLineEntry
 end
 
+--- 确保成就分组对象存在。
+---@param achievementList table[] 成就列表
+---@param achievementByID table<number, table> 成就索引
+---@param achievementID number 成就 ID
+---@param achievementName string 成就名称
+---@return table
+local function ensureAchievementGroup(achievementList, achievementByID, achievementID, achievementName)
+  local existingGroup = achievementByID[achievementID] -- 已存在成就分组
+  if type(existingGroup) == "table" then
+    return existingGroup
+  end
+
+  local achievementGroup = {
+    kind = "achievement",
+    id = achievementID,
+    name = achievementName,
+    questLines = {},
+    _questLineSeen = {},
+  }
+  achievementByID[achievementID] = achievementGroup
+  achievementList[#achievementList + 1] = achievementGroup
+  return achievementGroup
+end
+
+--- 向成就分组追加任务线，避免重复。
+---@param achievementGroup table 成就分组
+---@param questLineEntry table 任务线对象
+local function appendQuestLineToAchievement(achievementGroup, questLineEntry)
+  if type(achievementGroup) ~= "table" or type(questLineEntry) ~= "table" then
+    return
+  end
+
+  local questLineID = questLineEntry.id -- 当前任务线 ID
+  if type(questLineID) ~= "number" then
+    return
+  end
+  if achievementGroup._questLineSeen[questLineID] == true then
+    return
+  end
+
+  achievementGroup._questLineSeen[questLineID] = true
+  achievementGroup.questLines[#achievementGroup.questLines + 1] = questLineEntry
+end
+
 --- 排序混合导航列表：地图先、任务线后，各自按名称。
 ---@param entryList table[]
 local function sortMixedNavigationEntries(entryList)
@@ -1825,6 +1990,11 @@ local function buildQuestNavigationModel()
     and dataTable.schemaVersion >= 7
     and type(dataTable.campaigns) == "table"
     and type(dataTable.expansionCampaigns) == "table" -- 是否使用战役导航结构
+  local useAchievementNavigation = type(dataTable) == "table"
+    and type(dataTable.schemaVersion) == "number"
+    and dataTable.schemaVersion >= 8
+    and type(dataTable.achievements) == "table"
+    and type(dataTable.expansionAchievements) == "table" -- 是否使用成就导航结构
 
   local function ensureExpansionEntry(expansionID)
     local expansionEntry = navigationModel.expansionByID[expansionID] -- 已存在资料片分组
@@ -1848,10 +2018,18 @@ local function buildQuestNavigationModel()
             or "战役",
           entries = {},
         },
+        {
+          key = "achievement",
+          name = (Toolbox.L and Toolbox.L.EJ_QUEST_NAV_MODE_ACHIEVEMENT)
+            or (Toolbox.L and Toolbox.L.QUEST_VIEW_TAB_ACHIEVEMENT)
+            or "成就",
+          entries = {},
+        },
       },
       modeByKey = {},
       _mapEntryByID = {},
       _campaignEntryByID = {},
+      _achievementEntryByID = {},
     }
     for _, modeEntry in ipairs(expansionEntry.modes) do
       expansionEntry.modeByKey[modeEntry.key] = modeEntry
@@ -1945,6 +2123,32 @@ local function buildQuestNavigationModel()
 
   end
 
+  if useAchievementNavigation then
+    for expansionID, achievementIDList in pairs(dataTable.expansionAchievements or {}) do
+      if type(expansionID) == "number" and expansionID >= 0 then
+        local expansionEntry = ensureExpansionEntry(expansionID) -- 资料片分组
+        local achievementEntryList = expansionEntry.modeByKey.achievement.entries -- 成就分组列表
+        for _, achievementID in ipairs(achievementIDList or {}) do
+          local achievementRecord = dataTable.achievements and dataTable.achievements[achievementID] or nil -- 成就静态记录
+          if type(achievementRecord) == "table" then
+            local achievementGroup = ensureAchievementGroup(
+              achievementEntryList,
+              expansionEntry._achievementEntryByID,
+              achievementID,
+              getAchievementLabel(achievementID, achievementRecord)
+            )
+            for _, questLineID in ipairs(achievementRecord.QuestLineIDs or {}) do
+              local questLineEntry = questTabModel.questLineByID and questTabModel.questLineByID[questLineID] or nil -- 当前任务线
+              if type(questLineEntry) == "table" then
+                appendQuestLineToAchievement(achievementGroup, questLineEntry)
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
   table.sort(navigationModel.expansionList, function(leftEntry, rightEntry)
     return (leftEntry.id or 0) < (rightEntry.id or 0)
   end)
@@ -1977,9 +2181,33 @@ local function buildQuestNavigationModel()
         campaignModeEntry.entries = {}
       end
     end
+    local achievementModeEntry = expansionEntry.modeByKey and expansionEntry.modeByKey.achievement or nil -- 成就模式
+    local achievementModeEntries = type(achievementModeEntry) == "table" and achievementModeEntry.entries or {} -- 成就模式条目
+    if useAchievementNavigation then
+      local filteredAchievementList = {} -- 过滤后的成就列表
+      for _, achievementEntry in ipairs(achievementModeEntries) do
+        if type(achievementEntry) == "table" then
+          achievementEntry._questLineSeen = nil
+          if type(achievementEntry.questLines) == "table" and #achievementEntry.questLines > 0 then
+            filteredAchievementList[#filteredAchievementList + 1] = achievementEntry
+          end
+        end
+      end
+      table.sort(filteredAchievementList, function(leftEntry, rightEntry)
+        return tostring(leftEntry and leftEntry.name or "") < tostring(rightEntry and rightEntry.name or "")
+      end)
+      if type(achievementModeEntry) == "table" then
+        achievementModeEntry.entries = filteredAchievementList
+      end
+    else
+      if type(achievementModeEntry) == "table" then
+        achievementModeEntry.entries = {}
+      end
+    end
     expansionEntry._mapEntryByID = nil
     expansionEntry._campaignEntryByID = nil
     expansionEntry._directQuestLineByID = nil
+    expansionEntry._achievementEntryByID = nil
   end
 
   local filteredExpansionList = {} -- 过滤后的资料片列表
@@ -1989,9 +2217,12 @@ local function buildQuestNavigationModel()
     local mapModeEntries = type(mapModeEntry) == "table" and mapModeEntry.entries or nil -- 地图任务线条目列表
     local campaignModeEntry = type(expansionEntry) == "table" and expansionEntry.modeByKey and expansionEntry.modeByKey.campaign or nil -- 战役模式
     local campaignModeEntries = type(campaignModeEntry) == "table" and campaignModeEntry.entries or nil -- 战役条目列表
+    local achievementModeEntry = type(expansionEntry) == "table" and expansionEntry.modeByKey and expansionEntry.modeByKey.achievement or nil -- 成就模式
+    local achievementModeEntries = type(achievementModeEntry) == "table" and achievementModeEntry.entries or nil -- 成就条目列表
     local hasMapEntries = type(mapModeEntries) == "table" and #mapModeEntries > 0
     local hasCampaignEntries = type(campaignModeEntries) == "table" and #campaignModeEntries > 0
-    if hasMapEntries or hasCampaignEntries then
+    local hasAchievementEntries = type(achievementModeEntries) == "table" and #achievementModeEntries > 0
+    if hasMapEntries or hasCampaignEntries or hasAchievementEntries then
       filteredExpansionList[#filteredExpansionList + 1] = expansionSummary
     else
       navigationModel.expansionByID[expansionSummary.id] = nil
@@ -2057,6 +2288,52 @@ function Toolbox.Questlines.GetQuestLinesForMap(mapID, expansionID)
     end
   end
   return filteredQuestLineList, nil
+end
+
+--- 按成就 ID 获取任务线列表。
+---@param achievementID number|nil
+---@param expansionID number|nil 可选资料片 ID；传入后优先在该资料片下检索
+---@return table[] questLineList
+---@return table|nil errorObject
+function Toolbox.Questlines.GetQuestLinesForAchievement(achievementID, expansionID)
+  if type(achievementID) ~= "number" or achievementID <= 0 then
+    return {}, nil
+  end
+
+  local navigationModel, errorObject = Toolbox.Questlines.GetQuestNavigationModel() -- 导航模型
+  if errorObject then
+    return {}, errorObject
+  end
+
+  local questLineList = {} -- 当前成就下任务线列表
+  local questLineSeen = {} -- 任务线去重表
+  local function appendFromExpansionEntry(expansionEntry)
+    local achievementMode = type(expansionEntry) == "table" and expansionEntry.modeByKey and expansionEntry.modeByKey.achievement or nil -- 成就模式
+    for _, achievementEntry in ipairs(achievementMode and achievementMode.entries or {}) do
+      if type(achievementEntry) == "table" and achievementEntry.kind == "achievement" and achievementEntry.id == achievementID then
+        for _, questLineEntry in ipairs(achievementEntry.questLines or {}) do
+          local questLineID = type(questLineEntry) == "table" and questLineEntry.id or nil -- 当前任务线 ID
+          if type(questLineID) == "number" and questLineSeen[questLineID] ~= true then
+            questLineSeen[questLineID] = true
+            questLineList[#questLineList + 1] = questLineEntry
+          end
+        end
+        return
+      end
+    end
+  end
+
+  if type(expansionID) == "number" then
+    local expansionEntry = navigationModel and navigationModel.expansionByID and navigationModel.expansionByID[expansionID] or nil -- 指定资料片分组
+    appendFromExpansionEntry(expansionEntry)
+    return questLineList, nil
+  end
+
+  for _, expansionSummary in ipairs(navigationModel and navigationModel.expansionList or {}) do
+    local expansionEntry = navigationModel.expansionByID and navigationModel.expansionByID[expansionSummary.id] or nil -- 当前资料片分组
+    appendFromExpansionEntry(expansionEntry)
+  end
+  return questLineList, nil
 end
 
 --- 获取任务线显示名缓存表。

@@ -34,8 +34,8 @@ local function installQuestDataStubs()
   end
   Toolbox.Questlines.GetCurrentQuestLogEntries = function()
     return {
-      { questID = 81001, name = "觉醒的角兽", questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = false },
-      { questID = 81002, name = "立即回报", questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = true },
+      { questID = 81001, name = "觉醒的角兽", questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = false, typeID = 12 },
+      { questID = 81002, name = "立即回报", questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = true, typeID = 12 },
     }, nil
   end
   Toolbox.Questlines.GetQuestLinesForMap = function(mapID)
@@ -62,8 +62,8 @@ local function installQuestDataStubs()
       return {}, nil
     end
     return {
-      { id = 81001, name = "觉醒的角兽", questLineID = 9901, questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = false },
-      { id = 81003, name = "山谷回音", questLineID = 9901, questLineName = "欧恩哈拉开端", status = "pending", readyForTurnIn = false },
+      { id = 81001, name = "觉醒的角兽", questLineID = 9901, questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = false, typeID = 12 },
+      { id = 81003, name = "山谷回音", questLineID = 9901, questLineName = "欧恩哈拉开端", status = "pending", readyForTurnIn = false, typeID = 12 },
     }, nil
   end
   Toolbox.Questlines.GetQuestTabModel = function()
@@ -108,7 +108,7 @@ describe("Quest module split", function()
     end
   end)
 
-  it("registers_quest_module_with_three_bottom_tabs", function()
+  it("registers_quest_module_with_four_bottom_tabs", function()
     local moduleDef = harness:loadQuestModule() -- 任务模块定义
     assert.equals("quest", moduleDef.id)
     assert.is_function(moduleDef.GetSettingsPages)
@@ -122,7 +122,7 @@ describe("Quest module split", function()
     assert.equals("active_log", questView.selectedModeKey)
 
     local modeKeyList = questHooks:getBottomTabModeKeys() -- 底部分页签模式键
-    assert.same({ "active_log", "map_questline", "campaign" }, modeKeyList)
+    assert.same({ "active_log", "map_questline", "campaign", "achievement" }, modeKeyList)
 
     installQuestDataStubs()
 
@@ -135,19 +135,153 @@ describe("Quest module split", function()
     local activeButton = questView.modeTabButtonByKey and questView.modeTabButtonByKey.active_log or nil -- 当前任务页签按钮
     local mapButton = questView.modeTabButtonByKey and questView.modeTabButtonByKey.map_questline or nil -- 任务线页签按钮
     local campaignButton = questView.modeTabButtonByKey and questView.modeTabButtonByKey.campaign or nil -- 战役页签按钮
+    local achievementButton = questView.modeTabButtonByKey and questView.modeTabButtonByKey.achievement or nil -- 成就页签按钮
     assert.is_truthy(activeButton)
     assert.is_truthy(mapButton)
     assert.is_truthy(campaignButton)
+    assert.is_truthy(achievementButton)
     assert.is_true(activeButton.parentFrame == hostFrame)
     assert.is_true(mapButton.parentFrame == hostFrame)
     assert.is_true(campaignButton.parentFrame == hostFrame)
+    assert.is_true(achievementButton.parentFrame == hostFrame)
     assert.equals(Toolbox.L.QUEST_VIEW_TAB_ACTIVE or "当前任务", activeButton:GetText())
     assert.equals(Toolbox.L.QUEST_VIEW_TAB_QUESTLINE or "任务线", mapButton:GetText())
     assert.equals(Toolbox.L.QUEST_VIEW_TAB_CAMPAIGN or "战役", campaignButton:GetText())
+    assert.equals(Toolbox.L.QUEST_VIEW_TAB_ACHIEVEMENT or "成就", achievementButton:GetText())
     assert.is_true(activeButton:IsShown())
     assert.is_true(mapButton:IsShown())
     assert.is_true(campaignButton:IsShown())
+    assert.is_true(achievementButton:IsShown())
     assert.is_false(questView.tabButton and questView.tabButton:IsShown() or false)
+  end)
+
+  it("achievement_tab_left_tree_and_right_panel_follow_expansion_to_achievement_flow", function()
+    harness:loadQuestModule()
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local questView = questHooks:getView() -- 任务视图对象
+    installQuestDataStubs()
+
+    local mapMode = { key = "map_questline", name = "地图任务线", entries = {} } -- 地图任务线模式
+    local campaignMode = { key = "campaign", name = "战役", entries = {} } -- 战役模式
+    local achievementMode = {
+      key = "achievement",
+      name = "成就",
+      entries = {
+        {
+          kind = "achievement",
+          id = 7001,
+          name = "群岛探险家",
+          questLines = {
+            { id = 9901, name = "欧恩哈拉开端", questCount = 2, UiMapID = 2371 },
+          },
+        },
+      },
+    } -- 成就模式
+
+    local expansionEntry = {
+      id = 9,
+      name = "巨龙时代",
+      modes = { mapMode, campaignMode, achievementMode },
+      modeByKey = {
+        map_questline = mapMode,
+        campaign = campaignMode,
+        achievement = achievementMode,
+      },
+    } -- 资料片导航详情
+
+    Toolbox.Questlines.GetQuestNavigationModel = function()
+      return {
+        expansionList = {
+          { id = 9, name = "巨龙时代" },
+        },
+        expansionByID = {
+          [9] = expansionEntry,
+        },
+      }, nil
+    end
+
+    Toolbox.Questlines.GetQuestLinesForAchievement = function(achievementID, expansionID)
+      if achievementID == 7001 and expansionID == 9 then
+        return {
+          { id = 9901, name = "欧恩哈拉开端", questCount = 2, UiMapID = 2371 },
+        }, nil
+      end
+      return {}, nil
+    end
+
+    Toolbox.Questlines.GetQuestLineProgress = function(questLineID)
+      if questLineID == 9901 then
+        return {
+          completed = 1,
+          total = 2,
+          nextQuestName = "继续深入",
+          isCompleted = false,
+        }, nil
+      end
+      return nil, "unknown questLine"
+    end
+
+    Toolbox.Questlines.GetQuestListByQuestLineID = function(questLineID)
+      if questLineID ~= 9901 then
+        return {}, nil
+      end
+      return {
+        { id = 81001, name = "觉醒的角兽", questLineID = 9901, questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = false, typeID = 12 },
+        { id = 81003, name = "山谷回音", questLineID = 9901, questLineName = "欧恩哈拉开端", status = "pending", readyForTurnIn = false, typeID = 12 },
+      }, nil
+    end
+
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(hostFrame)
+    hostFrame:Show()
+    questView:setSelected(true)
+    questView:refresh()
+
+    local achievementButton = questView.modeTabButtonByKey and questView.modeTabButtonByKey.achievement or nil -- 成就页签按钮
+    assert.is_truthy(achievementButton)
+    achievementButton:RunScript("OnClick")
+
+    local function collectVisibleRows(rowButtonList)
+      local rowDataList = {} -- 可见行数据
+      for _, rowButton in ipairs(rowButtonList or {}) do
+        local rowData = rowButton and rowButton.rowData or nil -- 当前行数据
+        if rowButton and rowButton.IsShown and rowButton:IsShown() and type(rowData) == "table" then
+          rowDataList[#rowDataList + 1] = rowData
+        end
+      end
+      return rowDataList
+    end
+
+    local leftRowDataList = collectVisibleRows(questView.rowButtons) -- 左侧树可见行
+    local foundExpansionNode = false -- 是否找到资料片节点
+    local foundAchievementNode = false -- 是否找到成就节点
+    for _, rowData in ipairs(leftRowDataList) do
+      if rowData.kind == "expansion" and string.find(tostring(rowData.text or ""), "巨龙时代", 1, true) ~= nil then
+        foundExpansionNode = true
+      end
+      if rowData.kind == "achievement" and rowData.text == "群岛探险家" then
+        foundAchievementNode = true
+      end
+    end
+    assert.is_true(foundExpansionNode)
+    assert.is_true(foundAchievementNode)
+
+    local initialRightRows = collectVisibleRows(questView.rightRowButtons) -- 右侧初始行
+    assert.equals("questline", initialRightRows[1] and initialRightRows[1].kind)
+    assert.is_true(string.find(tostring(initialRightRows[1] and initialRightRows[1].text or ""), "欧恩哈拉开端", 1, true) ~= nil)
+
+    local firstQuestlineButton = questView.rightRowButtons and questView.rightRowButtons[1] or nil -- 第一条任务线按钮
+    assert.is_truthy(firstQuestlineButton)
+    firstQuestlineButton:RunScript("OnClick")
+
+    local expandedRightRows = collectVisibleRows(questView.rightRowButtons) -- 右侧展开后行
+    local foundQuestRow = false -- 是否出现任务行
+    for _, rowData in ipairs(expandedRightRows) do
+      if rowData.kind == "quest" and rowData.text == "觉醒的角兽" then
+        foundQuestRow = true
+      end
+    end
+    assert.is_true(foundQuestRow)
   end)
 
   it("registers_quest_host_frame_into_mover_with_title_drag_region", function()
@@ -280,6 +414,189 @@ describe("Quest module split", function()
     assert.equals("quest_detail", detailRow.rowData.kind)
     assert.is_true(string.find(detailRow.detailText:GetText() or "", "欧恩哈拉开端", 1, true) ~= nil)
     assert.is_true(string.find(detailRow.detailText:GetText() or "", "Campaign(12)", 1, true) ~= nil)
+  end)
+
+  it("hides_quests_with_blocked_or_missing_type_in_all_tabs", function()
+    harness:loadQuestModule()
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local questView = questHooks:getView() -- 任务视图对象
+    installQuestDataStubs()
+
+    local detailByQuestID = {
+      [91001] = {
+        questID = 91001,
+        name = "可见当前任务",
+        questLineName = "欧恩哈拉开端",
+        questLineID = 9901,
+        UiMapID = 2371,
+        questLineExpansionID = 9,
+        typeID = 12,
+      },
+      [91002] = {
+        questID = 91002,
+        name = "隐藏类型265",
+        questLineName = "欧恩哈拉开端",
+        questLineID = 9901,
+        UiMapID = 2371,
+        questLineExpansionID = 9,
+        typeID = 265,
+      },
+      [91003] = {
+        questID = 91003,
+        name = "隐藏空类型当前",
+        questLineName = "欧恩哈拉开端",
+        questLineID = 9901,
+        UiMapID = 2371,
+        questLineExpansionID = 9,
+        typeID = nil,
+      },
+      [91021] = {
+        questID = 91021,
+        name = "最近可见任务",
+        questLineName = "欧恩哈拉开端",
+        questLineID = 9901,
+        UiMapID = 2371,
+        questLineExpansionID = 9,
+        typeID = 12,
+      },
+      [91022] = {
+        questID = 91022,
+        name = "最近隐藏291",
+        questLineName = "欧恩哈拉开端",
+        questLineID = 9901,
+        UiMapID = 2371,
+        questLineExpansionID = 9,
+        typeID = 291,
+      },
+      [91023] = {
+        questID = 91023,
+        name = "最近隐藏空类型",
+        questLineName = "欧恩哈拉开端",
+        questLineID = 9901,
+        UiMapID = 2371,
+        questLineExpansionID = 9,
+        typeID = nil,
+      },
+    } -- 任务详情测试数据
+
+    Toolbox.Questlines.GetCurrentQuestLogEntries = function()
+      return {
+        {
+          questID = 91001,
+          name = "可见当前任务",
+          questLineName = "欧恩哈拉开端",
+          status = "active",
+          readyForTurnIn = false,
+          typeID = 12,
+          questLineID = 9901,
+          UiMapID = 2371,
+          questLineExpansionID = 9,
+        },
+        {
+          questID = 91002,
+          name = "隐藏类型265",
+          questLineName = "欧恩哈拉开端",
+          status = "active",
+          readyForTurnIn = false,
+          typeID = 265,
+          questLineID = 9901,
+          UiMapID = 2371,
+          questLineExpansionID = 9,
+        },
+        {
+          questID = 91003,
+          name = "隐藏空类型当前",
+          questLineName = "欧恩哈拉开端",
+          status = "active",
+          readyForTurnIn = false,
+          typeID = nil,
+          questLineID = 9901,
+          UiMapID = 2371,
+          questLineExpansionID = 9,
+        },
+      }, nil
+    end
+
+    Toolbox.Questlines.GetQuestListByQuestLineID = function(questLineID)
+      if questLineID ~= 9901 then
+        return {}, nil
+      end
+      return {
+        { id = 91101, name = "可见地图任务", questLineID = 9901, questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = false, typeID = 12 },
+        { id = 91102, name = "隐藏类型291地图", questLineID = 9901, questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = false, typeID = 291 },
+        { id = 91103, name = "隐藏空类型地图", questLineID = 9901, questLineName = "欧恩哈拉开端", status = "active", readyForTurnIn = false, typeID = nil },
+      }, nil
+    end
+
+    Toolbox.Questlines.GetQuestDetailByID = function(questID)
+      local detailObject = detailByQuestID[questID] -- 指定任务详情
+      if type(detailObject) == "table" then
+        return detailObject, nil
+      end
+      return {
+        questID = questID,
+        name = "可见地图任务",
+        questLineName = "欧恩哈拉开端",
+        questLineID = 9901,
+        UiMapID = 2371,
+        questLineExpansionID = 9,
+        typeID = 12,
+      }, nil
+    end
+
+    harness.questModuleDb.questRecentCompletedList = {
+      { questID = 91021, questName = "最近可见任务", completedAt = 1700000000 },
+      { questID = 91022, questName = "最近隐藏291", completedAt = 1700000001 },
+      { questID = 91023, questName = "最近隐藏空类型", completedAt = 1700000002 },
+    }
+
+    local function collectVisibleQuestText(rowButtonList)
+      local textList = {} -- 可见文本列表
+      for _, rowButton in ipairs(rowButtonList or {}) do
+        local rowData = rowButton and rowButton.rowData or nil -- 当前行数据
+        if rowButton and rowButton.IsShown and rowButton:IsShown() and type(rowData) == "table" and type(rowData.text) == "string" then
+          textList[#textList + 1] = rowData.text
+        end
+      end
+      return textList
+    end
+
+    local function hasText(textList, expectedText)
+      for _, currentText in ipairs(textList or {}) do
+        if currentText == expectedText then
+          return true
+        end
+      end
+      return false
+    end
+
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(hostFrame)
+    hostFrame:Show()
+    questView:setSelected(true)
+    questView:refresh()
+
+    local activeCurrentTexts = collectVisibleQuestText(questView.activeLogCurrentRowButtons) -- 当前任务可见文本
+    assert.is_true(hasText(activeCurrentTexts, "可见当前任务"))
+    assert.is_false(hasText(activeCurrentTexts, "隐藏类型265"))
+    assert.is_false(hasText(activeCurrentTexts, "隐藏空类型当前"))
+
+    local activeRecentTexts = collectVisibleQuestText(questView.activeLogRecentRowButtons) -- 最近完成可见文本
+    assert.is_true(hasText(activeRecentTexts, "最近可见任务"))
+    assert.is_false(hasText(activeRecentTexts, "最近隐藏291"))
+    assert.is_false(hasText(activeRecentTexts, "最近隐藏空类型"))
+
+    questView.selectedModeKey = "map_questline"
+    questView.selectedExpansionID = 9
+    questView.selectedMapID = 2371
+    questView.expandedQuestLineID = 9901
+    questView.selectedQuestID = nil
+    questView:render()
+
+    local mapQuestTexts = collectVisibleQuestText(questView.rightRowButtons) -- 地图任务线可见文本
+    assert.is_true(hasText(mapQuestTexts, "可见地图任务"))
+    assert.is_false(hasText(mapQuestTexts, "隐藏类型291地图"))
+    assert.is_false(hasText(mapQuestTexts, "隐藏空类型地图"))
   end)
 
   it("standalone_quest_layout_keeps_only_one_inset_view_container", function()
@@ -822,13 +1139,14 @@ describe("Quest module split", function()
           questLineID = 9902,
           UiMapID = 2601,
           questLineExpansionID = 10,
+          typeID = 12,
         }, nil
       end
       return nil, nil
     end
     Toolbox.Questlines.GetCurrentQuestLogEntries = function()
       return {
-        { questID = 82001, name = "新的召集", questLineName = "多恩诺嘉尔召集", status = "active", readyForTurnIn = false },
+        { questID = 82001, name = "新的召集", questLineName = "多恩诺嘉尔召集", status = "active", readyForTurnIn = false, typeID = 12 },
       }, nil
     end
     questDumpCallCount = 0

@@ -11,7 +11,7 @@
   - `docs/designs/quest-design.md`
   - `docs/tests/quest-test.md`
   - `docs/plans/encounter-journal-plan.md`
-- 最后更新：2026-04-21
+- 最后更新：2026-04-22
 
 ## 1. 目标
 
@@ -581,4 +581,55 @@
 - [ ] 步骤 3：在 `Toolbox.Questlines` 增加战役导航模型查询接口，提供 `资料片 -> 战役 -> 任务线` 左树数据与右侧任务查询。
 - [ ] 步骤 4：在 `QuestNavigation` 增加 `campaign_questline` 页签与左树三层展开逻辑，右侧接入任务列表渲染。
 - [ ] 步骤 5：补齐 `Config` 默认键迁移与 `Locales` 文案键，保证旧存档与新视图兼容。
+- [ ] 步骤 6：运行导出与 quest 逻辑测试，确认先红后绿并记录结果。
+
+## 20. 2026-04-22 成就页签（资料片 -> 成就）实施计划
+
+### 20.1 状态
+
+- 已确认
+- 可执行
+
+### 20.2 目标
+
+- 在 `quest` 模块新增 `achievement` 成就页签。
+- 左侧层级为 `资料片 -> 成就`，右侧默认展示任务线列表，点击任务线后展示该任务线任务列表。
+- 导出“所有成就相关任务与任务线”，并把结果纳入 `instance_questlines` 正式导出产物。
+
+### 20.3 已确认决策（2026-04-22）
+
+- 模块归属：复用现有 `quest` 模块，不新增 `RegisterModule`。
+- 导出落点：采用方案 A，扩展 `instance_questlines`（schema v8），在 `Toolbox/Data/InstanceQuestlines.lua` 增加成就结构块。
+- 资料片归属：采用方案 A，优先成就分类推断；无法推断时回退到该成就关联任务线主资料片。
+- 多成就引用同任务线：采用方案 A，允许同一任务线在多个成就下重复出现。
+- 右侧展示口径：先任务线列表，再下钻任务列表。
+
+### 20.4 影响文件
+
+- 修改：
+  - `docs/specs/quest-spec.md`
+  - `docs/plans/quest-plan.md`
+  - `DataContracts/instance_questlines.json`
+  - `scripts/export/export_quest_achievement_merged_from_db.py`
+  - `scripts/export/export_instance_questlines_runtime.py`
+  - `Toolbox/Data/InstanceQuestlines.lua`（由正式导出脚本生成）
+  - `Toolbox/Core/API/QuestlineProgress.lua`
+  - `Toolbox/Modules/Quest/QuestNavigation.lua`
+  - `Toolbox/Modules/Quest.lua`
+  - `Toolbox/Core/Foundation/Config.lua`
+  - `Toolbox/Core/Foundation/Locales.lua`
+  - `tests/logic/spec/questline_progress_spec.lua`
+  - `tests/logic/spec/quest_module_spec.lua`
+- 验证：
+  - `python scripts/export/export_quest_achievement_merged_from_db.py`
+  - `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/questline_progress_spec.lua`
+  - `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/quest_module_spec.lua`
+
+### 20.5 执行步骤
+
+- [ ] 步骤 1：升级 `instance_questlines` 契约到 schema v8，声明 `achievements` 与 `expansionAchievements` 结构。
+- [ ] 步骤 2：扩展正式导出脚本，聚合并写入成就维度的任务线关系与资料片归属。
+- [ ] 步骤 3：在 `Toolbox.Questlines` 增加成就导航查询能力，供 `quest` 视图消费。
+- [ ] 步骤 4：在 `QuestNavigation` 新增 `achievement` 页签、左侧 `资料片 -> 成就`、右侧任务线/任务下钻渲染。
+- [ ] 步骤 5：补齐 `Config` 默认键迁移、`Locales` 文案键与现有视图兼容处理。
 - [ ] 步骤 6：运行导出与 quest 逻辑测试，确认先红后绿并记录结果。
