@@ -87,7 +87,7 @@ local function ensureQuestHostFrame()
     questHostFrame:SetScript("OnShow", function()
       local questView = getQuestView() -- 任务视图对象
       if type(questView) == "table" and type(questView.setSelected) == "function" then
-        questView:setSelected(true)
+        questView:setSelected(true, true)
       end
       if type(questView) == "table" and type(questView.refresh) == "function" then
         questView:refresh()
@@ -96,7 +96,7 @@ local function ensureQuestHostFrame()
     questHostFrame:SetScript("OnHide", function()
       local questView = getQuestView() -- 任务视图对象
       if type(questView) == "table" and type(questView.setSelected) == "function" then
-        questView:setSelected(false)
+        questView:setSelected(false, true)
       end
     end)
   end
@@ -118,13 +118,6 @@ local function openQuestMainFrame()
 
   local hostFrame = ensureQuestHostFrame() -- quest 主界面
   hostFrame:Show()
-  local questView = getQuestView() -- 任务视图对象
-  if type(questView) == "table" and type(questView.setSelected) == "function" then
-    questView:setSelected(true)
-  end
-  if type(questView) == "table" and type(questView.refresh) == "function" then
-    questView:refresh()
-  end
 end
 
 --- 关闭 quest 主界面。

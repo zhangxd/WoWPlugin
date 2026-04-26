@@ -11,17 +11,37 @@ function FakeTooltip.new(traceList)
   self.lines = {} -- AddLine 记录
   self.titleText = nil -- SetText 标题
   self.ownerFrame = nil -- Owner 框体
+  self.ownerAnchor = nil -- Owner 锚点
+  self.setOwnerCount = 0 -- SetOwner 调用次数
+  self.anchorType = nil -- SetAnchorType 锚点类型
+  self.anchorOffsetX = nil -- SetAnchorType X 偏移
+  self.anchorOffsetY = nil -- SetAnchorType Y 偏移
+  self.setAnchorTypeCount = 0 -- SetAnchorType 调用次数
   self.showCount = 0 -- Show 调用次数
   self.hideCount = 0 -- Hide 调用次数
   return self
 end
 
 function FakeTooltip:SetOwner(ownerFrame, anchorType)
+  self.setOwnerCount = self.setOwnerCount + 1
   self.ownerFrame = ownerFrame
   self.ownerAnchor = anchorType
   self.traceList[#self.traceList + 1] = {
     kind = "tooltip_set_owner",
     anchorType = anchorType,
+  }
+end
+
+function FakeTooltip:SetAnchorType(anchorType, offsetX, offsetY)
+  self.setAnchorTypeCount = self.setAnchorTypeCount + 1
+  self.anchorType = anchorType
+  self.anchorOffsetX = offsetX
+  self.anchorOffsetY = offsetY
+  self.traceList[#self.traceList + 1] = {
+    kind = "tooltip_set_anchor_type",
+    anchorType = anchorType,
+    offsetX = offsetX,
+    offsetY = offsetY,
   }
 end
 

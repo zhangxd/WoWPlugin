@@ -66,6 +66,9 @@ local QuestlineTreeView = {
   activeRootState = "native",
   nativeTabBeforeQuest = nil,
   pendingNativeSelection = false,
+  renderScheduled = false,
+  renderTimerHandle = nil,
+  selectionLoaded = false,
 }
 
 local VIEW_STYLE = {
@@ -676,11 +679,50 @@ function QuestlineTreeView:hideRowButtonList(rowButtonList)
   end
 end
 
-function QuestlineTreeView:setSelected(selected)
+function QuestlineTreeView:cancelPendingRender()
+  if self.renderTimerHandle and type(self.renderTimerHandle.Cancel) == "function" then
+    self.renderTimerHandle:Cancel()
+  end
+  self.renderTimerHandle = nil
+  self.renderScheduled = false
+end
+
+function QuestlineTreeView:requestRender()
+  self:ensureWidgets()
+  if self.renderScheduled == true then
+    return
+  end
+  if Runtime and Runtime.__isTesting == true then
+    self:render()
+    return
+  end
+  if Runtime and type(Runtime.After) == "function" then
+    self.renderScheduled = true
+    self.renderTimerHandle = Runtime.After(0, function()
+      self.renderTimerHandle = nil
+      self.renderScheduled = false
+      self:render()
+    end)
+    return
+  end
+  self:render()
+end
+
+function QuestlineTreeView:setSelected(selected, suppressVisibilityUpdate)
   if selected == true and self.selected ~= true and self.hostJournalFrame and type(self.hostJournalFrame.selectedTab) == "number" then
     self.nativeTabBeforeQuest = self.hostJournalFrame.selectedTab -- 进入任务页前的原生页签 ID
   end
-  self.selected = selected == true
+  local normalizedSelected = selected == true -- 归一化后的选中状态
+  if self.selected == normalizedSelected then
+    return
+  end
+  self.selected = normalizedSelected
+  if self.selected ~= true then
+    self:cancelPendingRender()
+  end
+  if suppressVisibilityUpdate == true then
+    return
+  end
   self:updateVisibility()
 end
 
@@ -1261,7 +1303,7 @@ function QuestlineTreeView:recordRecentlyCompletedQuest(questID, completedAt)
   })
   self:trimRecentCompletedQuestRecords()
   if self.selected == true and self.selectedModeKey == "active_log" then
-    self:render()
+    self:requestRender()
   end
 end
 
@@ -1659,7 +1701,7 @@ function QuestlineTreeView:getOrCreateRowButton(rowIndex)
     end
     self:hideQuestDetailPopup()
     self:saveSelection()
-    self:render()
+    self:requestRender()
   end)
   self.rowButtons[rowIndex] = rowButton
   return rowButton
@@ -1920,7 +1962,7 @@ function QuestlineTreeView:getOrCreateRightRowButton(rowIndex, rowButtonList, sc
     self.selectedTypeKey = ""
     self:hideQuestDetailPopup()
     self:saveSelection()
-    self:render()
+    self:requestRender()
   end)
   jumpActionButton:Hide()
   rowButton.jumpActionButton = jumpActionButton
@@ -1943,7 +1985,7 @@ function QuestlineTreeView:getOrCreateRightRowButton(rowIndex, rowButtonList, sc
       end
       self:hideQuestDetailPopup()
       self:saveSelection()
-      self:render()
+      self:requestRender()
       return
     end
     if (rowData.kind == "quest" or rowData.kind == "recent_quest") and type(rowData.questID) == "number" then
@@ -1954,7 +1996,7 @@ function QuestlineTreeView:getOrCreateRightRowButton(rowIndex, rowButtonList, sc
       end
       self:hideQuestDetailPopup()
       self:saveSelection()
-      self:render()
+      self:requestRender()
     end
   end)
   buttonList[rowIndex] = rowButton
@@ -2218,7 +2260,7 @@ function QuestlineTreeView:buildCurrentQuestRows()
       questEntry.UiMapID,
       questEntry.questLineExpansionID
     ) -- 当前任务详情查询上下文
-    local resolvedTypeID = resolveQuestTypeIDForFilter(questEntry.questID, questEntry.typeID, detailContext) -- 当前任务可用类型 ID
+    local resolvedTypeID = questEntry.typeID -- 当前任务可用类型 ID
     local canDisplayQuest = shouldDisplayQuestByTypeID(resolvedTypeID) -- 当前任务是否允许显示
     local questName = tostring(questEntry.name or ("Quest #" .. tostring(questEntry.questID or "?"))) -- 任务显示名
     if canDisplayQuest and (searchKeyword == "" or textContainsKeyword(questName, searchKeyword)) then
@@ -2335,6 +2377,54 @@ function QuestlineTreeView:renderLeftRows(rowDataList)
   return contentHeight
 end
 
+local function buildQuestContentRowLayoutList(viewObject, rowDataList)
+  local layoutList = {} -- 行布局列表
+  local currentOffsetY = 6 -- 当前累计偏移
+  for rowIndex, rowData in ipairs(rowDataList or {}) do
+    local rowHeight = getQuestContentRowHeight(viewObject.rowHeight, rowData) -- 当前行高度
+    layoutList[#layoutList + 1] = {
+      rowIndex = rowIndex,
+      rowData = rowData,
+      rowHeight = rowHeight,
+      offsetY = currentOffsetY,
+    }
+    currentOffsetY = currentOffsetY + rowHeight + VIEW_STYLE.rightRowGap
+  end
+  return layoutList, math.max(currentOffsetY + 4, 10)
+end
+
+local function getQuestRowRenderFrameHeight(scrollFrame)
+  local frameHeight = type(scrollFrame.GetHeight) == "function" and tonumber(scrollFrame:GetHeight()) or nil -- 当前滚动框高度
+  if type(frameHeight) == "number" and frameHeight > 0 then
+    return frameHeight
+  end
+  return 220
+end
+
+local function collectVisibleQuestContentLayouts(scrollFrame, layoutList, contentHeight)
+  local frameHeight = getQuestRowRenderFrameHeight(scrollFrame) -- 当前滚动框高度
+  local maxOffset = math.max(0, (tonumber(contentHeight) or 0) - frameHeight) -- 当前允许的最大偏移
+  local effectiveScrollOffset = math.min(readVerticalScrollOffset(scrollFrame), maxOffset) -- 当前用于布局的滚动偏移
+  local overscanHeight = 84 -- 上下预渲染高度
+  local visibleTop = math.max(0, effectiveScrollOffset - overscanHeight) -- 可见区域顶部
+  local visibleBottom = effectiveScrollOffset + frameHeight + overscanHeight -- 可见区域底部
+  local visibleLayoutList = {} -- 可见布局列表
+
+  for _, rowLayout in ipairs(layoutList) do
+    local rowTop = rowLayout.offsetY -- 当前行顶部
+    local rowBottom = rowLayout.offsetY + rowLayout.rowHeight -- 当前行底部
+    if rowBottom >= visibleTop and rowTop <= visibleBottom then
+      visibleLayoutList[#visibleLayoutList + 1] = rowLayout
+    end
+  end
+
+  if #visibleLayoutList == 0 and #layoutList > 0 then
+    visibleLayoutList[1] = layoutList[1]
+  end
+
+  return visibleLayoutList
+end
+
 function QuestlineTreeView:renderRowList(scrollFrame, scrollChild, rowButtonList, rowDataList)
   local scrollWidth = scrollFrame:GetWidth() -- 主区宽度
   local localeTable = Toolbox.L or {} -- 本地化文案
@@ -2342,18 +2432,40 @@ function QuestlineTreeView:renderRowList(scrollFrame, scrollChild, rowButtonList
     scrollWidth = 520
   end
   local rowWidth = math.max(200, scrollWidth - 24) -- 行宽
-  local rowOffsetY = 6 -- 顶部留白
-  local currentOffsetY = rowOffsetY -- 当前累计偏移
-  local rowIndex = 0 -- 行索引
+  local layoutList, contentHeight = buildQuestContentRowLayoutList(self, rowDataList) -- 当前内容布局
+  local visibleLayoutList = collectVisibleQuestContentLayouts(scrollFrame, layoutList, contentHeight) -- 当前可见布局
+  local visibleButtonCount = 0 -- 当前使用的按钮数量
 
-  for _, rowData in ipairs(rowDataList or {}) do
-    rowIndex = rowIndex + 1
-    local rowButton = self:getOrCreateRightRowButton(rowIndex, rowButtonList, scrollChild) -- 当前主区行按钮
+  if scrollFrame and not scrollFrame._toolboxQuestRowListHooked and scrollFrame.SetScript then
+    scrollFrame._toolboxQuestRowListHooked = true
+    scrollFrame:SetScript("OnVerticalScroll", function(frameObject, scrollOffset)
+      frameObject:SetVerticalScroll(scrollOffset)
+      local refreshVisibleRows = frameObject._toolboxRefreshVisibleRows -- 当前滚动区可见行刷新函数
+      if type(refreshVisibleRows) == "function" and frameObject._toolboxRenderingRows ~= true then
+        refreshVisibleRows()
+      end
+    end)
+  end
+
+  scrollFrame._toolboxRefreshVisibleRows = function()
+    if scrollFrame._toolboxRenderingRows == true then
+      return
+    end
+    scrollFrame._toolboxRenderingRows = true
+    self:renderRowList(scrollFrame, scrollChild, rowButtonList, rowDataList)
+    scrollFrame._toolboxRenderingRows = false
+  end
+
+  for _, rowLayout in ipairs(visibleLayoutList) do
+    local rowData = rowLayout.rowData -- 当前行数据
+    local rowHeight = rowLayout.rowHeight -- 当前行高度
+    visibleButtonCount = visibleButtonCount + 1
+    local rowButton = self:getOrCreateRightRowButton(visibleButtonCount, rowButtonList, scrollChild) -- 当前主区行按钮
     rowButton.rowData = rowData
+    rowButton._toolboxRowIndex = rowLayout.rowIndex
     rowButton:ClearAllPoints()
-    rowButton:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 6, -currentOffsetY)
+    rowButton:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 6, -rowLayout.offsetY)
     rowButton:SetWidth(rowWidth)
-    local rowHeight = getQuestContentRowHeight(self.rowHeight, rowData) -- 当前行高度
     rowButton:SetHeight(rowHeight)
 
     if rowButton.rowFont and rowButton.rowFont.ClearAllPoints then
@@ -2494,16 +2606,14 @@ function QuestlineTreeView:renderRowList(scrollFrame, scrollChild, rowButtonList
     end
 
     rowButton:Show()
-    currentOffsetY = currentOffsetY + rowHeight + VIEW_STYLE.rightRowGap
   end
 
-  for hideIndex = rowIndex + 1, #rowButtonList do
+  for hideIndex = visibleButtonCount + 1, #rowButtonList do
     rowButtonList[hideIndex]:Hide()
   end
 
-  local contentHeight = math.max(currentOffsetY + 4, 10) -- 主区内容高度
   scrollChild:SetSize(rowWidth, contentHeight)
-  scrollFrame:SetShown(rowIndex > 0)
+  scrollFrame:SetShown(#layoutList > 0)
   return contentHeight
 end
 
@@ -2682,7 +2792,7 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
         self.selectedQuestID = nil
         self:hideQuestDetailPopup()
         self:saveSelection()
-        self:render()
+        self:requestRender()
       end,
     }
     breadcrumbList[#breadcrumbList + 1] = {
@@ -2702,7 +2812,7 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
         self.directQuestLineCollapsed = false
         self:hideQuestDetailPopup()
         self:saveSelection()
-        self:render()
+        self:requestRender()
       end,
     }
 
@@ -2716,7 +2826,7 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
             self.directQuestLineCollapsed = false
             self:hideQuestDetailPopup()
             self:saveSelection()
-            self:render()
+            self:requestRender()
           end,
         }
         if type(self.expandedQuestLineID) == "number" then
@@ -2740,7 +2850,7 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
             self.directQuestLineCollapsed = false
             self:hideQuestDetailPopup()
             self:saveSelection()
-            self:render()
+            self:requestRender()
           end,
         }
         if type(self.expandedQuestLineID) == "number" then
@@ -2765,7 +2875,7 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
                 self.directQuestLineCollapsed = false
                 self:hideQuestDetailPopup()
                 self:saveSelection()
-                self:render()
+                self:requestRender()
               end,
             }
             break
@@ -2797,7 +2907,7 @@ function QuestlineTreeView:syncBreadcrumb(expansionEntry)
                 self.directQuestLineCollapsed = false
                 self:hideQuestDetailPopup()
                 self:saveSelection()
-                self:render()
+                self:requestRender()
               end,
             }
           end
@@ -3046,24 +3156,10 @@ function QuestlineTreeView:render()
     return
   end
   local localeTable = Toolbox.L or {} -- 本地化文案
-  local leftScrollOffset = readVerticalScrollOffset(self.scrollFrame) -- 左树滚动偏移
-  local rightScrollOffset = readVerticalScrollOffset(self.rightScrollFrame) -- 主区滚动偏移
-  local navigationModel, queryError = Toolbox.Questlines.GetQuestNavigationModel() -- 导航模型
-  if queryError then
-    self:hideAllRows()
-    self:hideAllRightRows()
-    self:hideRowButtonList(self.activeLogCurrentRowButtons)
-    self:hideRowButtonList(self.activeLogRecentRowButtons)
-    self.rightScrollFrame:Hide()
-    self.emptyText:SetText(localeTable.EJ_QUEST_DATA_INVALID or "任务数据无效。")
-    self.emptyText:Show()
-    return
-  end
-  local expansionEntry = self:resolveNavigationDefaults(navigationModel or {}) -- 当前资料片
   self:applyContentLayout()
-  self:syncBreadcrumb(expansionEntry)
 
   if self.selectedModeKey == "active_log" then
+    self:syncBreadcrumb(nil)
     local activeLayoutState, activeError = self:renderActiveLogPanels() -- 当前任务布局状态
     if activeError then
       self:hideAllRows()
@@ -3109,6 +3205,22 @@ function QuestlineTreeView:render()
     end
     return
   end
+
+  local leftScrollOffset = readVerticalScrollOffset(self.scrollFrame) -- 左树滚动偏移
+  local rightScrollOffset = readVerticalScrollOffset(self.rightScrollFrame) -- 主区滚动偏移
+  local navigationModel, queryError = Toolbox.Questlines.GetQuestNavigationModel() -- 导航模型
+  if queryError then
+    self:hideAllRows()
+    self:hideAllRightRows()
+    self:hideRowButtonList(self.activeLogCurrentRowButtons)
+    self:hideRowButtonList(self.activeLogRecentRowButtons)
+    self.rightScrollFrame:Hide()
+    self.emptyText:SetText(localeTable.EJ_QUEST_DATA_INVALID or "任务数据无效。")
+    self.emptyText:Show()
+    return
+  end
+  local expansionEntry = self:resolveNavigationDefaults(navigationModel or {}) -- 当前资料片
+  self:syncBreadcrumb(expansionEntry)
 
   local leftRows = self:buildLeftTreeRows(navigationModel or {}) -- 左树行
   local mainRows, mainError = self:buildMainRowsForMap() -- 主区行与错误
@@ -3199,7 +3311,10 @@ function QuestlineTreeView:ensureWidgets()
     and self.searchBoxFrame
     and self.rightHeaderDivider
   then
-    self:loadSelection()
+    if self.selectionLoaded ~= true then
+      self:loadSelection()
+      self.selectionLoaded = true
+    end
     if self.searchBox then
       self.searchBox:SetText(self.searchText or "")
     end
@@ -3270,7 +3385,7 @@ function QuestlineTreeView:ensureWidgets()
       self.selectedQuestID = nil
       self:hideQuestDetailPopup()
       self:saveSelection()
-      self:render()
+      self:requestRender()
     end)
     self.modeTabButtonByKey.active_log = activeButton
   end
@@ -3284,7 +3399,7 @@ function QuestlineTreeView:ensureWidgets()
       self.selectedQuestID = nil
       self:hideQuestDetailPopup()
       self:saveSelection()
-      self:render()
+      self:requestRender()
     end)
     self.modeTabButtonByKey.map_questline = mapButton
   end
@@ -3298,7 +3413,7 @@ function QuestlineTreeView:ensureWidgets()
       self.selectedQuestID = nil
       self:hideQuestDetailPopup()
       self:saveSelection()
-      self:render()
+      self:requestRender()
     end)
     self.modeTabButtonByKey.campaign = campaignButton
   end
@@ -3312,7 +3427,7 @@ function QuestlineTreeView:ensureWidgets()
       self.selectedQuestID = nil
       self:hideQuestDetailPopup()
       self:saveSelection()
-      self:render()
+      self:requestRender()
     end)
     self.modeTabButtonByKey.achievement = achievementButton
   end
@@ -3379,7 +3494,7 @@ function QuestlineTreeView:ensureWidgets()
       self.searchText = currentText
       if userInput then
         self:saveSelection()
-        self:render()
+        self:requestRender()
       end
     end)
     searchBox:SetScript("OnEditFocusGained", function(editBox)
@@ -3448,7 +3563,7 @@ function QuestlineTreeView:ensureWidgets()
       self.activeLogRecentCollapsed = self.activeLogRecentCollapsed ~= true
       self:hideQuestDetailPopup()
       self:applyContentLayout()
-      self:render()
+      self:requestRender()
     end)
     self.activeLogRecentToggleButton = toggleButton
   end
@@ -3555,7 +3670,7 @@ function QuestlineTreeView:ensureWidgets()
       self.selectedTypeKey = ""
       self:hideQuestDetailPopup()
       self:saveSelection()
-      self:render()
+      self:requestRender()
     end)
     jumpButton:Hide()
     self.detailPopupJumpButton = jumpButton
@@ -3572,7 +3687,7 @@ function QuestlineTreeView:ensureWidgets()
       self.selectedQuestID = button.questID
       self:hideQuestDetailPopup()
       self:saveSelection()
-      self:render()
+      self:requestRender()
     end)
     activeButton:Hide()
     self.detailPopupActiveButton = activeButton
@@ -3585,7 +3700,10 @@ function QuestlineTreeView:ensureWidgets()
     end)
     self.detailPopupCloseButton = closeButton
   end
-  self:loadSelection()
+  if self.selectionLoaded ~= true then
+    self:loadSelection()
+    self.selectionLoaded = true
+  end
   if self.searchBox then
     self.searchBox:SetText(self.searchText or "")
   end

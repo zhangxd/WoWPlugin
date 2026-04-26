@@ -252,12 +252,24 @@ def validate_tooltip_anchor_regressions() -> None:
     core_text = read_text("Toolbox", "Core", "API", "Tooltip.lua")
     # 设置页应暴露 follow 模式，和 locale 文案保持一致。
     require_contains(module_text, 'makeMode("follow"', "tooltip anchor follow mode option")
-    # 核心锚点逻辑应识别 follow 模式（与 cursor 同行为兼容）。
+    # 核心逻辑应继续识别 follow 模式，并恢复全局默认锚点 hook。
     require_contains(
         core_text,
-        'db.mode ~= "cursor" and db.mode ~= "follow"',
-        "tooltip core treats follow mode as active cursor anchor",
+        'mode ~= "cursor" and mode ~= "follow"',
+        "tooltip core treats follow mode as active cursor hook mode",
     )
+    require_contains(
+        core_text,
+        'hooksecurefunc("GameTooltip_SetDefaultAnchor"',
+        "tooltip core registers global GameTooltip_SetDefaultAnchor hook",
+    )
+    require_contains(
+        core_text,
+        'tooltip:SetOwner(ownerFrame, "ANCHOR_CURSOR_LEFT", offsetX, offsetY)',
+        "tooltip core overrides owner to cursor anchor",
+    )
+    if "UberTooltips" in core_text:
+        raise AssertionError("tooltip core should not keep UberTooltips runtime logic after rollback")
 
 
 def validate_minimap_button_regressions() -> None:

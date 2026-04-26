@@ -1,7 +1,7 @@
 # 任务模块测试基线
 
 - 文档类型：测试
-- 状态：有问题
+- 状态：待补游戏内验证
 - 主题：quest
 - 适用范围：`quest` 当前独立任务界面、导航、最近完成与 Quest Inspector 的自动化与手工验证基线
 - 关联模块：`quest`、`minimap_button`
@@ -9,7 +9,7 @@
   - `docs/specs/quest-spec.md`
   - `docs/designs/quest-design.md`
   - `docs/plans/quest-plan.md`
-- 最后更新：2026-04-18
+- 最后更新：2026-04-26
 
 ## 1. 测试背景
 
@@ -36,13 +36,15 @@
 - 工具与命令：
   `python tests/run_all.py --ci`
   `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/quest_module_spec.lua`
+  `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/questline_progress_spec.lua`
 
 ## 4. 测试用例
 
 | 编号 | 前置条件 | 操作 | 预期结果 |
 |------|----------|------|----------|
 | TC-AUTO-01 | 测试环境可运行 Python / busted | 执行 `python tests/run_all.py --ci` | 静态校验与逻辑测试通过 |
-| TC-AUTO-02 | 已安装 `busted` 且 quest 逻辑测试可运行 | 执行 `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/quest_module_spec.lua` | `quest` 顶部路径导航 `NavBar` 回归用例通过 |
+| TC-AUTO-02 | 已安装 `busted` 且 quest 逻辑测试可运行 | 执行 `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/quest_module_spec.lua` | `quest` 打开链路、`active_log` 快路径、固定按钮池、顶部路径导航 `NavBar` 与列表内展开交互回归用例通过 |
+| TC-AUTO-03 | 已安装 `busted` 且 quest API 逻辑测试可运行 | 执行 `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/questline_progress_spec.lua` | `Toolbox.Questlines` 导航缓存、当前任务日志组装与详情缓存回归用例通过 |
 | TC-MANUAL-01 | 显示小地图按钮 | 点击飞出菜单“任务”入口 | 打开独立 `quest` 主界面 |
 | TC-MANUAL-02 | 打开 `quest` 主界面 | 查看底部页签 | 底部显示“当前任务”“任务线”两个页签 |
 | TC-MANUAL-03 | 打开 `quest` 主界面 | 点击并拖动标题栏 | 宿主框可拖动，拖动命中区位于标题栏，不需要点正文区 |
@@ -75,8 +77,9 @@
 
 | 编号 | 实际结果 | 结论 | 备注 |
 |------|----------|------|------|
-| TC-AUTO-01 | `python tests/run_all.py --ci` 失败，停在 `validate_data_contracts.py`：`instance_questlines: lua header contract_id mismatch` | 失败 | 当前为共享数据契约问题，直接影响任务数据链路验证 |
-| TC-AUTO-02 | `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/quest_module_spec.lua` 通过；新增“标题栏下独立头部带、导航栏位于图标右侧、头部带挂在宿主标题区而非正文框、导航按钮垂直居中并放大占满、正文区回到 `panelFrame` 内部起排、`quest` 宿主框通过 `Toolbox.Mover.RegisterFrame()` 注册标题栏拖动、搜索框不再出现双层边框、任务线状态区/行高/详情按钮收口，以及头部多级导航止于搜索框左侧并按可见区域左对齐”的回归断言，以及既有 tooltip 关闭、聊天输出关闭、详情类型显示为“名字（ID）”的用例均为红后转绿 | 通过 | 当前已验证 `quest` 会以 `ToolboxQuestFrame.TitleContainer` 作为优先拖动命中区接入 mover，搜索框外层仅保留布局容器；任务线主视图不再显示“下一步”长文案；多级导航整体宽度受搜索框左边界约束 |
+| TC-AUTO-01 | `python tests/run_all.py --ci` 通过；`validate_data_contracts`、`validate_settings_subcategories` 与全量 `tests/logic/spec` 均为绿 | 通过 | 当前共享自动化入口未再被 `instance_questlines` 头注释问题阻塞 |
+| TC-AUTO-02 | `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/quest_module_spec.lua` 通过；新增“`OpenMainFrame()` 不再在 `Show()` 之后重复驱动视图逻辑”“`active_log` 不查询导航模型”“当前任务滚动区改为固定按钮池”的回归断言，以及既有头部带 / `NavBar` / mover / 搜索框 / 列表内展开 / tooltip 关闭 / 聊天输出关闭用例均保持为绿 | 通过 | 当前已验证 quest 打开链路和 UI 列表渲染模型已收口 |
+| TC-AUTO-03 | `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/questline_progress_spec.lua` 通过；新增“导航模型缓存不再按时间秒级失效”“当前任务日志组装不再逐条调用公共详情 API”的回归断言为红后转绿 | 通过 | 当前已验证 `Toolbox.Questlines` 的缓存与当前任务日志组装链路已收口 |
 | TC-MANUAL-01 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-02 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-03 | 待执行 | 待执行 | 需游戏内验证 |
@@ -107,14 +110,12 @@
 
 ## 6. 问题与阻塞
 
-- 共享自动化校验当前失败：`validate_data_contracts.py` 报 `instance_questlines` 的 Lua 文件头 `contract_id` 与契约不一致。
 - 游戏内手工验证未在本轮文档回写中执行，因此仍需后续补齐。
 
 ## 7. 结论
 
-- 当前结论：有问题
+- 当前结论：自动化通过，待补游戏内验证
 - 后续动作：
-  - 先修复 `instance_questlines` 的 Lua 文件头与契约不一致问题
   - 在游戏内补齐独立任务界面、最近完成和 Quest Inspector 的手工验证
 
 ## 8. 修订记录
@@ -133,3 +134,4 @@
 | 2026-04-18 | 补充全量任务线覆盖验证口径：无地图任务线任务也必须进入任务线浏览数据，不再因缺地图而丢失 |
 | 2026-04-18 | 补充玩家可见地图验证口径：含子区域 / 洞穴 UiMap 的任务应提升到玩家实际看到的父地图显示 |
 | 2026-04-18 | 补充无地图任务线与名称回退验证口径：无稳定地图任务线直接挂资料片分组；运行时 API 查不到任务线名时回退导出的 `Name_lang` |
+| 2026-04-26 | 自动化基线更新：补充 `quest_module_spec` 与 `questline_progress_spec` 的渲染 / 缓存回归用例；`python tests/run_all.py --ci` 已恢复为全绿 |

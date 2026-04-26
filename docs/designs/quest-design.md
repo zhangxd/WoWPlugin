@@ -210,3 +210,68 @@
 | 2026-04-16 | 确认行内详情类型显示：使用“类型名字（ID）”格式，类型名来源统一复用 `Toolbox.Questlines` 的类型标签解析 |
 | 2026-04-17 | 确认顶部路径导航最终布局：导航栏上移到宿主标题栏下方的独立头部带，并显示在头像 / 图标右侧，正文区整体下移，视觉参考冒险手册副本节点页 |
 | 2026-04-18 | 确认任务线主视图状态区与行高收口：移除“下一步”长文案，仅保留“已完成”；任务线卡片改双行高度；展开任务行改回单行并隐藏任务线名称；移除“在进行中视图查看”按钮 |
+
+## 10. 2026-04-26 渲染与缓存架构收口
+
+### 10.1 状态
+
+- 已确认
+- 可执行
+
+### 10.2 目标
+
+- 彻底消除 `quest` 主界面首次打开时因重复渲染、导航模型整包重建与右侧列表一次性建控件而触发的 `script ran too long`。
+- 把 `active_log` 与 `map_questline / campaign / achievement` 的数据路径解耦，避免“当前任务”视图继续承担资料片导航计算成本。
+- 把 quest 运行时数据读取从“按秒失效 + 视图层重复补查询”收口为“事件驱动失效 + API 层一次组装”。
+- 把右侧滚动列表从“按总行数建 Button”收口为“固定按钮池 + 滚动复用”的虚拟列表实现。
+
+### 10.3 选定方案
+
+- 选定方案：分三层同时重构，而不是只在 `QuestNavigation.lua` 某一处加节流或延时。
+- 三层边界如下：
+  - `Toolbox/Modules/Quest.lua`：只负责打开 / 关闭宿主、事件接入与模块生命周期，不再主动重复触发视图层 `setSelected + refresh`。
+  - `Toolbox/Modules/Quest/QuestNavigation.lua`：负责视图状态到 UI 的映射、渲染调度与列表池化，不直接承担运行时缓存策略。
+  - `Toolbox/Core/API/QuestlineProgress.lua`：负责导航模型缓存、当前任务快照、任务详情缓存与失效时机；界面层只消费已组装好的结果。
+
+### 10.4 已确认决策
+
+- 打开链路必须收口为“单入口、单次完整渲染”。
+  `Toolbox.Quest.OpenMainFrame()` 只负责显示宿主框体；`OnShow` 作为唯一激活入口；若视图已处于相同选中状态，不再重复触发 `updateVisibility()`。
+- `active_log` 必须走快路径。
+  当 `selectedModeKey == "active_log"` 时，`QuestNavigation` 不再调用资料片导航模型构建与默认资料片修正逻辑，只构建当前任务 / 最近完成两块内容和对应 breadcrumb。
+- quest 运行时缓存必须改为事件驱动失效。
+  当前基于 `GetTime()` 的整秒缓存键不再作为导航模型与 Quest Log 快照的主失效条件；后续改为由任务日志变化事件、任务交付事件或测试注入重置显式推进 revision。
+- 当前任务视图所需数据必须由 `Toolbox.Questlines` 一次组装。
+  `GetCurrentQuestLogEntries()` 返回值需要直接携带界面渲染所需的任务名、任务线名、状态、类型、上下文等字段；`QuestNavigation` 不再为筛选而逐条二次补 `GetQuestDetailByID()`。
+- 最近完成列表允许按需补详情，但必须复用同一批详情缓存，不得在同一轮 render 中重复解析相同 questID。
+- 右侧主区、当前任务区、最近完成区必须统一采用固定按钮池渲染。
+  Button 总数应与可见区高度相关，而不是与数据总行数相关；滚动时只复用按钮并换绑 `rowData`。
+- 渲染调度必须支持同帧合并。
+  任务点击、模式切换、搜索、最近完成更新等入口不再层层直接 `self:render()`，而是统一经渲染调度入口收口，避免一次用户动作触发多轮全量渲染。
+
+### 10.5 非目标
+
+- 不通过降低 `questRecentCompletedMax`、隐藏行内详情、移除现有视图模式等方式掩盖问题。
+- 不用 `C_Timer.After(正数秒)` 等固定延时作为“等布局”或“避开超时”的主路径。
+- 不新增新的玩家入口、slash 命令或额外模块。
+
+### 10.6 影响文件
+
+- 修改：
+  - `Toolbox/Modules/Quest.lua`
+  - `Toolbox/Modules/Quest/QuestNavigation.lua`
+  - `Toolbox/Core/API/QuestlineProgress.lua`
+  - `docs/designs/quest-design.md`
+  - `docs/plans/quest-plan.md`
+  - `docs/tests/quest-test.md`
+  - `tests/logic/spec/quest_module_spec.lua`
+  - `tests/logic/spec/questline_progress_spec.lua`
+  - 如按钮池行为需要读取滚动信息，按最小范围调整 `tests/logic/harness/fake_frame.lua` / `harness.lua`
+
+### 10.7 验证重点
+
+- 首次打开 quest 主界面时，只出现一次完整渲染提交。
+- `active_log` 打开与切回时，不再依赖资料片导航模型。
+- Quest Log 与最近完成数据在同一轮渲染中不再对同一任务重复补详情。
+- 右侧 / 当前任务 / 最近完成三类滚动区的按钮数量与可见区相关，而不是与总行数线性增长。
+- 既有行内详情、跳转到对应地图 / 任务线、Quest Inspector 等行为保持不变。

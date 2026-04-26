@@ -154,3 +154,67 @@ describe("Toolbox.Config quest module migration", function()
     assert.is_nil(encounterDb.questlineTreeCollapsed)
   end)
 end)
+
+describe("Toolbox.Config tooltip_anchor rollback cleanup", function()
+  local originalToolbox = nil -- 原始 Toolbox 全局
+  local originalToolboxDB = nil -- 原始 ToolboxDB 全局
+  local originalCopyTable = nil -- 原始 CopyTable 全局
+
+  before_each(function()
+    originalToolbox = rawget(_G, "Toolbox")
+    originalToolboxDB = rawget(_G, "ToolboxDB")
+    originalCopyTable = rawget(_G, "CopyTable")
+
+    rawset(_G, "Toolbox", {
+      Config = {},
+    })
+    rawset(_G, "CopyTable", deepCopyTable)
+  end)
+
+  after_each(function()
+    rawset(_G, "Toolbox", originalToolbox)
+    rawset(_G, "ToolboxDB", originalToolboxDB)
+    rawset(_G, "CopyTable", originalCopyTable)
+  end)
+
+  it("new_tooltip_anchor_defaults_do_not_include_uber_tooltips_fields", function()
+    rawset(_G, "ToolboxDB", nil)
+
+    local configChunk = assert(loadfile("Toolbox/Core/Foundation/Config.lua")) -- Config chunk
+    configChunk()
+    Toolbox.Config.Init()
+
+    local tooltipDb = ToolboxDB.modules.tooltip_anchor -- tooltip_anchor 默认存档
+    assert.is_nil(tooltipDb.managedUberTooltipsActive)
+    assert.is_nil(tooltipDb.managedUberTooltipsOriginal)
+  end)
+
+  it("migration_clears_legacy_uber_tooltips_fields_from_tooltip_anchor", function()
+    rawset(_G, "ToolboxDB", {
+      version = 2,
+      global = {},
+      modules = {
+        tooltip_anchor = {
+          enabled = true,
+          debug = false,
+          mode = "cursor",
+          offsetX = 4,
+          offsetY = -9,
+          managedUberTooltipsActive = true,
+          managedUberTooltipsOriginal = "1",
+        },
+      },
+    })
+
+    local configChunk = assert(loadfile("Toolbox/Core/Foundation/Config.lua")) -- Config chunk
+    configChunk()
+    Toolbox.Config.Init()
+
+    local tooltipDb = ToolboxDB.modules.tooltip_anchor -- 迁移后的 tooltip_anchor 存档
+    assert.equals("cursor", tooltipDb.mode)
+    assert.equals(4, tooltipDb.offsetX)
+    assert.equals(-9, tooltipDb.offsetY)
+    assert.is_nil(tooltipDb.managedUberTooltipsActive)
+    assert.is_nil(tooltipDb.managedUberTooltipsOriginal)
+  end)
+end)

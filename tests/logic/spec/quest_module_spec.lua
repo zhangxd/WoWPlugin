@@ -322,6 +322,127 @@ describe("Quest module split", function()
     assert.is_false(hostFrame:IsShown())
   end)
 
+  it("open_main_frame_does_not_call_view_logic_outside_onshow", function()
+    harness:loadQuestModule()
+    installQuestDataStubs()
+
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local questView = questHooks:getView() -- 任务视图对象
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(questView)
+    assert.is_truthy(hostFrame)
+    assert.is_false(hostFrame:IsShown())
+
+    local originalShow = hostFrame.Show -- 原始显示函数
+    hostFrame.Show = function(frameObject)
+      frameObject._isShown = true
+    end
+
+    local originalSetSelected = questView.setSelected -- 原始选中切换函数
+    local selectionCallCount = 0 -- 选中切换调用次数
+    questView.setSelected = function(viewObject, ...)
+      selectionCallCount = selectionCallCount + 1
+      return originalSetSelected(viewObject, ...)
+    end
+    local originalRefresh = questView.refresh -- 原始刷新函数
+    local refreshCallCount = 0 -- 刷新调用次数
+    questView.refresh = function(viewObject, ...)
+      refreshCallCount = refreshCallCount + 1
+      return originalRefresh(viewObject, ...)
+    end
+
+    Toolbox.Quest.OpenMainFrame()
+    harness:runAllTimers()
+
+    assert.equals(0, selectionCallCount)
+    assert.equals(0, refreshCallCount)
+    assert.is_true(hostFrame:IsShown())
+    hostFrame.Show = originalShow
+  end)
+
+  it("active_log_refresh_skips_navigation_model_queries", function()
+    harness:loadQuestModule()
+    installQuestDataStubs()
+
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local questView = questHooks:getView() -- 任务视图对象
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(questView)
+    assert.is_truthy(hostFrame)
+
+    local navigationQueryCount = 0 -- 导航模型查询次数
+    Toolbox.Questlines.GetQuestNavigationModel = function()
+      navigationQueryCount = navigationQueryCount + 1
+      return buildQuestNavigationFixture(), nil
+    end
+
+    hostFrame:Show()
+    harness:runAllTimers()
+
+    navigationQueryCount = 0
+    questView.selectedModeKey = "active_log"
+    questView.selected = true
+    questView:ensureWidgets()
+    questView:render()
+
+    assert.equals(0, navigationQueryCount)
+  end)
+
+  it("active_log_current_panel_uses_fixed_row_button_pool", function()
+    harness:loadQuestModule()
+    local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
+    local questView = questHooks:getView() -- 任务视图对象
+    local hostFrame = questHooks:getHostFrame() -- quest 主界面
+    assert.is_truthy(questView)
+    assert.is_truthy(hostFrame)
+
+    local largeQuestEntryList = {} -- 大量当前任务列表
+    for questIndex = 1, 40 do
+      largeQuestEntryList[#largeQuestEntryList + 1] = {
+        questID = 83000 + questIndex,
+        name = "Current Quest #" .. tostring(questIndex),
+        questLineName = "Batch Questline",
+        status = questIndex % 3 == 0 and "ready" or "active",
+        readyForTurnIn = questIndex % 3 == 0,
+        typeID = 12,
+      }
+    end
+
+    Toolbox.Questlines.GetQuestNavigationModel = function()
+      return buildQuestNavigationFixture(), nil
+    end
+    Toolbox.Questlines.GetCurrentQuestLogEntries = function()
+      return largeQuestEntryList, nil
+    end
+    Toolbox.Questlines.GetQuestDetailByID = function(questID)
+      return {
+        questID = questID,
+        name = "Current Quest Detail",
+        questLineName = "Batch Questline",
+        questLineID = 9901,
+        UiMapID = 2371,
+        questLineExpansionID = 9,
+        typeID = 12,
+        typeLabel = "Campaign",
+      }, nil
+    end
+
+    questView:ensureWidgets()
+    questView.selectedModeKey = "active_log"
+    questView.selected = true
+    questView.activeLogRecentCollapsed = true
+    if questView.activeLogCurrentScrollFrame then
+      questView.activeLogCurrentScrollFrame:SetHeight(168)
+    end
+
+    hostFrame:Show()
+    harness:runAllTimers()
+    questView:render()
+
+    assert.is_true(#questView.activeLogCurrentRowButtons < #largeQuestEntryList)
+    assert.is_true(#questView.activeLogCurrentRowButtons <= 16)
+  end)
+
   it("active_log_uses_stacked_panels_and_registers_root_navigation_node", function()
     harness:loadQuestModule()
     local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook

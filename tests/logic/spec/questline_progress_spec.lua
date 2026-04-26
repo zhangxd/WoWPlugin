@@ -1075,4 +1075,44 @@ describe("QuestlineProgress mock data injection", function()
     assert.is_true(#snapshotObject.flatLines > 0)
     assert.is_true(string.find(table.concat(snapshotObject.flatLines, "\n"), "questLine.questLineName: Inspector QuestLine", 1, true) ~= nil)
   end)
+
+  it("quest_navigation_model_cache_survives_time_changes_without_data_changes", function()
+    local originalGetTime = rawget(_G, "GetTime") -- 原始 GetTime
+    local currentTime = 100 -- 当前时间
+    rawset(_G, "GetTime", function()
+      return currentTime
+    end)
+
+    local firstModel, firstError = Toolbox.Questlines.GetQuestNavigationModel()
+    assert.is_nil(firstError)
+    assert.is_truthy(type(firstModel) == "table")
+
+    currentTime = 101
+    local secondModel, secondError = Toolbox.Questlines.GetQuestNavigationModel()
+    assert.is_nil(secondError)
+    assert.is_true(firstModel == secondModel)
+
+    rawset(_G, "GetTime", originalGetTime)
+  end)
+
+  it("current_quest_log_entries_do_not_requery_detail_api_per_row", function()
+    local originalGetQuestDetailByID = Toolbox.Questlines.GetQuestDetailByID -- 原始详情 API
+    local detailQueryCount = 0 -- 详情查询次数
+    Toolbox.Questlines.GetQuestDetailByID = function(...)
+      detailQueryCount = detailQueryCount + 1
+      return originalGetQuestDetailByID(...)
+    end
+
+    questLogInfoList = {
+      { questID = 81002, title = "Quest #81002", isHeader = false, isHidden = false },
+      { questID = 81003, title = "Quest #81003", isHeader = false, isHidden = false },
+    }
+
+    local questEntryList, errorObject = Toolbox.Questlines.GetCurrentQuestLogEntries()
+    assert.is_nil(errorObject)
+    assert.equals(2, #questEntryList)
+    assert.equals(0, detailQueryCount)
+
+    Toolbox.Questlines.GetQuestDetailByID = originalGetQuestDetailByID
+  end)
 end)

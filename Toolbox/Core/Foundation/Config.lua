@@ -464,6 +464,12 @@ function Toolbox.Config.Init()
       minimapButtonDb.flyoutSlotIds[#minimapButtonDb.flyoutSlotIds + 1] = "tb_flyout_quest"
     end
   end
+
+  local tooltipAnchorDb = type(moduleStore.tooltip_anchor) == "table" and moduleStore.tooltip_anchor or nil -- tooltip 锚点存档
+  if type(tooltipAnchorDb) == "table" then
+    tooltipAnchorDb.managedUberTooltipsActive = nil
+    tooltipAnchorDb.managedUberTooltipsOriginal = nil
+  end
 end
 
 -- 返回 modules[moduleId] 表；若不存在则从 defaults 拷贝一份，保证字段齐全

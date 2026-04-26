@@ -313,6 +313,81 @@
 - 把 quest 行内展开详情里的“类型”从纯 `typeID` 收口为“类型名字（ID）”格式。
 - 继续复用现有类型映射与本地化口径，不引入新的类型数据源。
 
+## 15. 2026-04-26 渲染与缓存架构治理计划
+
+### 15.1 状态
+
+- 已确认
+- 可执行
+
+### 15.2 目标
+
+- 从架构上解决 `QuestNavigation.lua` 首次打开主界面时触发 `script ran too long` 的问题。
+- 保证 quest 打开链路、`active_log` 数据路径、`Toolbox.Questlines` 缓存策略和右侧滚动列表渲染模型一致收口。
+
+### 15.3 影响文件
+
+- 修改：
+  - `docs/designs/quest-design.md`
+  - `docs/plans/quest-plan.md`
+  - `docs/tests/quest-test.md`
+  - `tests/logic/spec/quest_module_spec.lua`
+  - `tests/logic/spec/questline_progress_spec.lua`
+  - `Toolbox/Modules/Quest.lua`
+  - `Toolbox/Modules/Quest/QuestNavigation.lua`
+  - `Toolbox/Core/API/QuestlineProgress.lua`
+  - 按测试需要最小调整 `tests/logic/harness/fake_frame.lua`
+  - 按测试需要最小调整 `tests/logic/harness/harness.lua`
+- 验证：
+  - `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/quest_module_spec.lua`
+  - `"%APPDATA%\\luarocks\\bin\\busted.cmd" tests/logic/spec/questline_progress_spec.lua`
+  - `python tests/run_all.py --ci`
+    说明：若共享数据契约检查仍被仓库既有 `instance_questlines` 头注释问题阻塞，需单独记录，不把它误判为本轮 quest 性能修复回归。
+
+### 15.4 已确认决策
+
+- 打开链路收口为“单入口、单次完整渲染”。
+  `Toolbox.Quest.OpenMainFrame()` 不再在 `Show()` 之后再次手动调用 `setSelected(true)` 与 `refresh()`；宿主 `OnShow` 作为唯一显示态激活入口。
+- `QuestNavigation` 的 `setSelected()` 改为幂等入口。
+  当选中状态未变化时，函数直接早退，不再重复触发 `updateVisibility()`。
+- `active_log` 走快路径。
+  `render()` 在 `active_log` 下不再调用资料片导航模型，而是直接构建当前任务 / 最近完成布局状态。
+- API 层缓存改为 revision 驱动。
+  导航模型、Quest Log 快照、任务详情缓存由显式 revision 或事件推进失效，不再以 `GetTime()` 整秒值作为主缓存键。
+- 列表渲染改为固定按钮池。
+  右侧主区、当前任务区、最近完成区只创建“可见行数 + 预留行数”范围内的按钮；滚动时复用按钮并更新数据绑定。
+- 视图层统一使用渲染调度入口。
+  搜索、点击任务、切模式、记录最近完成等入口统一改为请求渲染，而不是分散直接调用 `self:render()`。
+
+### 15.5 执行步骤
+
+- [x] 步骤 1：先把本轮已确认的架构修复决策写入 `quest` 设计 / 计划文档，并把状态保持为“可执行”。
+- [x] 步骤 2：在 `tests/logic/spec/quest_module_spec.lua` 先补失败测试，覆盖“打开主界面不重复 render”“`active_log` 不触发导航模型查询”“列表只初始化固定数量按钮池”。
+- [x] 步骤 3：在 `tests/logic/spec/questline_progress_spec.lua` 先补失败测试，覆盖“导航模型不再按秒失效”“当前任务列表不重复补详情”。
+- [x] 步骤 4：按测试需要扩展 harness / fake frame 的最小观测能力，用于读取渲染次数、滚动区高度和已创建按钮数量。
+- [x] 步骤 5：在 `Toolbox/Modules/Quest.lua` 收口打开链路，移除 `Show()` 之后的重复激活与刷新。
+- [x] 步骤 6：在 `Toolbox/Modules/Quest/QuestNavigation.lua` 引入渲染调度、`active_log` 快路径与固定按钮池渲染。
+- [x] 步骤 7：在 `Toolbox/Core/API/QuestlineProgress.lua` 重做导航模型 / Quest Log / 任务详情缓存失效策略，并让当前任务列表直接返回界面可渲染字段。
+- [x] 步骤 8：跑 quest 相关逻辑测试，确认新增用例先红后绿；再补跑共享自动化入口并把阻塞点写回 `docs/tests/quest-test.md`。
+
+### 15.7 执行结果
+
+- `Toolbox/Modules/Quest.lua` 已收口为“`OpenMainFrame()` 只负责 `Show()`，宿主 `OnShow` 作为唯一激活入口”。
+- `Toolbox/Modules/Quest/QuestNavigation.lua` 已实现 `active_log` 快路径、渲染调度与固定按钮池；当前任务 / 最近完成 / 主区任务线列表均不再按总行数线性建 Button。
+- `Toolbox/Core/API/QuestlineProgress.lua` 已把导航模型缓存从时间秒级失效收口为静态缓存，把 Quest Log / 任务详情收口为运行时 revision 驱动缓存，并让当前任务日志接口直接返回界面所需任务线字段。
+- `tests/logic/spec/quest_module_spec.lua`、`tests/logic/spec/questline_progress_spec.lua` 与 `python tests/run_all.py --ci` 均已通过。
+
+### 15.6 风险与控制
+
+- 风险：
+  `QuestNavigation.lua` 当前直接 `self:render()` 的入口很多，若只改其中一部分，会出现“首屏不超时了，但切模式 / 搜索 / 点击任务仍重复 render”的半修复。
+- 控制方式：
+  测试同时锁住三类触发源：打开主界面、切换 `active_log`、任务点击与搜索刷新，避免只修补打开链路。
+- 风险：
+  按钮池化若只做主区、不做当前任务和最近完成两块，会让 `active_log` 仍保留同类性能问题。
+- 控制方式：
+  固定按钮池抽成通用滚动区渲染能力，由三类列表统一接入。
+
 ### 14.3 影响文件
 
 - 修改：

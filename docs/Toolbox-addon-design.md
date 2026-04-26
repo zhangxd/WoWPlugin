@@ -22,7 +22,7 @@ Core（薄层）
 ├── 根命名空间（如 Toolbox）
 ├── Runtime / SavedVariables 加载 / 版本迁移
 ├── **Chat（领域对外 API）** — 默认聊天框输出、TOC 元数据读取；见 `Core/API/Chat.lua`
-├── **Tooltip（领域对外 API）** — `GameTooltip_SetDefaultAnchor` hook 与光标锚点；见 `Core/API/Tooltip.lua`
+├── **Tooltip（领域对外 API）** — `GameTooltip_SetDefaultAnchor` 默认锚点 hook 与 tooltip 鼠标附近显示策略；见 `Core/API/Tooltip.lua`
 ├── **EJ（领域对外 API）** — 冒险指南锁定、坐骑掉落与锁定摘要；见 `Core/API/EncounterJournal.lua`
 ├── **Questlines（领域对外 API）** — 任务线静态模型、任务线显示名解析与运行时任务字段；见 `Core/API/QuestlineProgress.lua`
 ├── ModuleRegistry（注册、排序、生命周期）
@@ -118,9 +118,9 @@ flowchart TB
 | 领域对外 API | 文件 | 职责 |
 |------|------|------|
 | `Toolbox.Chat` | `Core/API/Chat.lua` | 面向玩家的默认聊天框输出（`PrintAddonMessage`）、插件 TOC 元数据（`GetAddOnMetadata`）。**模块内禁止**直接调用 `DEFAULT_CHAT_FRAME:AddMessage`；新增聊天类能力须先扩展本 API。 |
-| `Toolbox.Tooltip` | `Core/API/Tooltip.lua` | `InstallDefaultAnchorHook()`、`RefreshDriver()`；读取 `modules.tooltip_anchor`。**模块 tooltip_anchor** 仅负责 `RegisterModule` 与设置 UI，不直接 `hooksecurefunc` GameTooltip。 |
+| `Toolbox.Tooltip` | `Core/API/Tooltip.lua` | `InstallDefaultAnchorHook()`、`RefreshDriver()`；读取 `modules.tooltip_anchor`。当前口径为恢复 WoWTools 式 `GameTooltip_SetDefaultAnchor` 全局 post-hook；`cursor` / `follow` 通过鼠标附近锚点接管系统 tooltip，`default` 或模块禁用时不覆写默认锚点。**模块 tooltip_anchor** 仅负责 `RegisterModule` 与设置 UI。 |
 | `Toolbox.EJ` | `Core/API/EncounterJournal.lua` | 冒险指南相关高层查询入口：当前页签语境、坐骑掉落集合、实例锁定、当前难度锁定、当前角色锁定摘要与 tooltip 行文本。锁定匹配优先走运行时 map 映射（`C_EncounterJournal.GetInstanceForGameMap` 与 `EJ_GetInstanceInfo` mapID 对齐），静态 `InstanceMapIDs` 仅作为单向兜底；当 SavedInstances 的 mapID 不可判定时按副本名兜底。业务模块禁止直接复制 `GetSavedInstanceInfo` / `EJ_*` 查询逻辑。 |
-| `Toolbox.Questlines` | `Core/API/QuestlineProgress.lua` | 任务线静态结构缓存、任务线显示名解析、运行时任务字段、任务导航模型、当前任务日志、任务详情、Quest Inspector 快照与任务线进度。`InstanceQuestlines` 当前使用 schema v7 主骨架（`quests / questLines / campaigns / expansions / expansionCampaigns`），并在任务/任务线节点保留运行时扩展字段（如 `QuestLineIDs / UiMapIDs / FactionTags / FactionConditions / RaceMaskValues / ClassMaskValues / ContentExpansionID`）；该文件正式导出入口为 `scripts/export/export_quest_achievement_merged_from_db.py`，`DataContracts/instance_questlines.json` 仅用于头注释追溯，不参与正式写盘链路。任务类型名称基线由 `Toolbox.Data.QuestTypeNames` 提供（契约 `quest_type_names`，来源 `questinfo`），类型名缺失时统一回退为“普通任务”（`EJ_QUEST_TYPE_DEFAULT`）。独立 `quest` 模块与 Quest Inspector 统一通过本 API 获取模型，而不是直接拼装静态数据。 |
+| `Toolbox.Questlines` | `Core/API/QuestlineProgress.lua` | 任务线静态结构缓存、任务线显示名解析、运行时任务字段、任务导航模型、当前任务日志、任务详情、Quest Inspector 快照与任务线进度。`InstanceQuestlines` 当前使用 schema v7 主骨架（`quests / questLines / campaigns / expansions / expansionCampaigns`），并在任务/任务线节点保留运行时扩展字段（如 `QuestLineIDs / UiMapIDs / FactionTags / FactionConditions / RaceMaskValues / ClassMaskValues / ContentExpansionID`）；该文件正式导出入口为 `scripts/export/export_quest_achievement_merged_from_db.py`，`DataContracts/instance_questlines.json` 仅用于头注释追溯，不参与正式写盘链路。任务类型名称基线由 `Toolbox.Data.QuestTypeNames` 提供（契约 `quest_type_names`，来源 `questinfo`），类型名缺失时统一回退为“普通任务”（`EJ_QUEST_TYPE_DEFAULT`）。当前运行时缓存按 revision / 数据变化失效，而不是按秒级时间键失效；`GetCurrentQuestLogEntries()` 直接返回界面渲染所需的任务线字段，避免界面层逐条再查公共详情 API。独立 `quest` 模块与 Quest Inspector 统一通过本 API 获取模型，而不是直接拼装静态数据。 |
 | `Toolbox.MinimapButton` | `Modules/MinimapButton.lua` | `RegisterFlyoutEntry(def)` 供其他模块向小地图按钮悬停菜单追加项；`def` 至少包含 `id` 与 `onClick`，可选 `titleKey`/`tooltipKey`/`icon`/`order`/`augmentTooltip`（用于在悬停提示中追加动态内容）。禁止直接操作 `flyoutRegistry` 或 `flyoutSlotIds`。 |
 
 **模块间协作原则**
@@ -172,7 +172,7 @@ sequenceDiagram
 | 小地图打开设置按钮 | `minimap_button` | `modules.minimap_button`（`enabled`/`debug`/`showMinimapButton`/`showCoordsOnMinimap`/`minimapCoordsAnchor`/`minimapPos`/`buttonShape`/`flyoutExpand`/`flyoutSlotIds`/`flyoutLauncherGap`/`flyoutPad`/`flyoutGap`） | 独立子页面：启用、调试、清理并重建、是否显示小地图按钮、坐标显示、恢复默认位置；款式（圆/方）、展开方式（纵向/横向）、悬停项顺序与功能池拖放、`flyoutSlotIds`；内置“冒险手册”飞出项会打开冒险指南，并在 tooltip 里追加当前副本锁定摘要。 |
 | 加载聊天提示 | `chat_notify` | `modules.chat_notify`（`enabled`/`debug`） | 独立子页面：启用、调试、清理并重建、说明文案 |
 | 冒险指南增强 | `encounter_journal` | `modules.encounter_journal`（`enabled`/`debug`/`mountFilterEnabled`/`lockoutOverlayEnabled`/`detailMountOnlyEnabled`）+ `Toolbox.Data.MountDrops` + `Toolbox.Data.InstanceMapIDs` + `Toolbox.EJ` | 覆盖副本列表“仅坐骑”、列表锁定叠加、悬停锁定详情、详情页“仅坐骑”、详情页重置标签，以及 `EJMicroButton` / 小地图“冒险手册” tooltip 锁定摘要。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
-| 独立任务浏览 | `quest` | `modules.quest`（`enabled`/`debug`/`questlineTreeEnabled`/`questNavExpansionID`/`questNavModeKey`/`questNavSelectedMapID`/`questNavSelectedTypeKey`/`questNavSearchText`/`questNavSkinPreset`/`questInspectorLastQuestID`/`questRecentCompletedList`/`questRecentCompletedMax`/`questNavExpandedQuestLineID`/`questlineTreeCollapsed`）+ `Toolbox.Data.InstanceQuestlines`（正式入口 `export_quest_achievement_merged_from_db.py`）+ `Toolbox.Data.QuestTypeNames`（`quest_type_names` 契约导出）+ `Toolbox.Questlines` | 覆盖独立任务界面、底部 `active_log` / `map_questline` 双视图、左上角通用导航路径、节点驱动的任务线左树、任务搜索、最近完成、任务 tooltip / 详情弹框 / 聊天调试输出，以及 Quest Inspector 设置子页面。详见 [designs/quest-design.md](./designs/quest-design.md)。 |
+| 独立任务浏览 | `quest` | `modules.quest`（`enabled`/`debug`/`questlineTreeEnabled`/`questNavExpansionID`/`questNavModeKey`/`questNavSelectedMapID`/`questNavSelectedTypeKey`/`questNavSearchText`/`questNavSkinPreset`/`questInspectorLastQuestID`/`questRecentCompletedList`/`questRecentCompletedMax`/`questNavExpandedQuestLineID`/`questlineTreeCollapsed`）+ `Toolbox.Data.InstanceQuestlines`（正式入口 `export_quest_achievement_merged_from_db.py`）+ `Toolbox.Data.QuestTypeNames`（`quest_type_names` 契约导出）+ `Toolbox.Questlines` | 覆盖独立任务界面、底部 `active_log` / `map_questline` 双视图、左上角通用导航路径、节点驱动的任务线左树、任务搜索、最近完成、列表内展开详情与 Quest Inspector 设置子页面。`active_log` 打开链路已收口为当前任务快路径；主区、当前任务区与最近完成区统一采用固定按钮池渲染，避免按总行数线性建控件。详见 [designs/quest-design.md](./designs/quest-design.md)。 |
 | （核心不提供业务数据） | — | `global` 其余键 | 调试、开发者选项可放 `global` |
 
 新增功能时：**新增一行 + 新文件 + TOC 一条**，不必改核心契约。
@@ -298,10 +298,10 @@ ToolboxDB = {
 
 | 项 | 说明 |
 |----|------|
-| **目标** | 调整 `GameTooltip` / `ItemRefTooltip` 相对鼠标的显示方式（贴近光标、显示期间跟随；锚在光标右下等）。 |
-| **领域对外 API** | `Core/Tooltip.lua`：`InstallDefaultAnchorHook()`（`hooksecurefunc("GameTooltip_SetDefaultAnchor", ...)`）、`RefreshDriver()`（跟随用 `OnUpdate`）。**勿在 OnUpdate 里 `SetOwner`**，否则会清空提示文字。 |
+| **目标** | 调整系统 tooltip 的鼠标附近显示策略，并通过全局默认锚点 hook 恢复 WoWTools 式行为。 |
+| **领域对外 API** | `Core/Tooltip.lua`：`InstallDefaultAnchorHook()` 负责注册一次 `GameTooltip_SetDefaultAnchor` 全局 post-hook；`RefreshDriver()` 负责根据 `modules.tooltip_anchor.mode` 刷新接管策略。当前口径下，`cursor` / `follow` 都使用鼠标附近锚点，`default` 或模块禁用时不覆写默认锚点。 |
 | **模块** | `tooltip_anchor`：设置 UI 与存档键；调用 `Toolbox.Tooltip` 的 `InstallDefaultAnchorHook` / `RefreshDriver`。 |
-| **注意** | `UIParent:GetEffectiveScale()`；与暴雪「界面·鼠标」类选项可能叠加。 |
+| **注意** | 本轮按用户确认，正式服 12.0 secret values 下可能重新引入 `MoneyFrame`、`UIWidget` 等系统 tooltip 的 taint 风险；该风险已被明确接受，不作为本轮回退失败标准。旧 `UberTooltips` 托管方案不再保留为并行驱动。 |
 
 ### 5.5 聊天（Chat）领域对外 API 与加载提示（chat_notify）
 
@@ -414,3 +414,5 @@ ToolboxDB = {
 | 2026-04-20 | 任务视图资料片显示口径更新：资料片版本编号在任务界面按 1-based 渲染（经典旧世=1），底层 `ExpansionID` 保持原始值 |
 | 2026-04-21 | `Toolbox.EJ` 锁定映射口径更新：`GetSavedInstanceInfo` 的 mapID 与运行时映射优先对齐（`C_EncounterJournal.GetInstanceForGameMap` / `EJ_GetInstanceInfo`），`InstanceMapIDs` 改为单向兜底；mapID 不可判定时按副本名兜底；详情页重置标签在当前难度未命中时回退显示可用锁定 |
 | 2026-04-22 | `instance_questlines` 正式导出入口收口为 `export_quest_achievement_merged_from_db.py`；`one/all` 命中该目标时转正式脚本，`DataContracts/instance_questlines.json` 不再参与正式写盘；运行时结构升级为 schema v7，新增 `campaigns / expansionCampaigns` 用于“资料片 → 战役 → 任务线”导航 |
+| 2026-04-26 | `tooltip_anchor` 对齐 Retail 12.0 secret values：默认锚点 hook 在 `IsPreventingSecretValues()` / `HasSecretValues()` / `IsAnchoringSecret()` 命中时跳过二次接管，避免含金币等 secret 数值的 tooltip 触发 taint 报错 |
+| 2026-04-27 | `tooltip_anchor` 主方案按用户确认回退：放弃 `UberTooltips` 托管，恢复 WoWTools 式 `GameTooltip_SetDefaultAnchor` 全局 post-hook；正式服 12.0 taint 风险接受，且不保留旧方案残留 |

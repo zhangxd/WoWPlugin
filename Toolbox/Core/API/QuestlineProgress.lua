@@ -18,6 +18,13 @@ local runtimeStateCache = { -- 任务运行时字段缓存
   runtimeKey = nil,
   byQuestID = {},
 }
+local questLogEntryCache = { -- 当前任务日志条目缓存
+  dataRef = nil,
+  generatedAt = nil,
+  runtimeKey = nil,
+  questEntryList = nil,
+  errorObject = nil,
+}
 local typeIndexCache = { -- 类型索引缓存
   dataRef = nil,
   generatedAt = nil,
@@ -28,7 +35,6 @@ local typeIndexCache = { -- 类型索引缓存
 local navigationModelCache = { -- 资料片导航模型缓存
   dataRef = nil,
   generatedAt = nil,
-  runtimeKey = nil,
   model = nil,
   errorObject = nil,
 }
@@ -43,7 +49,15 @@ local questLineNameCache = { -- 任务线显示名缓存
   runtimeKey = nil,
   byQuestLineID = {},
 }
+local questDetailCache = { -- 任务详情缓存
+  dataRef = nil,
+  generatedAt = nil,
+  runtimeKey = nil,
+  byContextKey = {},
+}
 local dataOverrideTable = nil -- 测试框架注入的数据源（nil 表示使用 live 数据）
+local runtimeRevision = 0 -- 运行时缓存修订号
+local runtimeEventFrame = nil -- 运行时事件监听框体
 
 local getLogIndexForQuestID = C_QuestLog and C_QuestLog.GetLogIndexForQuestID or GetQuestLogIndexByID -- 任务日志索引查询函数
 local isQuestCompletedFn = C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted or IsQuestFlaggedCompleted -- 任务完成状态函数
@@ -122,6 +136,13 @@ local function resetRuntimeCache()
     runtimeKey = nil,
     byQuestID = {},
   }
+  questLogEntryCache = {
+    dataRef = nil,
+    generatedAt = nil,
+    runtimeKey = nil,
+    questEntryList = nil,
+    errorObject = nil,
+  }
   typeIndexCache = {
     dataRef = nil,
     generatedAt = nil,
@@ -132,7 +153,6 @@ local function resetRuntimeCache()
   navigationModelCache = {
     dataRef = nil,
     generatedAt = nil,
-    runtimeKey = nil,
     model = nil,
     errorObject = nil,
   }
@@ -147,6 +167,61 @@ local function resetRuntimeCache()
     runtimeKey = nil,
     byQuestLineID = {},
   }
+  questDetailCache = {
+    dataRef = nil,
+    generatedAt = nil,
+    runtimeKey = nil,
+    byContextKey = {},
+  }
+end
+
+--- 仅失效依赖运行时任务状态的缓存，不清空静态结构模型。
+local function invalidateRuntimeDerivedCaches()
+  runtimeRevision = runtimeRevision + 1
+  runtimeStateCache.runtimeKey = nil
+  runtimeStateCache.byQuestID = {}
+  questLogEntryCache.runtimeKey = nil
+  questLogEntryCache.questEntryList = nil
+  questLogEntryCache.errorObject = nil
+  typeIndexCache.runtimeKey = nil
+  typeIndexCache.model = nil
+  typeIndexCache.errorObject = nil
+  progressCache.runtimeKey = nil
+  progressCache.mapByID = {}
+  progressCache.questLineByID = {}
+  questLineNameCache.runtimeKey = nil
+  questLineNameCache.byQuestLineID = {}
+  questDetailCache.runtimeKey = nil
+  questDetailCache.byContextKey = {}
+end
+
+--- 暴露运行时缓存失效入口，供模块事件与测试复用。
+---@param reasonText string|nil
+function Toolbox.Questlines.InvalidateRuntimeCaches(reasonText)
+  local _ = reasonText -- 预留调试原因文本
+  invalidateRuntimeDerivedCaches()
+end
+
+--- 确保运行时事件监听已注册。
+local function ensureRuntimeEventFrame()
+  if runtimeEventFrame ~= nil or type(CreateFrame) ~= "function" then
+    return
+  end
+  runtimeEventFrame = CreateFrame("Frame", "ToolboxQuestRuntimeEventFrame", UIParent)
+  if not runtimeEventFrame or type(runtimeEventFrame.RegisterEvent) ~= "function" then
+    return
+  end
+  runtimeEventFrame:RegisterEvent("QUEST_LOG_UPDATE")
+  runtimeEventFrame:RegisterEvent("QUEST_TURNED_IN")
+  runtimeEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+  runtimeEventFrame:SetScript("OnEvent", function(_, eventName)
+    if eventName == "QUEST_LOG_UPDATE"
+      or eventName == "QUEST_TURNED_IN"
+      or eventName == "PLAYER_ENTERING_WORLD"
+    then
+      invalidateRuntimeDerivedCaches()
+    end
+  end)
 end
 
 --- 构建校验错误对象。
@@ -795,13 +870,8 @@ end
 --- 获取运行时缓存键，避免动态字段永久缓存。
 ---@return number
 local function getRuntimeCacheKey()
-  if type(GetTime) == "function" then
-    local success, currentTime = pcall(GetTime) -- 当前运行时秒数
-    if success and type(currentTime) == "number" then
-      return math.floor(currentTime)
-    end
-  end
-  return 0
+  ensureRuntimeEventFrame()
+  return runtimeRevision
 end
 
 --- 按当前运行时窗口读取任务运行时字段缓存。
@@ -2343,7 +2413,6 @@ end
 ---@return table|nil errorObject
 function Toolbox.Questlines.GetQuestNavigationModel()
   local dataTable = getQuestlineDataTable() -- 根数据表
-  local runtimeKey = getRuntimeCacheKey() -- 当前运行时缓存键
   if type(dataTable) ~= "table" then
     return {
       expansionList = {},
@@ -2353,7 +2422,6 @@ function Toolbox.Questlines.GetQuestNavigationModel()
 
   if navigationModelCache.dataRef == dataTable
     and navigationModelCache.generatedAt == dataTable.generatedAt
-    and navigationModelCache.runtimeKey == runtimeKey
     and (navigationModelCache.model ~= nil or navigationModelCache.errorObject ~= nil)
   then
     return navigationModelCache.model, navigationModelCache.errorObject
@@ -2362,7 +2430,6 @@ function Toolbox.Questlines.GetQuestNavigationModel()
   local navigationModel, errorObject = buildQuestNavigationModel() -- 最新导航模型
   navigationModelCache.dataRef = dataTable
   navigationModelCache.generatedAt = dataTable.generatedAt
-  navigationModelCache.runtimeKey = runtimeKey
   navigationModelCache.model = navigationModel
   navigationModelCache.errorObject = errorObject
   return navigationModel, errorObject
@@ -2581,16 +2648,69 @@ function Toolbox.Questlines.GetQuestListByQuestLineID(questLineID)
   return buildQuestListByQuestIDs(dataTable, questLineEntry.questIDs or {}), nil
 end
 
+--- 解析当前任务日志行所需的任务线展示字段，避免逐条回调公共详情 API。
+---@param dataTable table
+---@param model table
+---@param questID number
+---@return number|nil
+---@return string|nil
+---@return number|nil
+---@return number|nil
+local function resolveQuestLogQuestlineFields(dataTable, model, questID)
+  local questRecord = type(dataTable) == "table" and dataTable.quests and dataTable.quests[questID] or nil -- 任务静态记录
+  if type(questRecord) ~= "table" or not isQuestAllowedForPlayer(questRecord) then
+    return nil, nil, nil, nil
+  end
+
+  local questLineID, questLineEntry = resolveQuestLineContext(model, questRecord, questID, nil) -- 当前任务线上下文
+  local questLineName = nil -- 当前任务线显示名
+  if type(questLineID) == "number" then
+    local displayName, displayError = Toolbox.Questlines.GetQuestLineDisplayName(questLineID) -- 任务线显示名
+    if not displayError and type(displayName) == "string" and displayName ~= "" then
+      questLineName = displayName
+    end
+  end
+  if questLineName == nil and type(questLineEntry) == "table" then
+    questLineName = type(questLineEntry.name) == "string" and questLineEntry.name or nil
+  end
+
+  local uiMapID = type(questRecord.UiMapID) == "number" and questRecord.UiMapID
+    or type(questLineEntry) == "table" and questLineEntry.UiMapID
+    or nil -- 当前任务归属地图 ID
+  local expansionID = type(questLineEntry) == "table" and questLineEntry.ExpansionID or nil -- 当前任务归属资料片 ID
+  return questLineID, questLineName, uiMapID, expansionID
+end
+
 --- 枚举当前 Quest Log 中的任务条目。
 ---@return table[] questEntryList
 ---@return table|nil errorObject
 function Toolbox.Questlines.GetCurrentQuestLogEntries()
+  local dataTable = getQuestlineDataTable() -- 根数据表
+  local model, errorObject = Toolbox.Questlines.GetQuestTabModel() -- 任务页签模型
+  local generatedAt = type(dataTable) == "table" and dataTable.generatedAt or nil -- 当前数据生成时间
+  if errorObject then
+    return {}, errorObject
+  end
   if type(getNumQuestLogEntriesFn) ~= "function" or type(getQuestLogInfoFn) ~= "function" then
     return {}, nil
   end
 
+  local runtimeKey = getRuntimeCacheKey() -- 当前运行时缓存键
+  if questLogEntryCache.dataRef == dataTable
+    and questLogEntryCache.generatedAt == generatedAt
+    and questLogEntryCache.runtimeKey == runtimeKey
+    and (questLogEntryCache.questEntryList ~= nil or questLogEntryCache.errorObject ~= nil)
+  then
+    return questLogEntryCache.questEntryList or {}, questLogEntryCache.errorObject
+  end
+
   local countSuccess, numShownEntries = pcall(getNumQuestLogEntriesFn) -- Quest Log 可枚举条目数
   if not countSuccess or type(numShownEntries) ~= "number" or numShownEntries <= 0 then
+    questLogEntryCache.dataRef = dataTable
+    questLogEntryCache.generatedAt = generatedAt
+    questLogEntryCache.runtimeKey = runtimeKey
+    questLogEntryCache.questEntryList = {}
+    questLogEntryCache.errorObject = nil
     return {}, nil
   end
 
@@ -2603,12 +2723,7 @@ function Toolbox.Questlines.GetCurrentQuestLogEntries()
       seenQuestSet[questID] = true
 
       local runtimeState = getCachedQuestRuntimeState(questID) -- 当前任务运行时字段
-      local detailObject = nil -- 当前任务详情对象
-      local detailError = nil -- 当前任务详情错误
-      detailObject, detailError = Toolbox.Questlines.GetQuestDetailByID(questID)
-      if detailError then
-        detailObject = nil
-      end
+      local questLineID, questLineName, uiMapID, expansionID = resolveQuestLogQuestlineFields(dataTable, model, questID) -- 当前任务线展示字段
 
       questEntryList[#questEntryList + 1] = {
         questID = questID,
@@ -2616,13 +2731,19 @@ function Toolbox.Questlines.GetCurrentQuestLogEntries()
         status = runtimeState.status,
         readyForTurnIn = runtimeState.readyForTurnIn,
         typeID = runtimeState.typeID,
-        questLineID = type(detailObject) == "table" and detailObject.questLineID or nil,
-        questLineName = type(detailObject) == "table" and detailObject.questLineName or nil,
-        UiMapID = type(detailObject) == "table" and detailObject.UiMapID or nil,
+        questLineID = questLineID,
+        questLineName = questLineName,
+        UiMapID = uiMapID,
+        questLineExpansionID = expansionID,
       }
     end
   end
 
+  questLogEntryCache.dataRef = dataTable
+  questLogEntryCache.generatedAt = generatedAt
+  questLogEntryCache.runtimeKey = runtimeKey
+  questLogEntryCache.questEntryList = questEntryList
+  questLogEntryCache.errorObject = nil
   return questEntryList, nil
 end
 
@@ -2847,6 +2968,39 @@ function Toolbox.Questlines.GetQuestTypeIndex()
   return typeIndexModel, nil
 end
 
+--- 构建任务详情缓存键，区分 questID 与可选上下文。
+---@param questID number
+---@param contextOptions table|nil
+---@return string
+local function buildQuestDetailCacheKey(questID, contextOptions)
+  local questLineID = type(contextOptions) == "table" and contextOptions.questLineID or nil -- 上下文任务线 ID
+  local expansionID = type(contextOptions) == "table" and contextOptions.expansionID or nil -- 上下文资料片 ID
+  local mapID = type(contextOptions) == "table" and contextOptions.mapID or nil -- 上下文地图 ID
+  return table.concat({
+    tostring(questID or ""),
+    tostring(questLineID or ""),
+    tostring(expansionID or ""),
+    tostring(mapID or ""),
+  }, ":")
+end
+
+--- 获取当前任务详情缓存桶。
+---@param dataTable table|nil
+---@return table
+local function getQuestDetailCacheBucket(dataTable)
+  local runtimeKey = getRuntimeCacheKey() -- 当前运行时缓存键
+  if questDetailCache.dataRef ~= dataTable
+    or questDetailCache.generatedAt ~= (type(dataTable) == "table" and dataTable.generatedAt or nil)
+    or questDetailCache.runtimeKey ~= runtimeKey
+  then
+    questDetailCache.dataRef = dataTable
+    questDetailCache.generatedAt = type(dataTable) == "table" and dataTable.generatedAt or nil
+    questDetailCache.runtimeKey = runtimeKey
+    questDetailCache.byContextKey = {}
+  end
+  return questDetailCache.byContextKey
+end
+
 --- 按任务 ID 获取任务详情。
 ---@param questID number
 ---@param contextOptions table|nil 任务线上下文（可选）
@@ -2863,11 +3017,21 @@ function Toolbox.Questlines.GetQuestDetailByID(questID, contextOptions)
     return nil, nil
   end
 
+  local cacheBucket = getQuestDetailCacheBucket(dataTable) -- 任务详情缓存桶
+  local cacheKey = buildQuestDetailCacheKey(questID, contextOptions) -- 当前缓存键
+  local cachedDetailObject = cacheBucket[cacheKey] -- 已缓存任务详情
+  if cachedDetailObject ~= nil then
+    if cachedDetailObject == false then
+      return nil, nil
+    end
+    return cachedDetailObject, nil
+  end
+
   local questRecord = dataTable.quests and dataTable.quests[questID] or nil -- 任务静态记录
   local runtimeState = getCachedQuestRuntimeState(questID) -- 任务运行时字段
   if type(questRecord) ~= "table" or not isQuestAllowedForPlayer(questRecord) then
     if isQuestCurrentlyInLog(questID) then
-      return {
+      local detailObject = {
         questID = questID,
         name = runtimeState.name,
         status = runtimeState.status,
@@ -2882,8 +3046,11 @@ function Toolbox.Questlines.GetQuestDetailByID(questID, contextOptions)
         questLineName = nil,
         questLineExpansionID = nil,
         runtime = runtimeState,
-      }, nil
+      }
+      cacheBucket[cacheKey] = detailObject
+      return detailObject, nil
     end
+    cacheBucket[cacheKey] = false
     return nil, nil
   end
 
@@ -2902,7 +3069,7 @@ function Toolbox.Questlines.GetQuestDetailByID(questID, contextOptions)
     resolvedQuestLineName = type(questLineEntry.name) == "string" and questLineEntry.name or nil
   end
 
-  return {
+  local detailObject = {
     questID = questID,
     name = runtimeState.name,
     status = runtimeState.status,
@@ -2917,7 +3084,9 @@ function Toolbox.Questlines.GetQuestDetailByID(questID, contextOptions)
     questLineName = resolvedQuestLineName,
     questLineExpansionID = type(questLineEntry) == "table" and questLineEntry.ExpansionID or nil,
     runtime = runtimeState,
-  }, nil
+  }
+  cacheBucket[cacheKey] = detailObject
+  return detailObject, nil
 end
 
 --- 构建任务详情调试快照，供异步输出使用。

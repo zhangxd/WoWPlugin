@@ -1,15 +1,15 @@
 --[[
-  提示框（领域对外 API）（Toolbox.Tooltip）：GameTooltip_SetDefaultAnchor 的 hook 与光标锚点逻辑。
+  提示框（领域对外 API）（Toolbox.Tooltip）：统一管理默认 tooltip 锚点接管。
   配置读取 modules.tooltip_anchor；业务模块 tooltip_anchor 仅负责 RegisterModule 与设置 UI。
-  使用 ANCHOR_CURSOR_RIGHT 让 Blizzard 原生处理光标跟随与边界检测，避免手动定位导致的闪烁问题。
+  当前实现恢复 WoWTools 式 GameTooltip_SetDefaultAnchor 全局 post-hook。
 ]]
 
 Toolbox.Tooltip = Toolbox.Tooltip or {}
 
 local MODULE_ID = "tooltip_anchor"
 
-local hooked
 local anchorOverrideSkipState = setmetatable({}, { __mode = "k" }) -- tooltip 私有跳过标记表
+local defaultAnchorHookInstalled = false -- 默认锚点 hook 是否已安装
 
 local function getDb()
   Toolbox_NamespaceEnsure()
@@ -29,16 +29,49 @@ local function debugPrint(message)
   end
 end
 
--- 空函数，保持接口兼容
-function Toolbox.Tooltip.RefreshDriver()
-  local db = getDb()
-  local L = Toolbox.L or {}
+local function shouldOverrideDefaultAnchor(tooltip)
+  local db = getDb() -- tooltip 模块存档
+  local mode = db.mode -- 当前锚点模式
   if db.enabled == false then
-    debugPrint(L.TOOLTIP_DEBUG_DRIVER_OFF or "")
-  else
-    local mode = db.mode or "default"
-    debugPrint(string.format(L.TOOLTIP_DEBUG_DRIVER_ON_FMT or "模式: %s", tostring(mode), "0", "0"))
+    return false
   end
+  if mode ~= "cursor" and mode ~= "follow" then
+    return false
+  end
+  if Toolbox.Tooltip.ShouldSkipAnchorOverride(tooltip) then
+    return false
+  end
+  return true
+end
+
+local function applyCursorAnchorOverride(tooltip, ownerFrame)
+  if type(tooltip) ~= "table" or type(tooltip.SetOwner) ~= "function" then
+    return
+  end
+
+  local db = getDb() -- tooltip 模块存档
+  local offsetX = tonumber(db.offsetX) or 0 -- X 偏移
+  local offsetY = tonumber(db.offsetY) or 0 -- Y 偏移
+
+  if type(tooltip.ClearAllPoints) == "function" then
+    tooltip:ClearAllPoints()
+  end
+  tooltip:SetOwner(ownerFrame, "ANCHOR_CURSOR_LEFT", offsetX, offsetY)
+end
+
+function Toolbox.Tooltip.RefreshDriver()
+  local db = getDb() -- tooltip 模块存档
+  if db.enabled == false or db.mode == "default" then
+    debugPrint((Toolbox.L or {}).TOOLTIP_DEBUG_DRIVER_OFF or "")
+    return
+  end
+
+  debugPrint(string.format(
+    ((Toolbox.L or {}).TOOLTIP_DEBUG_DRIVER_ON_FMT or "mode=%s offsetX=%s offsetY=%s"),
+    tostring(db.mode or "default"),
+    tostring(db.offsetX or 0),
+    tostring(db.offsetY or 0)
+  ))
 end
 
 --- 设置是否跳过默认锚点接管。
@@ -62,34 +95,17 @@ function Toolbox.Tooltip.ShouldSkipAnchorOverride(tooltip)
   return type(tooltip) == "table" and anchorOverrideSkipState[tooltip] == true or false
 end
 
--- 仅调用一次：hooksecurefunc 注册 GameTooltip_SetDefaultAnchor
 function Toolbox.Tooltip.InstallDefaultAnchorHook()
-  if hooked then
+  if defaultAnchorHookInstalled then
     return
   end
-  hooked = true
-  hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tooltip, parent)
-    local db = getDb()
-    if not db or db.enabled == false or (db.mode ~= "cursor" and db.mode ~= "follow") then
-      return
-    end
-    if not tooltip or not parent then
-      return
-    end
-    -- 跳过标记为不接管的 tooltip（如 EJMountFilter 复选框，避免 ANCHOR_RIGHT 被覆盖）
-    if Toolbox.Tooltip.ShouldSkipAnchorOverride(tooltip) then
-      debugPrint("[SetDefaultAnchor] skip (marked)")
-      return
-    end
-    -- 跳过受保护的提示框
-    if tooltip.IsPreventingSecretValues and tooltip:IsPreventingSecretValues() then
-      debugPrint("[SetDefaultAnchor] skip (secret values)")
-      return
-    end
 
-    -- 使用 ANCHOR_CURSOR_RIGHT 让提示框显示在光标右下角
-    tooltip:ClearAllPoints()
-    tooltip:SetOwner(parent, "ANCHOR_CURSOR_RIGHT")
-    debugPrint("[SetDefaultAnchor] ANCHOR_CURSOR_RIGHT")
+  hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tooltip, ownerFrame)
+    if not shouldOverrideDefaultAnchor(tooltip) then
+      return
+    end
+    applyCursorAnchorOverride(tooltip, ownerFrame)
   end)
+
+  defaultAnchorHookInstalled = true
 end
