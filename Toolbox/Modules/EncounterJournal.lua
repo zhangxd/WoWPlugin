@@ -14,6 +14,7 @@ local scrollBoxCache = Internal.scrollBoxCache
 local MountFilter = Internal.MountFilter
 local DetailEnhancer = Internal.DetailEnhancer
 local LockoutOverlay = Internal.LockoutOverlay
+local ListNavigationPin = Internal.ListNavigationPin
 
 local function getModuleDb()
   return Internal.GetModuleDb()
@@ -31,10 +32,12 @@ local function refreshAll()
   MountFilter = Internal.MountFilter
   DetailEnhancer = Internal.DetailEnhancer
   LockoutOverlay = Internal.LockoutOverlay
+  ListNavigationPin = Internal.ListNavigationPin
   MountFilter:createUI()
   DetailEnhancer:refresh()
   MountFilter:updateVisibility()
   MountFilter:applyFilter()
+  ListNavigationPin:updateFrames()
   LockoutOverlay:updateFrames()
   LockoutOverlay:hookTooltips()
 end
@@ -441,6 +444,7 @@ Toolbox.RegisterModule({
     setLockoutUpdateEventEnabled(true)
     DetailEnhancer:refresh()
     MountFilter:syncCheckbox()
+    ListNavigationPin:updateFrames()
     if type(_G.EncounterJournal_ListInstances) == "function" then
       pcall(_G.EncounterJournal_ListInstances)
     end
@@ -457,6 +461,7 @@ Toolbox.RegisterModule({
     else
       RefreshScheduler:cancel()
       LockoutOverlay:clearAllFrames()
+      ListNavigationPin:clearAllFrames()
     end
     MountFilter:syncCheckbox()
     if type(_G.EncounterJournal_ListInstances) == "function" then
@@ -468,6 +473,7 @@ Toolbox.RegisterModule({
     Toolbox.Config.ResetModule(MODULE_ID)
     DetailEnhancer:refresh()
     MountFilter:syncCheckbox()
+    ListNavigationPin:updateFrames()
     if type(_G.EncounterJournal_ListInstances) == "function" then
       pcall(_G.EncounterJournal_ListInstances)
     end

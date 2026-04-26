@@ -39,6 +39,9 @@ local MountFilter = {
   label = nil,
 }
 
+local ListNavigationPin = {}
+local PIN_BUTTON_KEY = "_ToolboxEntrancePinButton"
+
 --- 检查是否应显示坐骑筛选 UI
 ---@return boolean
 local function shouldShowMountFilterUI()
@@ -172,6 +175,143 @@ function MountFilter:applyFilter()
       pcall(function() dataProv:Remove(elementData) end)
     end
   end
+end
+
+--- 创建副本列表行右下角的入口导航图钉。
+---@param rowFrame table 副本列表行
+---@return table button 图钉按钮
+function ListNavigationPin:createButton(rowFrame)
+  local button = rowFrame[PIN_BUTTON_KEY] -- 复用列表行上的图钉按钮
+  if button then
+    return button
+  end
+
+  local loc = Toolbox.L or {} -- 本地化文案
+  button = CreateFrame("Button", nil, rowFrame)
+  button:SetSize(24, 24)
+  button:SetPoint("BOTTOMRIGHT", rowFrame, "BOTTOMRIGHT", -6, 4)
+  if button.SetMotionScriptsWhileDisabled then
+    button:SetMotionScriptsWhileDisabled(true)
+  end
+
+  local iconTexture = button:CreateTexture(nil, "ARTWORK") -- 地图标记图标
+  iconTexture:SetSize(22, 22)
+  iconTexture:SetPoint("CENTER", button, "CENTER", 0, 0)
+  if iconTexture.SetAtlas then
+    iconTexture:SetAtlas("Waypoint-MapPin-ChatIcon", true)
+  else
+    iconTexture:SetTexture("Interface\\MINIMAP\\POIIcons")
+    iconTexture:SetTexCoord(0.125, 0.25, 0.125, 0.25)
+  end
+  button._ToolboxEntrancePinIcon = iconTexture
+
+  local highlightTexture = button:CreateTexture(nil, "HIGHLIGHT") -- 悬停高亮
+  highlightTexture:SetPoint("TOPLEFT", button, "TOPLEFT", 2, -2)
+  highlightTexture:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 2)
+  highlightTexture:SetColorTexture(1, 0.82, 0.1, 0.22)
+  if highlightTexture.SetBlendMode then
+    highlightTexture:SetBlendMode("ADD")
+  end
+  button._ToolboxEntrancePinHighlight = highlightTexture
+
+  button:SetScript("OnClick", function(buttonFrame)
+    local journalInstanceID = buttonFrame._ToolboxJournalInstanceID -- 当前列表行副本 ID
+    if type(journalInstanceID) ~= "number" then
+      Toolbox.Chat.PrintAddonMessage(loc.EJ_ENTRANCE_NAV_UNAVAILABLE or "未找到该副本的入口位置。")
+      return
+    end
+    if not Toolbox.EJ or type(Toolbox.EJ.NavigateToDungeonEntrance) ~= "function" then
+      Toolbox.Chat.PrintAddonMessage(loc.EJ_ENTRANCE_NAV_UNAVAILABLE or "未找到该副本的入口位置。")
+      return
+    end
+
+    local navigateSuccess, navigateResult = Toolbox.EJ.NavigateToDungeonEntrance(journalInstanceID)
+    if navigateSuccess == true then
+      local entranceName = type(navigateResult) == "table" and navigateResult.name or nil -- 入口名称
+      Toolbox.Chat.PrintAddonMessage(string.format(
+        loc.EJ_ENTRANCE_NAV_NOTIFY_FMT or "已导航到：%s",
+        tostring(entranceName or loc.EJ_ENTRANCE_NAV_FALLBACK_NAME or "副本入口")
+      ))
+      return
+    end
+
+    Toolbox.Chat.PrintAddonMessage(loc.EJ_ENTRANCE_NAV_UNAVAILABLE or "未找到该副本的入口位置。")
+  end)
+
+  button:SetScript("OnEnter", function(buttonFrame)
+    if Toolbox.Tooltip and Toolbox.Tooltip.SetSkipAnchorOverride then
+      Toolbox.Tooltip.SetSkipAnchorOverride(GameTooltip, true)
+    end
+    Runtime.TooltipSetOwner(GameTooltip, buttonFrame, "ANCHOR_RIGHT")
+    Runtime.TooltipClear(GameTooltip)
+    Runtime.TooltipSetText(GameTooltip, loc.EJ_ENTRANCE_NAV_BUTTON or "导航入口")
+    Runtime.TooltipAddLine(GameTooltip, loc.EJ_ENTRANCE_NAV_TOOLTIP or "打开地图并导航到该副本入口。", 1, 1, 1, true)
+    Runtime.TooltipShow(GameTooltip)
+  end)
+
+  button:SetScript("OnLeave", function()
+    if Toolbox.Tooltip and Toolbox.Tooltip.SetSkipAnchorOverride then
+      Toolbox.Tooltip.SetSkipAnchorOverride(GameTooltip, false)
+    end
+    Runtime.TooltipHide(GameTooltip)
+  end)
+
+  rowFrame[PIN_BUTTON_KEY] = button
+  return button
+end
+
+--- 刷新副本列表行图钉。
+function ListNavigationPin:updateFrames()
+  if not isModuleEnabled() or Toolbox.EJ.IsRaidOrDungeonInstanceListTab() ~= true then
+    self:clearAllFrames()
+    return
+  end
+
+  local box = getCurrentScrollBox()
+  if not box or type(box.ForEachFrame) ~= "function" then
+    return
+  end
+
+  pcall(function()
+    box:ForEachFrame(function(rowFrame)
+      if not rowFrame or type(rowFrame.GetElementData) ~= "function" then
+        return
+      end
+      local dataSuccess, elementData = pcall(function() return rowFrame:GetElementData() end)
+      local journalInstanceID = dataSuccess and getJournalInstanceID(elementData) or nil -- 当前行副本 ID
+      if type(journalInstanceID) ~= "number" then
+        local oldButton = rowFrame[PIN_BUTTON_KEY] -- 旧图钉按钮
+        if oldButton then
+          oldButton:Hide()
+        end
+        return
+      end
+
+      local button = self:createButton(rowFrame)
+      button._ToolboxJournalInstanceID = journalInstanceID
+      button:Show()
+      if button.SetEnabled then
+        button:SetEnabled(true)
+      end
+    end)
+  end)
+end
+
+--- 清理当前列表行上的图钉按钮。
+function ListNavigationPin:clearAllFrames()
+  local box = getCurrentScrollBox()
+  if not box or type(box.ForEachFrame) ~= "function" then
+    return
+  end
+
+  pcall(function()
+    box:ForEachFrame(function(rowFrame)
+      local button = rowFrame and rowFrame[PIN_BUTTON_KEY] or nil -- 当前行图钉按钮
+      if button then
+        button:Hide()
+      end
+    end)
+  end)
 end
 
 -- ============================================================================
@@ -524,4 +664,5 @@ function DetailEnhancer:refresh()
 end
 
 Internal.MountFilter = MountFilter
+Internal.ListNavigationPin = ListNavigationPin
 Internal.DetailEnhancer = DetailEnhancer

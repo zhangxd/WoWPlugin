@@ -339,6 +339,11 @@ local enUS = {
   EJ_DETAIL_MOUNT_ONLY_HINT = "Filter loot list to mount items for this instance.",
   EJ_DETAIL_LOCKOUT_FMT = "Resets in: %s",
   EJ_DETAIL_LOCKOUT_NONE = "Resets in: none",
+  EJ_ENTRANCE_NAV_BUTTON = "Track entrance",
+  EJ_ENTRANCE_NAV_TOOLTIP = "Open the map and track this instance entrance.",
+  EJ_ENTRANCE_NAV_NOTIFY_FMT = "Tracking entrance: %s",
+  EJ_ENTRANCE_NAV_FALLBACK_NAME = "instance entrance",
+  EJ_ENTRANCE_NAV_UNAVAILABLE = "No map entrance is available for this instance.",
 
   EJ_LOCKOUT_OVERLAY_LABEL = "Show instance CD in Adventure Guide",
   EJ_LOCKOUT_INLINE_FMT = "|cffff9900[CD] %s|r",
@@ -687,6 +692,11 @@ local zhCN = {
   EJ_DETAIL_MOUNT_ONLY_HINT = "仅显示当前副本掉落列表中的坐骑物品。",
   EJ_DETAIL_LOCKOUT_FMT = "重置：%s",
   EJ_DETAIL_LOCKOUT_NONE = "重置：无",
+  EJ_ENTRANCE_NAV_BUTTON = "导航入口",
+  EJ_ENTRANCE_NAV_TOOLTIP = "打开地图并导航到该副本入口。",
+  EJ_ENTRANCE_NAV_NOTIFY_FMT = "已导航到：%s",
+  EJ_ENTRANCE_NAV_FALLBACK_NAME = "副本入口",
+  EJ_ENTRANCE_NAV_UNAVAILABLE = "未找到该副本的入口位置。",
 
   EJ_LOCKOUT_OVERLAY_LABEL = "在冒险指南中显示副本 CD",
   EJ_LOCKOUT_INLINE_FMT = "|cffff9900[CD] %s|r",

@@ -359,5 +359,18 @@ function FakeFrame:SetColorTexture(redValue, greenValue, blueValue, alphaValue)
     tonumber(alphaValue) or 0,
   }
 end
+function FakeFrame:SetAtlas(atlasName, useAtlasSize)
+  self._atlas = atlasName
+  self._useAtlasSize = useAtlasSize == true
+end
+function FakeFrame:SetTexture(texturePath)
+  self._texture = texturePath
+end
+function FakeFrame:SetTexCoord(...)
+  self._texCoord = { ... }
+end
+function FakeFrame:SetBlendMode(blendMode)
+  self._blendMode = blendMode
+end
 
 return FakeFrame

@@ -114,7 +114,8 @@ function Harness:_installGlobals()
       InstanceQuestlines = {},
     },
     Chat = {
-      PrintAddonMessage = function(_, text)
+      PrintAddonMessage = function(firstArg, secondArg)
+        local text = secondArg or firstArg -- 兼容点调用与冒号调用
         self.traceList[#self.traceList + 1] = {
           kind = "chat_print",
           text = text,

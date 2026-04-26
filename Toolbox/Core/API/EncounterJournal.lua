@@ -416,6 +416,224 @@ function Toolbox.EJ.GetKilledBosses(journalInstanceID, difficultyID)
 end
 
 -- ============================================================================
+-- 副本入口导航 API
+-- ============================================================================
+
+local dungeonEntranceCandidateCache = nil -- 可扫描入口地图候选缓存
+
+--- 向列表追加不重复的地图 ID。
+---@param mapIDList table 地图 ID 列表
+---@param seenMapID table 已加入集合
+---@param uiMapID number|nil 地图 ID
+local function appendUniqueMapID(mapIDList, seenMapID, uiMapID)
+  if type(uiMapID) ~= "number" or uiMapID <= 0 or seenMapID[uiMapID] then
+    return
+  end
+  seenMapID[uiMapID] = true
+  mapIDList[#mapIDList + 1] = uiMapID
+end
+
+--- 沿 C_Map.GetMapInfo 的 parentMapID 收集地图父链。
+---@param mapIDList table 地图 ID 列表
+---@param seenMapID table 已加入集合
+---@param startMapID number|nil 起始地图 ID
+local function appendMapParentChain(mapIDList, seenMapID, startMapID)
+  if not C_Map or type(C_Map.GetMapInfo) ~= "function" then
+    return
+  end
+
+  local currentMapID = startMapID -- 当前向上追溯的地图 ID
+  local guardCount = 0 -- 防止异常父链死循环
+  while type(currentMapID) == "number" and currentMapID > 0 and guardCount < 16 do
+    guardCount = guardCount + 1
+    appendUniqueMapID(mapIDList, seenMapID, currentMapID)
+
+    local infoSuccess, mapInfo = pcall(C_Map.GetMapInfo, currentMapID)
+    if not infoSuccess or type(mapInfo) ~= "table" or type(mapInfo.parentMapID) ~= "number" then
+      return
+    end
+    if mapInfo.parentMapID == currentMapID or mapInfo.parentMapID <= 0 then
+      return
+    end
+    currentMapID = mapInfo.parentMapID
+  end
+end
+
+--- 递归收集某个地图树下的子地图。用于无法从副本 mapID 父链直接命中入口时的兜底扫描。
+---@param mapIDList table 地图 ID 列表
+---@param seenMapID table 已加入集合
+---@param rootMapID number 根地图 ID
+local function appendMapDescendants(mapIDList, seenMapID, rootMapID)
+  if not C_Map or type(C_Map.GetMapChildrenInfo) ~= "function" then
+    return
+  end
+
+  local childrenSuccess, childMapList = pcall(C_Map.GetMapChildrenInfo, rootMapID, nil, true)
+  if not childrenSuccess or type(childMapList) ~= "table" then
+    return
+  end
+  for _, childMapInfo in ipairs(childMapList) do
+    local childMapID = type(childMapInfo) == "table" and childMapInfo.mapID or nil -- 子地图 ID
+    appendUniqueMapID(mapIDList, seenMapID, childMapID)
+  end
+end
+
+--- 构建副本入口扫描候选地图。
+---@param journalInstanceID number 冒险指南副本 ID
+---@param options table|nil 可选：candidateMapIDs 直接指定候选地图
+---@return table mapIDList 地图 ID 列表
+local function buildDungeonEntranceCandidateMapIDs(journalInstanceID, options)
+  local mapIDList = {} -- 候选地图 ID 列表
+  local seenMapID = {} -- 去重集合
+
+  if type(options) == "table" and type(options.candidateMapIDs) == "table" then
+    for _, uiMapID in ipairs(options.candidateMapIDs) do
+      appendUniqueMapID(mapIDList, seenMapID, uiMapID)
+    end
+    return mapIDList
+  end
+
+  local journalMapID = getJournalMapID(journalInstanceID) -- 副本自身地图 ID
+  appendMapParentChain(mapIDList, seenMapID, journalMapID)
+
+  local worldMapFrame = _G.WorldMapFrame -- 世界地图框体
+  if worldMapFrame and type(worldMapFrame.GetMapID) == "function" then
+    local mapSuccess, currentMapID = pcall(worldMapFrame.GetMapID, worldMapFrame)
+    if mapSuccess then
+      appendMapParentChain(mapIDList, seenMapID, currentMapID)
+    end
+  end
+
+  if C_Map and type(C_Map.GetFallbackWorldMapID) == "function" then
+    local fallbackSuccess, fallbackMapID = pcall(C_Map.GetFallbackWorldMapID)
+    if fallbackSuccess then
+      appendUniqueMapID(mapIDList, seenMapID, fallbackMapID)
+    end
+  end
+
+  if dungeonEntranceCandidateCache == nil then
+    dungeonEntranceCandidateCache = {} -- 全局入口扫描候选缓存
+    local cacheSeenMapID = {} -- 缓存去重集合
+    local rootMapIDs = { 946, 947 } -- Cosmic / Azeroth 常见根地图；失败时静默跳过
+    for _, rootMapID in ipairs(rootMapIDs) do
+      appendUniqueMapID(dungeonEntranceCandidateCache, cacheSeenMapID, rootMapID)
+      appendMapDescendants(dungeonEntranceCandidateCache, cacheSeenMapID, rootMapID)
+    end
+  end
+  for _, cachedMapID in ipairs(dungeonEntranceCandidateCache) do
+    appendUniqueMapID(mapIDList, seenMapID, cachedMapID)
+  end
+
+  return mapIDList
+end
+
+--- 查询某个副本在地图上的入口位置。
+---@param journalInstanceID number 冒险指南副本 ID
+---@param options table|nil 可选：candidateMapIDs 用于测试或调用方传入更小地图范围
+---@return table|nil entrance 入口信息，含 uiMapID / position / areaPoiID / name / journalInstanceID
+function Toolbox.EJ.FindDungeonEntranceForJournalInstance(journalInstanceID, options)
+  if type(journalInstanceID) ~= "number" or journalInstanceID <= 0 then
+    return nil
+  end
+  if not C_EncounterJournal or type(C_EncounterJournal.GetDungeonEntrancesForMap) ~= "function" then
+    return nil
+  end
+
+  local candidateMapIDs = buildDungeonEntranceCandidateMapIDs(journalInstanceID, options) -- 候选地图
+  for _, uiMapID in ipairs(candidateMapIDs) do
+    local entranceSuccess, entranceList = pcall(C_EncounterJournal.GetDungeonEntrancesForMap, uiMapID)
+    if entranceSuccess and type(entranceList) == "table" then
+      for _, entranceInfo in ipairs(entranceList) do
+        if type(entranceInfo) == "table" and entranceInfo.journalInstanceID == journalInstanceID and entranceInfo.position then
+          return {
+            uiMapID = uiMapID,
+            position = entranceInfo.position,
+            areaPoiID = entranceInfo.areaPoiID,
+            name = entranceInfo.name,
+            description = entranceInfo.description,
+            atlasName = entranceInfo.atlasName,
+            journalInstanceID = entranceInfo.journalInstanceID,
+          }
+        end
+      end
+    end
+  end
+
+  return nil
+end
+
+--- 打开世界地图到指定地图 ID。优先使用 OpenWorldMap，回退到 ToggleWorldMap + WorldMapFrame:SetMapID。
+---@param uiMapID number 地图 ID
+local function openWorldMapToMap(uiMapID)
+  if type(uiMapID) ~= "number" or uiMapID <= 0 then
+    return
+  end
+
+  if type(OpenWorldMap) == "function" then
+    local openSuccess = pcall(OpenWorldMap, uiMapID)
+    if openSuccess then
+      local worldMapFrame = _G.WorldMapFrame -- 世界地图框体
+      if worldMapFrame and type(worldMapFrame.SetMapID) == "function" then
+        pcall(worldMapFrame.SetMapID, worldMapFrame, uiMapID)
+      end
+      return
+    end
+  end
+
+  if type(ToggleWorldMap) == "function" then
+    pcall(ToggleWorldMap)
+  end
+
+  local worldMapFrame = _G.WorldMapFrame -- 世界地图框体
+  if worldMapFrame and type(worldMapFrame.SetMapID) == "function" then
+    pcall(worldMapFrame.SetMapID, worldMapFrame, uiMapID)
+  end
+end
+
+--- 导航到指定副本入口：打开地图、设置用户 waypoint，并启用系统追踪。
+---@param journalInstanceID number 冒险指南副本 ID
+---@param options table|nil 可选：candidateMapIDs 用于测试或调用方传入更小地图范围
+---@return boolean success 是否成功
+---@return table|string result 成功时为入口信息；失败时为原因：not_found / waypoint_api_missing / waypoint_forbidden / point_api_missing / set_failed
+function Toolbox.EJ.NavigateToDungeonEntrance(journalInstanceID, options)
+  local entranceInfo = Toolbox.EJ.FindDungeonEntranceForJournalInstance(journalInstanceID, options) -- 命中的入口信息
+  if not entranceInfo then
+    return false, "not_found"
+  end
+
+  if not C_Map or type(C_Map.CanSetUserWaypointOnMap) ~= "function" or type(C_Map.SetUserWaypoint) ~= "function" then
+    return false, "waypoint_api_missing"
+  end
+
+  local canSetSuccess, canSetWaypoint = pcall(C_Map.CanSetUserWaypointOnMap, entranceInfo.uiMapID)
+  if not canSetSuccess or canSetWaypoint ~= true then
+    return false, "waypoint_forbidden"
+  end
+
+  if not UiMapPoint or type(UiMapPoint.CreateFromVector2D) ~= "function" then
+    return false, "point_api_missing"
+  end
+
+  local pointSuccess, mapPoint = pcall(UiMapPoint.CreateFromVector2D, entranceInfo.uiMapID, entranceInfo.position)
+  if not pointSuccess or not mapPoint then
+    return false, "point_api_missing"
+  end
+
+  openWorldMapToMap(entranceInfo.uiMapID)
+
+  local setSuccess = pcall(C_Map.SetUserWaypoint, mapPoint)
+  if not setSuccess then
+    return false, "set_failed"
+  end
+
+  if C_SuperTrack and type(C_SuperTrack.SetSuperTrackedUserWaypoint) == "function" then
+    pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, true)
+  end
+
+  return true, entranceInfo
+end
+
+-- ============================================================================
 -- UI 状态查询 API
 -- ============================================================================
 
