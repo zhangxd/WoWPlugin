@@ -245,6 +245,10 @@ def validate_mover_regressions() -> None:
         raise AssertionError("mover should push addon registry before disabled guard")
     # 模块关闭时除暴雪面板外，还要关闭已登记自定义 frame 的拖动行为。
     require_contains(text, "disableAddonRegisteredFrames()", "mover disables addon-registered drags when disabled")
+    # 大地图顶部导航条位于 TitleCanvasSpacerFrame 内，不能直接把整块 Spacer 注册成拖动面，否则会吞掉导航点击。
+    require_contains(text, "ensureWorldMapDragHandle", "mover uses a dedicated world map drag handle")
+    if "return frame.TitleCanvasSpacerFrame" in text:
+        raise AssertionError("mover should not bind drag directly to WorldMapFrame.TitleCanvasSpacerFrame")
 
 
 def validate_tooltip_anchor_regressions() -> None:

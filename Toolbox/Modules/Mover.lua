@@ -288,7 +288,7 @@ end
 
   1) 移动谁：在「要记忆位置的根 Frame」上改锚点（全局名 = 存档键，如 WorldMapFrame）。子 Frame 单独拖无法带动整块。
 
-  2) 从哪拖：RegisterForDrag 挂在命中区（见 resolveBlizzardDragRegion；大地图优先 TitleCanvasSpacerFrame）。
+  2) 从哪拖：RegisterForDrag 挂在命中区（见 resolveBlizzardDragRegion；大地图避开导航面包屑区域）。
 
   3) 与面板管线：UIPanelWindows / UIPARENT_MANAGED_FRAME_POSITIONS 会驱动 FramePositionManager 每帧重锚，
      仅用 StartMoving 常被立刻抵消。故在 apply 时 detach（ignoreFramePositionManager、暂移出 UIPanelWindows、
@@ -442,7 +442,26 @@ local function restoreBlizzardPanelIfMisplaced(frame, key)
   restoreBlizzardPanel(frame, key)
 end
 
---- 解析拖动条：顺序与 § 暴雪窗口拖动原理一致（大地图 TitleCanvasSpacerFrame → 根 TitleContainer → Border.TitleContainer → BorderFrame）。
+--- 解析 WorldMapFrame 的拖动条。
+--- TitleCanvasSpacerFrame 内含地图导航面包屑，若直接注册拖动会吞掉导航点击；
+--- 因此大地图优先使用暴雪边框标题容器这类不承载导航按钮的区域。
+---@param frame Frame
+---@return Frame|nil
+local function ensureWorldMapDragHandle(frame)
+  if not frame then
+    return nil
+  end
+  local borderFrame = frame.BorderFrame -- 大地图边框 Frame
+  if borderFrame and borderFrame.TitleContainer then
+    return borderFrame.TitleContainer
+  end
+  if frame.TitleContainer then
+    return frame.TitleContainer
+  end
+  return nil
+end
+
+--- 解析拖动条：顺序与 § 暴雪窗口拖动原理一致（大地图安全标题容器 → 根 TitleContainer → Border.TitleContainer → BorderFrame）。
 ---@param frame Frame
 ---@return Frame
 local function resolveBlizzardDragRegion(frame)
@@ -450,9 +469,9 @@ local function resolveBlizzardDragRegion(frame)
     return frame
   end
   local fname = frame.GetName and frame:GetName() or nil
-  -- 大地图须优先于 BorderFrame.TitleContainer：后者仅肖像旁窄条，NavBar 占满 Spacer 大部，玩家易点不中。
-  if fname == "WorldMapFrame" and frame.TitleCanvasSpacerFrame then
-    return frame.TitleCanvasSpacerFrame
+  -- 大地图导航条位于 TitleCanvasSpacerFrame，拖动面不能覆盖它，否则导航位置无法点击。
+  if fname == "WorldMapFrame" then
+    return ensureWorldMapDragHandle(frame) or frame
   end
   -- 成就：TitleContainer 多在肖像侧较窄，中间标题区点不中；Header 为整块顶栏（含标题区域命中）。
   if fname == "AchievementFrame" and frame.Header then
