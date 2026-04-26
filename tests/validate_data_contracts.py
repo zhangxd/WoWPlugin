@@ -32,6 +32,11 @@ EXPECTED_GENERATED_CONTRACTS = {
         "lua_table": "Toolbox.Data.QuestTypeNames",
         "root_type": "map_scalar",
     },
+    "navigation_map_nodes": {
+        "lua_file": "Toolbox/Data/NavigationMapNodes.lua",
+        "lua_table": "Toolbox.Data.NavigationMapNodes",
+        "root_type": "document",
+    },
 }
 
 

@@ -155,6 +155,45 @@ describe("Toolbox.Config quest module migration", function()
   end)
 end)
 
+describe("Toolbox.Config navigation module defaults", function()
+  local originalToolbox = nil -- 原始 Toolbox 全局
+  local originalToolboxDB = nil -- 原始 ToolboxDB 全局
+  local originalCopyTable = nil -- 原始 CopyTable 全局
+
+  before_each(function()
+    originalToolbox = rawget(_G, "Toolbox")
+    originalToolboxDB = rawget(_G, "ToolboxDB")
+    originalCopyTable = rawget(_G, "CopyTable")
+
+    rawset(_G, "Toolbox", {
+      Config = {},
+    })
+    rawset(_G, "CopyTable", deepCopyTable)
+  end)
+
+  after_each(function()
+    rawset(_G, "Toolbox", originalToolbox)
+    rawset(_G, "ToolboxDB", originalToolboxDB)
+    rawset(_G, "CopyTable", originalCopyTable)
+  end)
+
+  it("creates_navigation_module_defaults", function()
+    rawset(_G, "ToolboxDB", nil)
+
+    local configChunk = assert(loadfile("Toolbox/Core/Foundation/Config.lua")) -- Config chunk
+    configChunk()
+    Toolbox.Config.Init()
+
+    local moduleDb = ToolboxDB.modules.navigation -- navigation 模块默认存档
+    assert.is_table(moduleDb)
+    assert.is_true(moduleDb.enabled)
+    assert.is_false(moduleDb.debug)
+    assert.equals(0, moduleDb.lastTargetUiMapID)
+    assert.equals(0, moduleDb.lastTargetX)
+    assert.equals(0, moduleDb.lastTargetY)
+  end)
+end)
+
 describe("Toolbox.Config tooltip_anchor rollback cleanup", function()
   local originalToolbox = nil -- 原始 Toolbox 全局
   local originalToolboxDB = nil -- 原始 ToolboxDB 全局

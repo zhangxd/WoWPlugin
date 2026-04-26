@@ -10,7 +10,7 @@
 |------|------|
 | **定位** | 单插件「工具箱」：统一入口、可扩展模块、统一存档与设置 UI。 |
 | **客户端** | **仅正式服（Retail）**，以 `Settings` API 与当前 Interface 版本为准。 |
-| **当前能力** | ① **模块 `mover`**：插件自建窗体与可选暴雪顶层窗口拖动；② **模块 `tooltip_anchor`**：Tooltip 锚点与跟随模式；③ **模块 `chat_notify`**：统一加载提示；④ **模块 `minimap_button`**：小地图按钮与飞出菜单；⑤ **模块 `encounter_journal`**：冒险指南副本列表增强、详情页增强、入口导航与锁定摘要联动；⑥ **模块 `quest`**：独立任务界面、任务浏览与 Quest Inspector；⑦ ESC 游戏菜单 + 系统「选项」中的插件类目入口。 |
+| **当前能力** | ① **模块 `mover`**：插件自建窗体与可选暴雪顶层窗口拖动；② **模块 `tooltip_anchor`**：Tooltip 锚点与跟随模式；③ **模块 `chat_notify`**：统一加载提示；④ **模块 `minimap_button`**：小地图按钮与飞出菜单；⑤ **模块 `encounter_journal`**：冒险指南副本列表增强、详情页增强、入口导航与锁定摘要联动；⑥ **模块 `quest`**：独立任务界面、任务浏览与 Quest Inspector；⑦ **模块 `navigation`**：地图导航第一版，已接入路径核心、当前角色能力过滤、地图节点契约数据、手工玩法边、世界地图“规划路线”按钮与顶部路径 UI；⑧ ESC 游戏菜单 + 系统「选项」中的插件类目入口。 |
 | **扩展方式** | 新功能 = 新模块文件 + `RegisterModule` + TOC 加载顺序；核心保持稳定，业务只增模块。 |
 
 ---
@@ -25,6 +25,7 @@ Core（薄层）
 ├── **Tooltip（领域对外 API）** — `GameTooltip_SetDefaultAnchor` 默认锚点 hook 与 tooltip 鼠标附近显示策略；见 `Core/API/Tooltip.lua`
 ├── **EJ（领域对外 API）** — 冒险指南锁定、坐骑掉落、入口导航与锁定摘要；见 `Core/API/EncounterJournal.lua`
 ├── **Questlines（领域对外 API）** — 任务线静态模型、任务线显示名解析与运行时任务字段；见 `Core/API/QuestlineProgress.lua`
+├── **Navigation（领域对外 API）** — 路径图、当前角色可用性过滤与 Dijkstra 最短路径求解；见 `Core/API/Navigation.lua`
 ├── ModuleRegistry（注册、排序、生命周期）
 └── 可选：轻量事件（模块增多后再评估 EventHub）
 
@@ -35,6 +36,7 @@ Modules（平级业务，持续增加）
 ├── MinimapButton — 小地图旁打开 Toolbox 设置的按钮（可单独隐藏）；悬停展开纵向操作列，内置“冒险手册”“任务”等飞出项
 ├── TooltipAnchor — GameTooltip 等锚点/跟随鼠标
 ├── EncounterJournal — 冒险指南副本列表增强、详情页增强、入口导航与锁定摘要联动
+├── Navigation — 地图导航模块，世界地图“规划路线”按钮、路径核心、地图节点契约数据、手工玩法边和顶部路径 UI 已接入
 └── Quest — 独立任务界面、任务浏览、最近完成与 Quest Inspector
 
 UI
@@ -121,6 +123,7 @@ flowchart TB
 | `Toolbox.Tooltip` | `Core/API/Tooltip.lua` | `InstallDefaultAnchorHook()`、`RefreshDriver()`；读取 `modules.tooltip_anchor`。当前口径为恢复 WoWTools 式 `GameTooltip_SetDefaultAnchor` 全局 post-hook；`cursor` / `follow` 通过鼠标附近锚点接管系统 tooltip，`default` 或模块禁用时不覆写默认锚点。**模块 tooltip_anchor** 仅负责 `RegisterModule` 与设置 UI。 |
 | `Toolbox.EJ` | `Core/API/EncounterJournal.lua` | 冒险指南相关高层查询入口：当前页签语境、坐骑掉落集合、实例锁定、当前难度锁定、当前角色锁定摘要、tooltip 行文本、副本入口查找与系统 waypoint 导航。锁定匹配优先走运行时 map 映射（`C_EncounterJournal.GetInstanceForGameMap` 与 `EJ_GetInstanceInfo` mapID 对齐），静态 `InstanceMapIDs` 仅作为单向兜底；当 SavedInstances 的 mapID 不可判定时按副本名兜底。入口导航使用 `C_EncounterJournal.GetDungeonEntrancesForMap` 查找当前 `journalInstanceID` 的入口，并通过 `C_Map.SetUserWaypoint` / `C_SuperTrack.SetSuperTrackedUserWaypoint` 交给系统导航。业务模块禁止直接复制 `GetSavedInstanceInfo` / `EJ_*` / waypoint 查询逻辑。 |
 | `Toolbox.Questlines` | `Core/API/QuestlineProgress.lua` | 任务线静态结构缓存、任务线显示名解析、运行时任务字段、任务导航模型、当前任务日志、任务详情、Quest Inspector 快照与任务线进度。`InstanceQuestlines` 当前使用 schema v7 主骨架（`quests / questLines / campaigns / expansions / expansionCampaigns`），并在任务/任务线节点保留运行时扩展字段（如 `QuestLineIDs / UiMapIDs / FactionTags / FactionConditions / RaceMaskValues / ClassMaskValues / ContentExpansionID`）；该文件正式导出入口为 `scripts/export/export_quest_achievement_merged_from_db.py`，`DataContracts/instance_questlines.json` 仅用于头注释追溯，不参与正式写盘链路。任务类型名称基线由 `Toolbox.Data.QuestTypeNames` 提供（契约 `quest_type_names`，来源 `questinfo`），类型名缺失时统一回退为“普通任务”（`EJ_QUEST_TYPE_DEFAULT`）。当前运行时缓存按 revision / 数据变化失效，而不是按秒级时间键失效；`GetCurrentQuestLogEntries()` 直接返回界面渲染所需的任务线字段，避免界面层逐条再查公共详情 API。独立 `quest` 模块与 Quest Inspector 统一通过本 API 获取模型，而不是直接拼装静态数据。 |
+| `Toolbox.Navigation` | `Core/API/Navigation.lua` | 地图导航领域 API：`FindShortestPath()` 对过滤后的路径图执行 Dijkstra，`FilterRouteGraph()` 按当前角色职业、阵营和已确认技能过滤不可用边，`PlanRoute()` 组合过滤与求解，`BuildCurrentCharacterAvailability()` 从当前角色运行时状态生成可用性快照（含当前 `uiMapID`）。目标规则支持多个候选枢纽，世界地图入口、顶部路径 UI 与静态数据契约详见 [designs/navigation-design.md](./designs/navigation-design.md)。 |
 | `Toolbox.MinimapButton` | `Modules/MinimapButton.lua` | `RegisterFlyoutEntry(def)` 供其他模块向小地图按钮悬停菜单追加项；`def` 至少包含 `id` 与 `onClick`，可选 `titleKey`/`tooltipKey`/`icon`/`order`/`augmentTooltip`（用于在悬停提示中追加动态内容）。禁止直接操作 `flyoutRegistry` 或 `flyoutSlotIds`。 |
 
 **模块间协作原则**
@@ -172,6 +175,7 @@ sequenceDiagram
 | 小地图打开设置按钮 | `minimap_button` | `modules.minimap_button`（`enabled`/`debug`/`showMinimapButton`/`showCoordsOnMinimap`/`minimapCoordsAnchor`/`minimapPos`/`buttonShape`/`flyoutExpand`/`flyoutSlotIds`/`flyoutLauncherGap`/`flyoutPad`/`flyoutGap`） | 独立子页面：启用、调试、清理并重建、是否显示小地图按钮、坐标显示、恢复默认位置；款式（圆/方）、展开方式（纵向/横向）、悬停项顺序与功能池拖放、`flyoutSlotIds`；内置“冒险手册”飞出项会打开冒险指南，并在 tooltip 里追加当前副本锁定摘要。 |
 | 加载聊天提示 | `chat_notify` | `modules.chat_notify`（`enabled`/`debug`） | 独立子页面：启用、调试、清理并重建、说明文案 |
 | 冒险指南增强 | `encounter_journal` | `modules.encounter_journal`（`enabled`/`debug`/`mountFilterEnabled`/`lockoutOverlayEnabled`/`detailMountOnlyEnabled`）+ `Toolbox.Data.MountDrops` + `Toolbox.Data.InstanceMapIDs` + `Toolbox.EJ` | 覆盖副本列表“仅坐骑”、副本列表图钉导航、列表锁定叠加、悬停锁定详情、详情页“仅坐骑”、详情页重置标签，以及 `EJMicroButton` / 小地图“冒险手册” tooltip 锁定摘要。入口导航不新增存档字段，跟随模块总开关。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
+| 地图导航 | `navigation` | `modules.navigation`（`enabled`/`debug`/`lastTargetUiMapID`/`lastTargetX`/`lastTargetY`）+ `Toolbox.Navigation` + `Toolbox.Data.NavigationMapNodes` + `Toolbox.Data.NavigationManualEdges` | 当前第一版已接入路径核心、当前角色能力过滤、设置页、世界地图“规划路线”按钮和顶部路径 UI；地图基础节点由 `DataContracts/navigation_map_nodes.json` 正式导出，人工玩法边覆盖部落公共传送门、奥格瑞玛传送门房、法师主城传送与死亡骑士 / 德鲁伊 / 武僧职业位移样例。详见 [specs/navigation-spec.md](./specs/navigation-spec.md)、[designs/navigation-design.md](./designs/navigation-design.md)、[plans/navigation-plan.md](./plans/navigation-plan.md)。 |
 | 独立任务浏览 | `quest` | `modules.quest`（`enabled`/`debug`/`questlineTreeEnabled`/`questNavExpansionID`/`questNavModeKey`/`questNavSelectedMapID`/`questNavSelectedTypeKey`/`questNavSearchText`/`questNavSkinPreset`/`questInspectorLastQuestID`/`questRecentCompletedList`/`questRecentCompletedMax`/`questNavExpandedQuestLineID`/`questlineTreeCollapsed`）+ `Toolbox.Data.InstanceQuestlines`（正式入口 `export_quest_achievement_merged_from_db.py`）+ `Toolbox.Data.QuestTypeNames`（`quest_type_names` 契约导出）+ `Toolbox.Questlines` | 覆盖独立任务界面、底部 `active_log` / `map_questline` 双视图、左上角通用导航路径、节点驱动的任务线左树、任务搜索、最近完成、列表内展开详情与 Quest Inspector 设置子页面。`active_log` 打开链路已收口为当前任务快路径；主区、当前任务区与最近完成区统一采用固定按钮池渲染，避免按总行数线性建控件。详见 [designs/quest-design.md](./designs/quest-design.md)。 |
 | （核心不提供业务数据） | — | `global` 其余键 | 调试、开发者选项可放 `global` |
 
@@ -202,6 +206,13 @@ ToolboxDB = {
       mountFilterEnabled = true,
       lockoutOverlayEnabled = true,
       detailMountOnlyEnabled = false,
+    },
+    navigation = {
+      enabled = true,
+      debug = false,
+      lastTargetUiMapID = 0,
+      lastTargetX = 0,
+      lastTargetY = 0,
     },
     quest = {
       enabled = true,
@@ -347,13 +358,14 @@ ToolboxDB = {
 5. `Core/Foundation/ModuleRegistry.lua` — 模块注册与生命周期
 6. `Core/API/Chat.lua` — 聊天领域对外 API
 7. `Core/API/Tooltip.lua` — 提示框领域对外 API
-8. `Core/API/EncounterJournal.lua`、`Core/API/QuestlineProgress.lua` — 冒险指南与任务线领域对外 API
+8. `Core/API/EncounterJournal.lua`、`Core/API/QuestlineProgress.lua`、`Core/API/Navigation.lua` — 冒险指南、任务线与地图导航领域对外 API
 9. `UI/SettingsHost.lua`
 10. `Modules/Mover.lua`、`Modules/MicroMenuPanels.lua`、`Modules/TooltipAnchor.lua`、`Modules/ChatNotify.lua`、`Modules/MinimapButton.lua`
 11. `Data/InstanceMapIDs.lua`、`Data/InstanceDrops_Mount.lua`、`Data/QuestTypeNames.lua`、`Data/InstanceQuestlines.lua`
 12. `Modules/EncounterJournal/Shared.lua`、`Modules/EncounterJournal/DetailEnhancer.lua`、`Modules/EncounterJournal/LockoutOverlay.lua`、`Modules/EncounterJournal.lua` — 冒险指南增强模块
-13. `Modules/Quest/Shared.lua`、`Modules/Quest/QuestNavigation.lua`、`Modules/Quest.lua` — 独立任务模块
-14. `Core/Foundation/Bootstrap.lua` — `ADDON_LOADED` 中初始化并启用模块
+13. `Modules/Navigation/RouteBar.lua`、`Modules/Navigation/WorldMap.lua`、`Modules/Navigation.lua` — 地图导航模块
+14. `Modules/Quest/Shared.lua`、`Modules/Quest/QuestNavigation.lua`、`Modules/Quest.lua` — 独立任务模块
+15. `Core/Foundation/Bootstrap.lua` — `ADDON_LOADED` 中初始化并启用模块
 
 `## Interface:` 与正式服客户端一致，大版本后更新。
 
@@ -418,3 +430,5 @@ ToolboxDB = {
 | 2026-04-26 | `tooltip_anchor` 对齐 Retail 12.0 secret values：默认锚点 hook 在 `IsPreventingSecretValues()` / `HasSecretValues()` / `IsAnchoringSecret()` 命中时跳过二次接管，避免含金币等 secret 数值的 tooltip 触发 taint 报错 |
 | 2026-04-27 | `tooltip_anchor` 主方案按用户确认回退：放弃 `UberTooltips` 托管，恢复 WoWTools 式 `GameTooltip_SetDefaultAnchor` 全局 post-hook；正式服 12.0 taint 风险接受，且不保留旧方案残留 |
 | 2026-04-27 | `encounter_journal` 副本列表新增图钉导航：`Toolbox.EJ` 通过 `C_EncounterJournal.GetDungeonEntrancesForMap` 查找入口，并使用系统 waypoint / super tracking 打开地图导航 |
+| 2026-04-27 | 新增 `navigation` 地图导航基线：`Toolbox.Navigation` 提供路径核心与当前角色可用性过滤，模块设置页、默认存档与 TOC 已接入 |
+| 2026-04-27 | `navigation` 接入世界地图第一版入口与数据层：`WorldMapFrame` 显示时创建“规划路线”按钮，点击读取地图与鼠标坐标并在顶部路径条显示规划步骤；地图基础节点走 `navigation_map_nodes` 契约导出，手工玩法边扩充为多枢纽旅行图，覆盖部落公共传送门、奥格瑞玛传送门房、法师主城传送与部分非 mage 职业位移 |

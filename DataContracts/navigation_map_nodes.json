@@ -1,0 +1,137 @@
+{
+  "contract": {
+    "contract_id": "navigation_map_nodes",
+    "schema_version": 1,
+    "summary": "地图导航基础 UiMap 节点",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/NavigationMapNodes.lua",
+    "lua_table": "Toolbox.Data.NavigationMapNodes",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "uimap"
+    ],
+    "sql": "SELECT 1 AS placeholder",
+    "query": {
+      "from": "uimap",
+      "joins": [],
+      "select": [
+        "ui_map_id",
+        "parent_ui_map_id",
+        "map_type",
+        "map_name"
+      ],
+      "where": [
+        "ui_map_id > 0",
+        "map_name 非空"
+      ],
+      "group_by": [],
+      "order_by": [
+        "ui_map_id ASC"
+      ],
+      "row_granularity": "一行代表一个 UiMap 基础节点"
+    },
+    "datasets": {
+      "nodes": {
+        "sql": "SELECT\n  CAST(ID AS INTEGER) AS ui_map_id,\n  CAST(COALESCE(ParentUiMapID, 0) AS INTEGER) AS parent_ui_map_id,\n  CAST(COALESCE(Type, 0) AS INTEGER) AS map_type,\n  Name_lang AS map_name\nFROM uimap\nWHERE TRIM(COALESCE(ID, '')) <> ''\n  AND CAST(ID AS INTEGER) > 0\n  AND TRIM(COALESCE(Name_lang, '')) <> ''\nORDER BY CAST(ID AS INTEGER), ID",
+        "query": {
+          "from": "uimap",
+          "joins": [],
+          "select": [
+            "ui_map_id",
+            "parent_ui_map_id",
+            "map_type",
+            "map_name"
+          ],
+          "where": [
+            "ui_map_id > 0",
+            "map_name 非空"
+          ],
+          "group_by": [],
+          "order_by": [
+            "ui_map_id ASC"
+          ],
+          "row_granularity": "一行代表一个 UiMap 基础节点"
+        }
+      }
+    }
+  },
+  "structure": {
+    "root_type": "document",
+    "lua_shape": "Toolbox.Data.NavigationMapNodes = { schemaVersion, sourceMode, generatedAt, nodes }",
+    "fields": [],
+    "document_blocks": [
+      {
+        "name": "metadata",
+        "metadata": {
+          "schemaVersion": 1,
+          "sourceMode": "live",
+          "generatedAt": "@generated_at"
+        }
+      },
+      {
+        "name": "nodes",
+        "dataset": "nodes",
+        "block_type": "map_object",
+        "key_field": "ui_map_id",
+        "dedupe_by": [
+          "ui_map_id"
+        ],
+        "required_fields": [
+          "ui_map_id",
+          "parent_ui_map_id",
+          "map_type",
+          "map_name"
+        ],
+        "sort_by": [
+          "ui_map_id"
+        ],
+        "value_template": {
+          "ID": "ui_map_id",
+          "ParentUiMapID": "parent_ui_map_id",
+          "MapType": "map_type",
+          "Name_lang": "map_name"
+        }
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [
+      "ui_map_id",
+      "parent_ui_map_id",
+      "map_type",
+      "map_name"
+    ],
+    "unique_keys": [
+      [
+        "ui_map_id"
+      ]
+    ],
+    "non_null_fields": [
+      "ui_map_id",
+      "parent_ui_map_id",
+      "map_type",
+      "map_name"
+    ],
+    "sort_rules": [
+      {
+        "field": "ui_map_id",
+        "direction": "asc"
+      }
+    ]
+  },
+  "versioning": {
+    "current_schema_version": 1,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约版本，导出 UiMap 基础节点用于 navigation 路径显示和节点引用"
+      }
+    ]
+  }
+}

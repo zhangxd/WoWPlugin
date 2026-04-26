@@ -1,0 +1,108 @@
+local FakeFrame = dofile("tests/logic/harness/fake_frame.lua")
+
+describe("Navigation WorldMap integration", function()
+  local originalToolbox = nil -- 原始 Toolbox 全局
+  local originalWorldMapFrame = nil -- 原始 WorldMapFrame 全局
+  local originalCreateFrame = nil -- 原始 CreateFrame 全局
+  local shownRoute = nil -- RouteBar 显示的路线
+
+  before_each(function()
+    originalToolbox = rawget(_G, "Toolbox")
+    originalWorldMapFrame = rawget(_G, "WorldMapFrame")
+    originalCreateFrame = rawget(_G, "CreateFrame")
+    shownRoute = nil
+
+    local worldMapFrame = FakeFrame.new({ frameType = "Frame", frameName = "WorldMapFrame" }) -- 大地图 Frame
+    worldMapFrame.BorderFrame = FakeFrame.new({ frameType = "Frame", parentFrame = worldMapFrame })
+    worldMapFrame.ScrollContainer = {
+      GetNormalizedCursorPosition = function()
+        return 0.52, 0.43
+      end,
+    }
+    function worldMapFrame:GetMapID()
+      return 1
+    end
+    rawset(_G, "WorldMapFrame", worldMapFrame)
+    rawset(_G, "CreateFrame", function(frameType, frameName, parentFrame, templateName)
+      return FakeFrame.new({
+        frameType = frameType,
+        frameName = frameName,
+        parentFrame = parentFrame,
+        templateName = templateName,
+      })
+    end)
+    rawset(_G, "Toolbox", {
+      Navigation = {
+        GetRequiredSpellIDList = function()
+          return { 3567, 32272, 3566, 3563, 35715, 50977, 193753, 18960, 126892 }
+        end,
+        BuildCurrentCharacterAvailability = function(spellIDList)
+          assert.same({ 3567, 32272, 3566, 3563, 35715, 50977, 193753, 18960, 126892 }, spellIDList)
+          return {
+            classFile = "MAGE",
+            faction = "Horde",
+            knownSpellByID = {
+              [spellIDList[1]] = true,
+            },
+          }
+        end,
+        PlanRouteToMapTarget = function(target, availabilityContext)
+          assert.equals(1, target.uiMapID)
+          assert.equals(0.52, target.x)
+          assert.equals(0.43, target.y)
+          assert.equals("MAGE", availabilityContext.classFile)
+          return {
+            totalCost = 35,
+            stepLabels = { "传送：奥格瑞玛", "从奥格瑞玛前往杜隆塔尔目标" },
+          }, nil
+        end,
+      },
+      NavigationModule = {
+        RouteBar = {
+          ShowRoute = function(routeResult)
+            shownRoute = routeResult
+          end,
+        },
+      },
+      Config = {
+        GetModule = function()
+          return {
+            enabled = true,
+            lastTargetUiMapID = 0,
+            lastTargetX = 0,
+            lastTargetY = 0,
+          }
+        end,
+      },
+      L = {
+        NAVIGATION_WORLD_MAP_BUTTON = "规划路线",
+      },
+    })
+
+    local worldMapChunk = assert(loadfile("Toolbox/Modules/Navigation/WorldMap.lua")) -- 世界地图入口 chunk
+    worldMapChunk()
+  end)
+
+  after_each(function()
+    rawset(_G, "Toolbox", originalToolbox)
+    rawset(_G, "WorldMapFrame", originalWorldMapFrame)
+    rawset(_G, "CreateFrame", originalCreateFrame)
+  end)
+
+  it("creates_one_world_map_button_and_plans_route_from_mouse_target", function()
+    Toolbox.NavigationModule.WorldMap.Install()
+    Toolbox.NavigationModule.WorldMap.Install()
+
+    local hookList = WorldMapFrame.hookedHandlers.OnShow -- OnShow hook 列表
+    assert.equals(1, #hookList)
+
+    WorldMapFrame:Show()
+    local targetButton = Toolbox.NavigationModule.WorldMap.GetTargetButton() -- 规划按钮
+    assert.is_table(targetButton)
+    assert.equals("规划路线", targetButton:GetText())
+
+    targetButton:RunScript("OnClick")
+    assert.is_table(shownRoute)
+    assert.equals(35, shownRoute.totalCost)
+  end)
+end)

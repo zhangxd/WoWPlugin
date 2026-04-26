@@ -22,6 +22,7 @@ Core\API\Chat.lua
 Core\API\Tooltip.lua
 Core\API\EncounterJournal.lua
 Core\API\QuestlineProgress.lua
+Core\API\Navigation.lua
 
 # ============================================================================
 # UI（表现层）
@@ -44,6 +45,8 @@ Data\InstanceMapIDs.lua
 Data\InstanceDrops_Mount.lua
 Data\QuestTypeNames.lua
 Data\InstanceQuestlines.lua
+Data\NavigationMapNodes.lua
+Data\NavigationManualEdges.lua
 
 # ============================================================================
 # Modules（功能模块 - 依赖 Data）
@@ -52,6 +55,10 @@ Modules\EncounterJournal\Shared.lua
 Modules\EncounterJournal\DetailEnhancer.lua
 Modules\EncounterJournal\LockoutOverlay.lua
 Modules\EncounterJournal.lua
+Modules\Navigation\Shared.lua
+Modules\Navigation\RouteBar.lua
+Modules\Navigation\WorldMap.lua
+Modules\Navigation.lua
 Modules\Quest\Shared.lua
 Modules\Quest\QuestNavigation.lua
 Modules\Quest.lua

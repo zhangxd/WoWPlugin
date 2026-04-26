@@ -84,6 +84,8 @@ def validate_config() -> None:
         ("encounter_journal = {", "encounter journal module defaults"),
         ("mountFilterEnabled = true", "encounter journal mount filter default"),
         ("lockoutOverlayEnabled = true", "encounter journal lockout overlay default"),
+        ("navigation = {", "navigation module defaults"),
+        ("lastTargetUiMapID = 0", "navigation last target map default"),
         ("quest = {", "quest module defaults"),
         ("questNavModeKey = \"active_log\"", "quest mode default"),
         ("questInspectorLastQuestID = 0", "quest inspector last quest id default"),
@@ -119,6 +121,9 @@ def validate_locales() -> None:
         ("SETTINGS_MODULE_RESET_REBUILD", "shared reset locale"),
         ("MODULE_ENCOUNTER_JOURNAL", "encounter journal module locale"),
         ("MODULE_ENCOUNTER_JOURNAL_INTRO", "encounter journal intro locale"),
+        ("MODULE_NAVIGATION", "navigation module locale"),
+        ("MODULE_NAVIGATION_INTRO", "navigation intro locale"),
+        ("NAVIGATION_WORLD_MAP_BUTTON", "navigation world map button locale"),
         ("MODULE_QUEST", "quest module locale"),
         ("MODULE_QUEST_INTRO", "quest module intro locale"),
         ("EJ_MOUNT_FILTER_LABEL", "encounter journal mount filter locale"),
@@ -145,6 +150,7 @@ def validate_modules() -> None:
     files = [
         "ChatNotify.lua",
         "EncounterJournal.lua",
+        "Navigation.lua",
         "Quest.lua",
         "MinimapButton.lua",
         "Mover.lua",
@@ -174,10 +180,17 @@ def validate_modules() -> None:
 def validate_toc() -> None:
     text = read_text("Toolbox", "Toolbox.toc")
     require_contains(text, "Core\\Foundation\\Runtime.lua", "runtime adapter toc entry")
+    require_contains(text, "Core\\API\\Navigation.lua", "navigation api toc entry")
+    require_contains(text, "Data\\NavigationMapNodes.lua", "navigation map nodes toc entry")
+    require_contains(text, "Data\\NavigationManualEdges.lua", "navigation manual edges toc entry")
     require_contains(text, "Modules\\EncounterJournal\\Shared.lua", "encounter journal shared toc entry")
     require_contains(text, "Modules\\EncounterJournal\\DetailEnhancer.lua", "encounter journal detail enhancer toc entry")
     require_contains(text, "Modules\\EncounterJournal\\LockoutOverlay.lua", "encounter journal lockout overlay toc entry")
     require_contains(text, "Modules\\EncounterJournal.lua", "encounter journal module toc entry")
+    require_contains(text, "Modules\\Navigation\\Shared.lua", "navigation shared toc entry")
+    require_contains(text, "Modules\\Navigation\\RouteBar.lua", "navigation routebar toc entry")
+    require_contains(text, "Modules\\Navigation\\WorldMap.lua", "navigation worldmap toc entry")
+    require_contains(text, "Modules\\Navigation.lua", "navigation module toc entry")
     require_contains(text, "Modules\\Quest\\Shared.lua", "quest shared toc entry")
     require_contains(text, "Modules\\Quest\\QuestNavigation.lua", "quest navigation toc entry")
     require_contains(text, "Modules\\Quest.lua", "quest module toc entry")

@@ -9,8 +9,10 @@
 > 文档写作规范见 [DOCS-STANDARD.md](./DOCS-STANDARD.md)
 > 冒险指南功能说明见 [features/encounter-journal-features.md](./features/encounter-journal-features.md)
 > 任务模块功能说明见 [features/quest-features.md](./features/quest-features.md)
+> 地图导航功能说明见 [features/navigation-features.md](./features/navigation-features.md)
 > 冒险指南详细设计见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)
 > 任务模块详细设计见 [designs/quest-design.md](./designs/quest-design.md)
+> 地图导航详细设计见 [designs/navigation-design.md](./designs/navigation-design.md)
 
 ## 这是什么
 
@@ -18,6 +20,7 @@
 
 - 冒险指南浏览
 - 独立任务浏览
+- 地图导航路线规划
 - Tooltip 显示位置
 - 插件消息输出
 - 小地图快捷入口
@@ -66,6 +69,23 @@
   在设置子页面里按 `QuestID` 查询运行时任务与任务线字段，结果文本可复制。
 
 详见 [features/quest-features.md](./features/quest-features.md)。
+
+### 地图导航
+
+适用场景：希望从世界地图目标生成当前角色可用旅行路线时。
+
+当前包含：
+
+- **世界地图入口**
+  世界地图显示时提供“规划路线”按钮，点击后读取当前地图与鼠标目标坐标。
+- **当前角色能力过滤**
+  路线只使用当前角色已确认可用的能力；未知技能或不满足职业 / 阵营要求的路径不会参与推荐。
+- **顶部路径条**
+  规划结果会显示在屏幕顶部中间，按顺序列出路线步骤。
+- **多枢纽旅行图**
+  支持当前地点、部落主城公共传送门、奥格瑞玛传送门房、法师主城传送，以及死亡骑士 / 德鲁伊 / 武僧的职业位移能力。
+
+详见 [features/navigation-features.md](./features/navigation-features.md)。
 
 ### Tooltip 增强
 
@@ -122,6 +142,7 @@
 - 副本 CD 显示依赖游戏原生 `GetSavedInstanceInfo` API
 - 坐骑筛选依赖静态数据表维护
 - 任务浏览依赖 `Toolbox.Data.InstanceQuestlines` 与运行时任务 API 聚合结果
+- 地图导航第一版已覆盖部分高频传送门与职业位移，但玩具、炉石、节日传送和全职业特殊交通仍需继续扩充
 - 部分功能需要 `Blizzard_EncounterJournal` 插件已加载
 
 ## 更新日志

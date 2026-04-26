@@ -70,6 +70,14 @@ local defaults = {
       lockoutOverlayEnabled = true,
       detailMountOnlyEnabled = false,
     },
+    navigation = {
+      enabled = true,
+      debug = false,
+      -- 最近一次世界地图目标，仅用于调试和后续恢复，不参与账号级跨角色推断。
+      lastTargetUiMapID = 0,
+      lastTargetX = 0,
+      lastTargetY = 0,
+    },
     quest = {
       enabled = true,
       debug = false,
