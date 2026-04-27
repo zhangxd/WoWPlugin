@@ -302,6 +302,15 @@ function ListNavigationPin:createButton(rowFrame)
       Toolbox.Tooltip.SetSkipAnchorOverride(GameTooltip, false)
     end
     Runtime.TooltipHide(GameTooltip)
+
+    local parentRow = button.GetParent and button:GetParent() or nil -- 图钉所属列表行
+    local journalInstanceID = button._ToolboxJournalInstanceID -- 当前图钉副本 ID
+    local state = getListNavigationState() -- 列表交互状态
+    local rowStillHovered = parentRow and parentRow.IsMouseOver and parentRow:IsMouseOver() -- 鼠标是否回到列表行
+    if state.hoveredJournalInstanceID == journalInstanceID and rowStillHovered ~= true then
+      state.hoveredJournalInstanceID = nil
+      ListNavigationPin:updateFrames()
+    end
   end)
 
   rowFrame[PIN_BUTTON_KEY] = button
@@ -383,6 +392,11 @@ function ListNavigationPin:ensureRowHooks(rowFrame)
 
   rowFrame:SetScript("OnLeave", function(buttonFrame, ...)
     callFrameScript(buttonFrame._ToolboxOriginalOnLeave, buttonFrame, ...)
+    local pinButton = buttonFrame[PIN_BUTTON_KEY] -- 当前行图钉按钮
+    local pinStillHovered = pinButton and pinButton.IsMouseOver and pinButton:IsMouseOver() -- 鼠标是否移入图钉
+    if pinStillHovered == true then
+      return
+    end
     local state = getListNavigationState() -- 列表交互状态
     if state.hoveredJournalInstanceID == buttonFrame._ToolboxJournalInstanceID then
       state.hoveredJournalInstanceID = nil

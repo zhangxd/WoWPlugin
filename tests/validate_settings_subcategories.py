@@ -182,7 +182,12 @@ def validate_toc() -> None:
     require_contains(text, "Core\\Foundation\\Runtime.lua", "runtime adapter toc entry")
     require_contains(text, "Core\\API\\Navigation.lua", "navigation api toc entry")
     require_contains(text, "Data\\NavigationMapNodes.lua", "navigation map nodes toc entry")
-    require_contains(text, "Data\\NavigationManualEdges.lua", "navigation manual edges toc entry")
+    require_contains(text, "Data\\NavigationMapAssignments.lua", "navigation map assignments toc entry")
+    require_contains(text, "Data\\NavigationInstanceEntrances.lua", "navigation instance entrances toc entry")
+    require_contains(text, "Data\\NavigationTaxiEdges.lua", "navigation taxi edges toc entry")
+    require_contains(text, "Data\\NavigationRouteEdges.lua", "navigation unified route edges toc entry")
+    if "Data\\NavigationManualEdges.lua" in text:
+        raise AssertionError("navigation manual edges must not be loaded from TOC")
     require_contains(text, "Modules\\EncounterJournal\\Shared.lua", "encounter journal shared toc entry")
     require_contains(text, "Modules\\EncounterJournal\\DetailEnhancer.lua", "encounter journal detail enhancer toc entry")
     require_contains(text, "Modules\\EncounterJournal\\LockoutOverlay.lua", "encounter journal lockout overlay toc entry")

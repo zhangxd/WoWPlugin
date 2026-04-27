@@ -318,6 +318,9 @@ end
 function FakeFrame:SetParent(parentFrame)
   self.parentFrame = parentFrame
 end
+function FakeFrame:GetParent()
+  return self.parentFrame
+end
 function FakeFrame:SetHighlightTexture()
   self._highlightTexture = FakeFrame.new({
     frameType = "Texture",

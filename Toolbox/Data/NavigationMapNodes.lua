@@ -2,8 +2,8 @@
 @contract_id navigation_map_nodes
 @schema_version 1
 @contract_file WoWPlugin/DataContracts/navigation_map_nodes.json
-@contract_snapshot WoWTools/outputs/toolbox/contract_snapshots/navigation_map_nodes/navigation_map_nodes__schema_v1__20260426T193827Z.json
-@generated_at 2026-04-26T19:38:27Z
+@contract_snapshot WoWTools/outputs/toolbox/contract_snapshots/navigation_map_nodes/navigation_map_nodes__schema_v1__20260427T165923Z.json
+@generated_at 2026-04-27T16:59:23Z
 @generated_by WoWPlugin/scripts/export/export_toolbox_one.py
 @data_source wow.db
 @summary 地图导航基础 UiMap 节点
@@ -15,7 +15,7 @@ Toolbox.Data = Toolbox.Data or {}
 Toolbox.Data.NavigationMapNodes = {
   schemaVersion = 1,
   sourceMode = "live",
-  generatedAt = "2026-04-26T19:38:27Z",
+  generatedAt = "2026-04-27T16:59:23Z",
 
   nodes = {
     [1] = { ID = 1, ParentUiMapID = 12, MapType = 3, Name_lang = "杜隆塔尔" },
@@ -1181,6 +1181,7 @@ Toolbox.Data.NavigationMapNodes = {
     [1494] = { ID = 1494, ParentUiMapID = 876, MapType = 4, Name_lang = "麦卡贡" },
     [1497] = { ID = 1497, ParentUiMapID = 876, MapType = 4, Name_lang = "麦卡贡" },
     [1499] = { ID = 1499, ParentUiMapID = 1355, MapType = 5, Name_lang = "辛艾萨莉" },
+    [1500] = { ID = 1500, ParentUiMapID = 1355, MapType = 5, Name_lang = "Map #1500" },
     [1501] = { ID = 1501, ParentUiMapID = 876, MapType = 6, Name_lang = "潮落岛" },
     [1502] = { ID = 1502, ParentUiMapID = 424, MapType = 6, Name_lang = "琼花村" },
     [1504] = { ID = 1504, ParentUiMapID = 0, MapType = 2, Name_lang = "纳沙塔尔" },
@@ -1197,6 +1198,7 @@ Toolbox.Data.NavigationMapNodes = {
     [1521] = { ID = 1521, ParentUiMapID = 0, MapType = 6, Name_lang = "卡拉赞墓穴" },
     [1522] = { ID = 1522, ParentUiMapID = 1462, MapType = 5, Name_lang = "崩塌的洞穴" },
     [1523] = { ID = 1523, ParentUiMapID = 0, MapType = 3, Name_lang = "Solesa Naksu [DNT]" },
+    [1524] = { ID = 1524, ParentUiMapID = 1355, MapType = 5, Name_lang = "Map #1524" },
     [1525] = { ID = 1525, ParentUiMapID = 1550, MapType = 3, Name_lang = "雷文德斯" },
     [1527] = { ID = 1527, ParentUiMapID = 12, MapType = 3, Name_lang = "奥丹姆" },
     [1528] = { ID = 1528, ParentUiMapID = 947, MapType = 6, Name_lang = "纳沙塔尔" },
@@ -1439,6 +1441,7 @@ Toolbox.Data.NavigationMapNodes = {
     [1825] = { ID = 1825, ParentUiMapID = 1565, MapType = 5, Name_lang = "根须地窖" },
     [1826] = { ID = 1826, ParentUiMapID = 1565, MapType = 5, Name_lang = "根须地窖" },
     [1827] = { ID = 1827, ParentUiMapID = 1565, MapType = 5, Name_lang = "根须地窖" },
+    [1829] = { ID = 1829, ParentUiMapID = 1565, MapType = 5, Name_lang = "Map #1829" },
     [1833] = { ID = 1833, ParentUiMapID = 1543, MapType = 6, Name_lang = "托加斯特" },
     [1834] = { ID = 1834, ParentUiMapID = 1543, MapType = 6, Name_lang = "托加斯特" },
     [1835] = { ID = 1835, ParentUiMapID = 1543, MapType = 6, Name_lang = "托加斯特" },

@@ -384,6 +384,37 @@ def build_document_object_literal_contract() -> dict:
     return data
 
 
+def build_document_string_key_contract() -> dict:
+    data = build_document_contract()
+    data["contract"]["contract_id"] = "navigation_taxi_edges"
+    data["contract"]["summary"] = "公共交通测试"
+    data["output"]["lua_file"] = "Toolbox/Data/NavigationTaxiEdges.lua"
+    data["output"]["lua_table"] = "Toolbox.Data.NavigationTaxiEdges"
+    data["structure"]["document_blocks"] = [
+        {
+            "name": "metadata",
+            "metadata": {
+                "schemaVersion": 1,
+                "sourceMode": "live",
+                "generatedAt": "@generated_at",
+            },
+        },
+        {
+            "name": "nodes",
+            "block_type": "map_object",
+            "key_field": "route_node_key",
+            "required_fields": ["route_node_key", "taxi_node_id", "node_name"],
+            "dedupe_by": ["route_node_key"],
+            "sort_by": ["route_node_key"],
+            "value_template": {
+                "ID": "taxi_node_id",
+                "Name_lang": "node_name",
+            },
+        },
+    ]
+    return data
+
+
 class LuaContractWriterTests(unittest.TestCase):
     def load_contract(self, raw_data: dict, contract_id: str) -> object:
         with tempfile.TemporaryDirectory() as temp_dir_name:
@@ -577,6 +608,20 @@ class LuaContractWriterTests(unittest.TestCase):
             generated_by="writer-test",
         )
         self.assertIn("[5531] = { Enabled = true, Maybe = nil },", rendered_text)
+
+    def test_render_contract_lua_quotes_string_keys_in_document_map_object_blocks(self) -> None:
+        contract_document = self.load_contract(build_document_string_key_contract(), "navigation_taxi_edges")
+        rendered_text = render_contract_lua(
+            contract_document,
+            rows=[
+                {"route_node_key": "taxi_6", "taxi_node_id": 6, "node_name": "铁炉堡，丹莫罗"},
+            ],
+            contract_file=Path("WoWPlugin/DataContracts/navigation_taxi_edges.json"),
+            contract_snapshot=Path("snapshots/navigation_taxi_edges.json"),
+            generated_at=datetime(2026, 4, 27, 14, 22, 33, tzinfo=timezone.utc),
+            generated_by="writer-test",
+        )
+        self.assertIn('["taxi_6"] = { ID = 6, Name_lang = "铁炉堡，丹莫罗" },', rendered_text)
 
 
 if __name__ == "__main__":

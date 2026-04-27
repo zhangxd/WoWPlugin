@@ -37,6 +37,31 @@ EXPECTED_GENERATED_CONTRACTS = {
         "lua_table": "Toolbox.Data.NavigationMapNodes",
         "root_type": "document",
     },
+    "navigation_map_assignments": {
+        "lua_file": "Toolbox/Data/NavigationMapAssignments.lua",
+        "lua_table": "Toolbox.Data.NavigationMapAssignments",
+        "root_type": "document",
+    },
+    "navigation_instance_entrances": {
+        "lua_file": "Toolbox/Data/NavigationInstanceEntrances.lua",
+        "lua_table": "Toolbox.Data.NavigationInstanceEntrances",
+        "root_type": "document",
+    },
+    "navigation_taxi_edges": {
+        "lua_file": "Toolbox/Data/NavigationTaxiEdges.lua",
+        "lua_table": "Toolbox.Data.NavigationTaxiEdges",
+        "root_type": "document",
+    },
+    "navigation_route_edges": {
+        "lua_file": "Toolbox/Data/NavigationRouteEdges.lua",
+        "lua_table": "Toolbox.Data.NavigationRouteEdges",
+        "root_type": "document",
+    },
+    "instance_entrances": {
+        "lua_file": "Toolbox/Data/InstanceEntrances.lua",
+        "lua_table": "Toolbox.Data.InstanceEntrances",
+        "root_type": "document",
+    },
 }
 
 
@@ -46,7 +71,9 @@ def require(condition: bool, message: str) -> None:
 
 
 def read_text(*parts: str) -> str:
-    return ROOT.joinpath(*parts).read_text(encoding="utf-8")
+    file_path = ROOT.joinpath(*parts)
+    require(file_path.exists(), f"missing file: {file_path}")
+    return file_path.read_text(encoding="utf-8")
 
 
 def parse_tagged_header(text: str) -> dict[str, str]:
@@ -138,9 +165,65 @@ def validate_contract(contract_id: str, expected_meta: dict[str, str]) -> None:
     require(header_metadata.get("data_source") == "wow.db", f"{contract_id}: lua header data_source mismatch")
 
 
+def validate_toc_loads_generated_data(expected_contracts: dict[str, dict[str, str]]) -> None:
+    toc_text = read_text("Toolbox", "Toolbox.toc")
+    for contract_id, expected_meta in expected_contracts.items():
+        lua_file = expected_meta["lua_file"]
+        if not lua_file.startswith("Toolbox/Data/"):
+            continue
+        toc_entry = lua_file.removeprefix("Toolbox/").replace("/", "\\")
+        require(toc_entry in toc_text, f"{contract_id}: missing TOC data entry {toc_entry}")
+
+
+def validate_navigation_instance_entrance_regressions() -> None:
+    lua_text = read_text("Toolbox", "Data", "NavigationInstanceEntrances.lua")
+    razorfen_downs_match = re.search(r"\[233\]\s*=\s*\{([^}]+)\}", lua_text)
+    require(razorfen_downs_match is not None, "navigation_instance_entrances: missing Razorfen Downs journalInstanceID 233")
+    razorfen_downs_row = razorfen_downs_match.group(1)
+    require("Name_lang = \"剃刀高地\"" in razorfen_downs_row, "navigation_instance_entrances: Razorfen Downs name mismatch")
+    require("InstanceMapID = 129" in razorfen_downs_row, "navigation_instance_entrances: Razorfen Downs instance map trace missing")
+    require("TargetUiMapID = 64" in razorfen_downs_row, "navigation_instance_entrances: Razorfen Downs must target the external Thousand Needles map")
+    require("TargetX = 0.762069" in razorfen_downs_row, "navigation_instance_entrances: Razorfen Downs target X mismatch")
+    require("TargetY = 0.521909" in razorfen_downs_row, "navigation_instance_entrances: Razorfen Downs target Y mismatch")
+
+
+def validate_instance_entrance_regressions() -> None:
+    lua_text = read_text("Toolbox", "Data", "InstanceEntrances.lua")
+    dire_maul_center_match = re.search(r"\[230\]\s*=\s*\{(.*?)\n\s*\},", lua_text, re.S)
+    require(dire_maul_center_match is not None, "instance_entrances: missing Dire Maul center garden journalInstanceID 230")
+    dire_maul_center_rows = dire_maul_center_match.group(1)
+    require(
+        'Source = "areapoi"' in dire_maul_center_rows,
+        "instance_entrances: Dire Maul center garden must use exact areapoi source",
+    )
+    require(
+        "AreaPoiID = 6501" in dire_maul_center_rows,
+        "instance_entrances: Dire Maul center garden must keep areaPoiID 6501",
+    )
+    require(
+        "HintUiMapID = 69" in dire_maul_center_rows,
+        "instance_entrances: Dire Maul center garden must hint the Feralas uiMapID 69",
+    )
+    require(
+        'Source = "journalinstanceentrance"' not in dire_maul_center_rows,
+        "instance_entrances: Dire Maul center garden must not use split-wing journalinstanceentrance rows",
+    )
+
+    gordok_match = re.search(r"\[1277\]\s*=\s*\{(.*?)\n\s*\},", lua_text, re.S)
+    require(gordok_match is not None, "instance_entrances: missing Gordok Council journalInstanceID 1277")
+    gordok_rows = gordok_match.group(1)
+    require(
+        'Source = "journalinstanceentrance"' in gordok_rows,
+        "instance_entrances: Gordok Council must keep journalinstanceentrance source",
+    )
+
+
 def main() -> int:
     for contract_id, expected_meta in EXPECTED_GENERATED_CONTRACTS.items():
         validate_contract(contract_id, expected_meta)
+    validate_toc_loads_generated_data(EXPECTED_GENERATED_CONTRACTS)
+    validate_navigation_instance_entrance_regressions()
+    validate_instance_entrance_regressions()
     print("OK: data contracts validated")
     return 0
 

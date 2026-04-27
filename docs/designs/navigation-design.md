@@ -24,7 +24,7 @@
 - 建立清晰的路径图模型：节点、边、边权、可用性过滤和最短路径求解分层。
 - 第一版能用保守数据给出稳定路线，而不是因未知能力误推荐不可用路径。
 - 顶部路径 UI 简洁展示每个地点 / 步骤，先解决“该怎么走”，不做复杂地图内动画。
-- 数据维护可演进：基础地图数据走契约导出，玩法路径边人工维护并可逐步扩充。
+- 数据维护只走契约导出：所有导航运行时数据必须从数据库契约生成，缺失的玩法路径不以手工 ID 补洞。
 
 ## 3. 非目标
 
@@ -73,14 +73,14 @@
 | `Toolbox/Modules/Navigation/WorldMap.lua` | 世界地图目标选择入口；查证并封装 `C_Map` / WorldMapFrame 相关调用。 |
 | `Toolbox/Modules/Navigation/RouteBar.lua` | 顶部中间路径 UI，负责显示步骤、清除路线、刷新布局。 |
 | `Toolbox/Data/NavigationMapNodes.lua` | DB2 / WoWDB 导出的地图基础节点或区域节点，需对应 `DataContracts` 契约。 |
-| `Toolbox/Data/NavigationManualEdges.lua` | 人工维护玩法路径边与连接器锚点：职业传送、传送门房、炉石类能力、主城与资料片枢纽。 |
 | `DataContracts/navigation_map_nodes.json` | 地图基础节点导出契约。 |
-| `DataContracts/navigation_taxi_edges.json` | 公共交通 `Taxi*` draft 契约，输出当前实现可直接消费的 `NavigationTaxiEdges` 形状。 |
+| `DataContracts/navigation_taxi_edges.json` | Taxi 来源侧追溯契约；不作为运行时路线边来源。 |
+| `DataContracts/navigation_route_edges.json` | 运行时统一路线边 active 契约，导出 `UiMapLink` 与 `waypointedge` 解析出的直连边，输出 `NavigationRouteEdges` 供 `Toolbox.Navigation` 构图消费。 |
 
 说明：
 
 - 文件拆分可在实施时按实际复杂度收缩，但 `Core/API/Navigation.lua` 与 `Modules/Navigation.lua` 的 API / 模块边界必须保留。
-- 若第一版人工维护边不适合放在 `Toolbox/Data`，可以先放在 `Toolbox/Modules/Navigation/Data.lua`；但玩家路径数据若需要跨模块复用，应尽早迁入 `Toolbox/Data`。
+- 禁止新增 `Toolbox/Data/NavigationManualEdges.lua` 或模块内手工数据表作为导航运行时数据源；需要新数据时先新增或更新 DataContracts 契约并实跑导出。
 
 ### 5.2 路径图模型
 
@@ -91,10 +91,10 @@
   - 地图内抽象连接点，例如目标地图入口或区域中心。
 - 边：
   - 地图内移动边：按地图距离估算耗时。
-  - 公共交通边：`TaxiNodes / TaxiPath / TaxiPathNode` 可直接导出飞艇 / 船 / 电车等公共交通边；当前先以模拟数据验证导航消费，后续再接正式导出。
+  - DB 明确关系边：当前 `navigation_route_edges` 导出 `UiMapLink` 显式 UI 地图链接，以及基于 `waypointedge` + `UiMap/MapID` 关系解析出的主城传送 / 公共交通直连边。
   - 职业技能边：例如法师传送 / 传送门；长期更适合先导出“职业旅行技能候选”，再补落点归一化。
   - 炉石类边：普通炉石、特殊炉石或同类能力。
-  - 传送门房 / 枢纽边：当前仍以人工维护可达关系为主；后续可先导出“传送门候选”，再补目的地归一化。
+  - 传送门房 / 枢纽边：必须通过后续数据库契约导出；未能导出最终目的地、落点坐标与限制条件前，不进入运行时图。
 - 边权：
   - 读条时间。
   - 交互 / 换乘固定成本。
@@ -117,23 +117,15 @@
 ### 5.3 静态连接器与运行时可用性
 
 - `NavigationMapNodes.lua` 继续只承担地图层级与名称，不承担“是否可通行”的业务语义。
-- `NavigationManualEdges.lua` 当前负责维护高价值连接器与目标规则；即使后续接入更多导出表，至少在当前求解器模型下仍需要承担一层归一化与 `targetRules` 维护职责。
-- 当前实现仍依赖 `targetRules[targetMapID].viaNodes` 把“中转枢纽 / 落点”连接到最终目标图；仅增加导出边，不能自动替代全部手工维护。
-- `NavigationManualEdges.lua` 建议扩展以下信息：
-  - 节点锚点坐标：城市中心、传送门房、职业落点等 `uiMapID/x/y`
-  - 目标规则落点：`arrivalUiMapID/arrivalX/arrivalY/baseCost/label`
-  - 边的固定世界事实：`from/to/mode/baseCost`
-  - 边的运行时可用性要求：职业、阵营、法术、玩具、手动确认解锁等
-- 公共交通边分两阶段：
-  - 本轮：用模拟数据验证飞艇 / 船样板可进入导航骨架与求解。
-  - 后续：再落 `TaxiNodes / TaxiPath / TaxiPathNode` 的正式导出契约与 Data 文件。
-- 当前已补 `navigation_taxi_edges` draft 契约，采用以下保守规则：
-  - 只保留 `TaxiPathNode.Delay > 0` 或 stop flag 命中的路径，作为飞艇 / 船 / 电车等公共交通候选。
-  - `TaxiNodes.ContinentID` 指向 `Map::ID`，而当前导航消费 `UiMapID`；draft 契约先通过 `UiMapAssignment.MapID -> MIN(UiMapID)` 做保守映射，待真实环境验证后再决定是否升级为区域包含判定。
-- 公共交通正式导出边界：
-  - `TaxiPath` 已明确提供起点、终点与成本，适合作为最终公共交通边主表。
-  - `TaxiNodes` 提供节点地图、名称与条件字段，适合作为公共交通节点主表。
-  - `TaxiPathNode` 提供路径特征与停靠特征，适合用于识别飞艇 / 船 / 电车并补充调试信息。
+- `NavigationManualEdges.lua` 不再是运行时数据源，也不得作为目标规则、连接器或落点坐标的维护位置。
+- `targetRules[targetMapID].viaNodes` 仍是求解器可消费的结构，但只能由 `navigation_route_edges` 这类统一运行时契约导出的 Data 文件提供；未导出的目标不生成中转连接边。
+- 新增或修正节点锚点坐标、目标规则落点、路径边、职业 / 阵营 / 法术限制、成本与标签时，必须提升对应 `contract_id` 的 `schema_version` 并重新导出。
+- 运行时路线边来源边界：
+  - `navigation_route_edges` 当前允许导出 `UiMapLink` 明确 UiMap 链接边，以及 `waypointedge` 解析出的 `UiMap -> UiMap` 直连边。
+  - `navigation_map_assignments` 仅保留 `UiMap <-> MapID` 关系，不再导出 `Region_*` / `UiMin*` / `UiMax*` 坐标字段。
+  - 禁止从 `UiMapAssignment.Region_*`、`WaypointSafeLocs`、矩形覆盖、相交、包含、采样点、轨迹点或 `ParentUiMapID` 推导“地图可前往地图”。
+  - `navigation_taxi_edges` 仅保留来源侧追溯，不进入运行时构图；普通飞行管理员路线不作为导航节点或路线边。
+  - 当前地图到邻接地图的“前往”步骤只能来自数据库明确关系；若数据库没有明确关系，运行时不补兜底边。
 - 传送门候选数据边界：
   - 世界门 / 副本门类优先评估 `AreaTrigger`，必要时辅以 `GameObjects` 识别门对象或可交互入口。
   - 该链路按当前已确认表定义，能导出“某地图有哪些传送门候选、位于何处、带哪些阶段限制”，但尚不能稳定还原最终目的地、落点坐标与单向/双向语义。
@@ -141,10 +133,10 @@
 - 职业旅行技能候选边界：
   - `SkillLineAbility` 可提供职业 / 法术关联，`ChrClasses` 可解出职业身份，`SpellEffect` 可辅助识别传送类技能。
   - 该链路能导出“哪些职业有哪些候选旅行技能”，但目的地地图、落点坐标、技能别名 / 替代 spell 归并仍需一层归一化。
-  - 因此职业传送更适合作为 `navigation_spell_travel_candidates` 一类候选表，再由手工规则或后续更强的数据链补齐最终边。
+  - 因此职业传送更适合作为 `navigation_spell_travel_candidates` 一类候选表，再由后续更强的数据链补齐最终边。
 - 数据源长期口径：
   - 公共交通边追求“直接导出最终边”。
-  - 传送门与职业旅行技能追求“优先导出候选，薄手工归一化”，当前不承诺彻底零手工维护。
+  - 传送门与职业旅行技能追求“优先导出候选，后续数据链归一化”；当前不允许手工归一化进入运行时图。
 - 解锁策略拆层：
   - 固定世界事实静态维护，不进入运行时判断。
   - 玩家是否可用运行时过滤，不写回静态导出。
@@ -227,7 +219,7 @@
 ## 6. 影响面
 
 - 数据与存档：
-  新增 `ToolboxDB.modules.navigation`；新增地图基础数据契约与人工维护路径边。
+  新增 `ToolboxDB.modules.navigation`；新增地图基础数据契约与公共交通契约，后续副本入口和其它导航数据继续以独立契约接入。
 - API 与模块边界：
   新增 `Toolbox.Navigation` 领域 API；`navigation` 模块只负责入口、设置和 UI。
 - 文件与目录：
@@ -242,7 +234,7 @@
 - 缓解：
   实现前逐项查证 API，并对不稳定 API 使用存在性判断或 `pcall`。
 - 风险：
-  人工维护路径边数据不全会导致路线偏保守。
+  数据库契约尚未覆盖的玩法路径会导致路线偏保守。
 - 缓解：
   第一版明确保守策略，不把未知边推荐为首选；逐步扩充高价值边。
 - 风险：
@@ -258,7 +250,7 @@
   - Dijkstra 按最小耗时选择路线。
   - 未知可用性边被过滤。
   - 法师奥格瑞玛 / 银月城 / 雷霆崖 / 幽暗城 / 沙塔斯城等已确认主城传送优先于纯地图内移动。
-  - 当前位置为手工枢纽节点时，可使用公共传送门网络继续规划。
+  - 当前位置为导出枢纽节点时，可使用已导出的公共交通或传送网络继续规划。
   - 死亡骑士、德鲁伊、武僧等已确认职业位移边可作为独立入口参与求解。
   - 非对应职业或未确认技能时不使用对应职业边。
   - 世界地图按钮读取用户 waypoint；无 waypoint 时不生成路线。
@@ -269,8 +261,8 @@
 - 数据测试：
   - `DataContracts/navigation_map_nodes.json` 与生成文件头校验通过。
   - 模拟公共交通数据至少覆盖奥格瑞玛到北风苔原这类飞艇 / 船样板。
-  - 人工维护边不包含无法解析的节点 ID。
-  - 人工维护的落点坐标满足 `0..1`，且 `arrivalUiMapID` 能映射到已知地图节点。
+  - 生成型导航边不包含无法解析的节点 ID。
+  - 导出的落点坐标满足 `0..1`，且 `arrivalUiMapID` 能映射到已知地图节点。
 - 游戏内验证：
   - 世界地图已有用户 waypoint 时，点击“规划路线”后顶部路径 UI 出现。
   - 路径步骤顺序可读，清除路线后 UI 隐藏。
@@ -283,5 +275,8 @@
 | 日期 | 内容 |
 |------|------|
 | 2026-04-27 | 初稿：确认新建 `navigation` 模块、混合数据源、Dijkstra 路径图与顶部路径 UI 设计 |
+| 2026-04-27 | 数据源规则收紧：`NavigationManualEdges.lua` 不再作为运行时数据源，所有导航节点、边、目标规则、坐标与限制必须从契约导出 |
 | 2026-04-27 | 复审修订：目标源改为用户 waypoint，加入 `x/y` 成本模型、静态连接器/运行时过滤拆层与缓存策略，并明确排除 tooltip 与 EJ 性能修复 |
 | 2026-04-27 | 数据源补充：公共交通边长期主方案确认使用 `Taxi*` 自动导出；当前执行边界先用模拟飞艇 / 船数据验证导航消费，真实导出待后续单独立项 |
+| 2026-04-27 | 用户确认“开动”：真实 `Taxi*` 导出进入执行范围，`navigation_taxi_edges` 从 draft 推进为 active，生成 `NavigationTaxiEdges.lua` 并加入 TOC |
+| 2026-04-27 | 路线边统一导出：新增 `navigation_route_edges` active 契约，`NavigationRouteEdges.lua` 成为 `Toolbox.Navigation` 唯一运行时路线边入口 |

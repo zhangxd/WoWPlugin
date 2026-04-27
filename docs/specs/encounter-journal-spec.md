@@ -18,6 +18,7 @@
 - 需要一份只描述当前 `encounter_journal` 真实边界的需求基线，作为后续继续演进副本列表和详情页增强时的验收对照。
 - 2026-04-27 用户确认新增“副本列表入口导航”，并在后续反馈中修正落点：图钉按钮应显示在冒险指南地下城 / 团队副本列表条目的右下角，而不是副本详情页；点击后打开世界地图到该副本入口并设置系统导航目标。
 - 2026-04-27 用户继续确认列表交互增强：单击列表条目时建立焦点，双击同一条目时进入副本；图钉替换为更高辨识度的高亮版，并新增“定位图标常驻显示”设置。未勾选时，图钉在当前焦点行或鼠标悬停行显示；勾选后所有可导航条目常驻显示。
+- 2026-04-27 用户反馈 `厄运之槌 - 戈多克议会` 的运行时入口 API 无精确返回；经只读调查确认 `areapoi` / `C_EncounterJournal.GetDungeonEntrancesForMap` 只返回聚合入口 `230`，而 `journalinstanceentrance` 在 DB 中保留 `1276 / 1277` 的精确世界坐标。用户确认新增 DB 导出的静态副本入口数据，运行时在选中 / 点击副本图钉时按 `journalInstanceID` 读取静态表补足缺口。
 
 ## 2. 目标
 
@@ -47,7 +48,7 @@
 - “任务”小地图入口。
 - Tooltip 锚点、窗口拖动、聊天 API 等与冒险指南无关的模块能力。
 - 副本内部 boss、楼层、门、传送点或路径规划坐标。
-- 手写静态入口坐标表；第一版只使用 Blizzard 运行时入口数据。
+- 手写静态入口坐标表；入口静态数据必须从 `wow.db` 通过契约导出生成。
 
 ## 4. 已确认决策
 
@@ -57,7 +58,10 @@
 - `encounter_journal` 当前只保留副本列表、详情页和锁定摘要相关逻辑；任务能力已经迁移到 `quest` 模块。
 - `ToolboxDB.modules.encounter_journal` 当前只保留 `mountFilterEnabled`、`lockoutOverlayEnabled`、`detailMountOnlyEnabled` 等本模块独占字段；旧任务相关键已迁移或清理。
 - 本轮新增 `ToolboxDB.modules.encounter_journal.listPinAlwaysVisible` 字段，默认关闭，用于控制副本列表图钉是否常驻显示。
-- 入口数据主来源为 `C_EncounterJournal.GetDungeonEntrancesForMap(uiMapID)`；不手写副本入口坐标。
+- 入口数据来源以 DB 导出的 `Toolbox.Data.InstanceEntrances[journalInstanceID]` 为主；选中 / 点击冒险指南条目时按该 `journalInstanceID` 直接读取静态表。运行时 `C_EncounterJournal.GetDungeonEntrancesForMap(uiMapID)` 只作为静态表缺失时的兜底，不得抢占静态数据。
+- `Toolbox.Data.InstanceEntrances` 的来源为 `wow.db.areapoi` + `wow.db.journalinstanceentrance`：若 `areapoi` 存在 `PoiDataType=1` 且 `PoiData=<journalInstanceID>` 的精确副本 POI，则该 ID 优先使用 `areapoi`，并排除同 ID 的 `journalinstanceentrance` 门候选；否则使用 `journalinstanceentrance` 分翼入口，并关联 `journalinstance`、`areatable`、`uimapassignment`、`uimap` 补充副本名、区域名与 `HintUiMapID`。
+- 静态入口导出保留多入口记录、世界坐标、来源字段和可选 `HintUiMapID`；插件运行时通过 `C_Map.GetMapPosFromWorldPos` 将世界坐标转换为 waypoint 需要的地图坐标。
+- 不因 `journalinstance.MapID` 相同、名称相近或同属一个副本组而自动共用入口；没有精确 `journalInstanceID` 来源时，不显示误导性静态导航。
 - 点击按钮后执行“打开世界地图 + 切到入口所在地图 + `C_Map.SetUserWaypoint` + `C_SuperTrack.SetSuperTrackedUserWaypoint(true)`”。
 - 找不到入口或当前地图不允许设置 waypoint 时，不报 Lua 错误；按钮置灰或聊天提示说明不可导航。
 - 副本列表图钉显示规则固定为：
@@ -70,7 +74,7 @@
 
 ## 5. 待确认项
 
-- 无。2026-04-27 已确认按本文件“导航入口 + 列表焦点交互”规则开动实现。
+- 无。2026-04-27 已确认按本文件“DB 静态入口按 `journalInstanceID` 直接读取 + 列表焦点交互”规则开动实现。
 
 ## 6. 验收标准
 
@@ -88,11 +92,13 @@
 12. 在有入口数据的副本 / 地下城列表条目右下角，用户能看到更高辨识度的高亮图钉按钮。
 13. 点击某个列表条目的图钉按钮后，世界地图打开到该条目副本入口所在地图，并创建系统用户导航目标且开始追踪。
 14. 对无入口数据、API 不可用或地图不允许设置导航的副本，插件不抛 Lua 错误，并给出可理解的不可用反馈。
+15. 当运行时入口 API 未返回当前 `journalInstanceID` 的精确入口，但 DB 静态表存在该 ID 的入口记录时，图钉导航使用静态入口数据；`厄运之槌 - 戈多克议会` 应能从静态数据命中自身记录，而不是兜到聚合入口 `230`。
+16. 新增 `Toolbox/Data/InstanceEntrances.lua` 必须由 `DataContracts/instance_entrances.json` 和正式导出脚本生成，文件头满足数据库生成文件规范。
 
 ## 7. 实施状态
 
 - 当前状态：已完成
-- 下一步：在游戏内补齐副本列表图钉导航手工验证。
+- 下一步：在游戏内补齐 `厄运之槌 - 戈多克议会` 与更多旧副本入口的手工验证。
 
 ## 8. 修订记录
 
@@ -103,3 +109,7 @@
 | 2026-04-27 | 用户确认“开动”：新增副本入口导航需求，选定运行时入口数据与系统 waypoint 方案 |
 | 2026-04-27 | 用户修正入口落点：从详情页按钮改为副本列表条目右下角图钉 |
 | 2026-04-27 | 用户确认列表交互增强：单击焦点、双击进入、图钉高亮版与“定位图标常驻显示”设置 |
+| 2026-04-27 | 用户确认新增 DB 静态入口数据：从 `journalinstanceentrance` 导出精确入口，运行时按 `journalInstanceID` 读取静态表补足入口 API 缺口 |
+| 2026-04-27 | 修正 `厄运之槌 - 中心花园` 数据源优先级：`areapoi` 精确 POI 优先，避免使用分翼门候选坐标 |
+| 2026-04-28 | 修正入口读取优先级：选中冒险指南条目时直接按 `journalInstanceID` 读取 DB 静态表，运行时入口 API 仅作缺数据兜底 |
+| 2026-04-28 | 修正静态入口目标地图：`areapoi` 来源也必须导出 `HintUiMapID`，确保导航后打开对应区域地图 |

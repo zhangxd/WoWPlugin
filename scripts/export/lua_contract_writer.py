@@ -214,6 +214,12 @@ def render_comment_from_template(row: Mapping[str, Any], comment_template: Mappi
     return ", ".join(comment_parts)
 
 
+def render_lua_table_key(key_value: Any) -> str:
+    """渲染 Lua 表键，字符串键必须加引号以避免被当作全局变量。"""
+
+    return f"[{render_lua_literal(key_value)}]"
+
+
 def render_document(
     contract_document: ContractDocument,
     rows: list[Mapping[str, Any]],
@@ -265,7 +271,7 @@ def render_document(
             for row in block_rows:
                 key_value = row[key_field]
                 rendered_object = render_object_value_from_template(row, value_template)
-                line_text = f"    [{key_value}] = {rendered_object},"
+                line_text = f"    {render_lua_table_key(key_value)} = {rendered_object},"
                 if comment_template:
                     line_text += f" -- {render_comment_from_template(row, comment_template)}"
                 lines.append(line_text)

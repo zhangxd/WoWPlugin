@@ -1,0 +1,240 @@
+{
+  "contract": {
+    "contract_id": "navigation_instance_entrances",
+    "schema_version": 1,
+    "summary": "导航副本入口外部目标",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/NavigationInstanceEntrances.lua",
+    "lua_table": "Toolbox.Data.NavigationInstanceEntrances",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "journalinstanceentrance",
+      "journalinstance",
+      "areapoi",
+      "uimapassignment",
+      "uimap"
+    ],
+    "sql": "SELECT 1 AS placeholder",
+    "query": {
+      "from": "journalinstanceentrance",
+      "joins": [
+        "journalinstance ON journalinstance.ID = journalinstanceentrance.JournalInstanceID",
+        "areapoi ON areapoi.PoiData = journalinstance.ID AND areapoi.PoiDataType = 1",
+        "uimapassignment ON uimapassignment.MapID = journalinstanceentrance.MapID",
+        "uimap ON uimap.ID = uimapassignment.UiMapID"
+      ],
+      "select": [
+        "journal_instance_id",
+        "entrance_id",
+        "instance_name",
+        "instance_map_id",
+        "target_ui_map_id",
+        "target_x",
+        "target_y"
+      ],
+      "where": [
+        "入口世界坐标落在 UiMapAssignment 覆盖范围内",
+        "首选 UiMap 优先使用副本内部 UiMap 的父地图"
+      ],
+      "group_by": [],
+      "order_by": [
+        "journal_instance_id ASC"
+      ],
+      "row_granularity": "一行代表一个 journalInstance 的首选外部入口目标"
+    },
+    "datasets": {
+      "entrances": {
+        "sql": "WITH instance_maps AS (SELECT CAST(ji.ID AS INTEGER) AS journal_instance_id, MIN(CAST(u.UiMapID AS INTEGER)) AS instance_ui_map_id, MIN(CAST(m.ParentUiMapID AS INTEGER)) AS instance_parent_ui_map_id FROM journalinstance ji JOIN uimapassignment u ON CAST(u.MapID AS INTEGER) = CAST(ji.MapID AS INTEGER) JOIN uimap m ON CAST(m.ID AS INTEGER) = CAST(u.UiMapID AS INTEGER) WHERE CAST(ji.ID AS INTEGER) > 0 AND CAST(ji.MapID AS INTEGER) > 0 AND CAST(u.UiMapID AS INTEGER) > 0 GROUP BY CAST(ji.ID AS INTEGER)), poi_rows AS (SELECT CAST(PoiData AS INTEGER) AS journal_instance_id, MIN(CAST(ID AS INTEGER)) AS area_poi_id, MIN(Name_lang) AS area_poi_name FROM areapoi WHERE CAST(PoiDataType AS INTEGER) = 1 AND CAST(PoiData AS INTEGER) > 0 GROUP BY CAST(PoiData AS INTEGER)), candidates AS (SELECT CAST(jie.ID AS INTEGER) AS entrance_id, CAST(jie.JournalInstanceID AS INTEGER) AS journal_instance_id, ji.Name_lang AS instance_name, CAST(ji.MapID AS INTEGER) AS instance_map_id, CAST(jie.MapID AS INTEGER) AS world_map_id, CAST(COALESCE(jie.AreaTableID, 0) AS INTEGER) AS area_table_id, CAST(COALESCE(jie.Faction, -1) AS INTEGER) AS faction, CAST(jie.Position_0 AS REAL) AS world_x, CAST(jie.Position_1 AS REAL) AS world_y, CAST(jie.Position_2 AS REAL) AS world_z, p.area_poi_id AS area_poi_id, p.area_poi_name AS area_poi_name, im.instance_ui_map_id AS instance_ui_map_id, im.instance_parent_ui_map_id AS instance_parent_ui_map_id, CAST(a.ID AS INTEGER) AS assignment_id, CAST(a.UiMapID AS INTEGER) AS target_ui_map_id, u.Name_lang AS target_ui_map_name, CAST(COALESCE(u.Type, 0) AS INTEGER) AS target_ui_map_type, CAST(COALESCE(a.AreaID, 0) AS INTEGER) AS assignment_area_id, CAST(COALESCE(a.OrderIndex, 0) AS INTEGER) AS assignment_order_index, ROUND(CAST(a.UiMin_0 AS REAL) + ((CAST(jie.Position_0 AS REAL) - CAST(a.Region_0 AS REAL)) / (CAST(a.Region_3 AS REAL) - CAST(a.Region_0 AS REAL))) * (CAST(a.UiMax_0 AS REAL) - CAST(a.UiMin_0 AS REAL)), 6) AS target_x, ROUND(CAST(a.UiMin_1 AS REAL) + ((CAST(jie.Position_1 AS REAL) - CAST(a.Region_1 AS REAL)) / (CAST(a.Region_4 AS REAL) - CAST(a.Region_1 AS REAL))) * (CAST(a.UiMax_1 AS REAL) - CAST(a.UiMin_1 AS REAL)), 6) AS target_y, CASE WHEN CAST(a.UiMapID AS INTEGER) = im.instance_parent_ui_map_id THEN 0 WHEN CAST(COALESCE(a.AreaID, 0) AS INTEGER) = CAST(COALESCE(jie.AreaTableID, 0) AS INTEGER) THEN 1 WHEN CAST(COALESCE(u.Type, 0) AS INTEGER) = 3 THEN 2 WHEN CAST(COALESCE(u.Type, 0) AS INTEGER) = 2 THEN 3 ELSE 4 END AS candidate_rank FROM journalinstanceentrance jie JOIN journalinstance ji ON CAST(ji.ID AS INTEGER) = CAST(jie.JournalInstanceID AS INTEGER) LEFT JOIN instance_maps im ON im.journal_instance_id = CAST(jie.JournalInstanceID AS INTEGER) LEFT JOIN poi_rows p ON p.journal_instance_id = CAST(jie.JournalInstanceID AS INTEGER) JOIN uimapassignment a ON CAST(a.MapID AS INTEGER) = CAST(jie.MapID AS INTEGER) JOIN uimap u ON CAST(u.ID AS INTEGER) = CAST(a.UiMapID AS INTEGER) WHERE CAST(jie.ID AS INTEGER) > 0 AND CAST(jie.JournalInstanceID AS INTEGER) > 0 AND CAST(jie.MapID AS INTEGER) > 0 AND CAST(a.Region_0 AS REAL) != CAST(a.Region_3 AS REAL) AND CAST(a.Region_1 AS REAL) != CAST(a.Region_4 AS REAL) AND CAST(jie.Position_0 AS REAL) BETWEEN MIN(CAST(a.Region_0 AS REAL), CAST(a.Region_3 AS REAL)) AND MAX(CAST(a.Region_0 AS REAL), CAST(a.Region_3 AS REAL)) AND CAST(jie.Position_1 AS REAL) BETWEEN MIN(CAST(a.Region_1 AS REAL), CAST(a.Region_4 AS REAL)) AND MAX(CAST(a.Region_1 AS REAL), CAST(a.Region_4 AS REAL))), ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY journal_instance_id ORDER BY candidate_rank ASC, target_ui_map_type DESC, assignment_order_index ASC, target_ui_map_id ASC, assignment_id ASC) AS candidate_order FROM candidates WHERE target_x BETWEEN 0 AND 1 AND target_y BETWEEN 0 AND 1) SELECT journal_instance_id, entrance_id, instance_name, instance_map_id, world_map_id, area_table_id, faction, world_x, world_y, world_z, area_poi_id, area_poi_name, instance_ui_map_id, instance_parent_ui_map_id, assignment_id, target_ui_map_id, target_ui_map_name, target_ui_map_type, target_x, target_y, candidate_rank FROM ranked WHERE candidate_order = 1 ORDER BY journal_instance_id",
+        "query": {
+          "from": "journalinstanceentrance",
+          "joins": [
+            "journalinstance",
+            "areapoi",
+            "uimapassignment",
+            "uimap"
+          ],
+          "select": [
+            "journal_instance_id",
+            "entrance_id",
+            "instance_name",
+            "instance_map_id",
+            "target_ui_map_id",
+            "target_x",
+            "target_y"
+          ],
+          "where": [
+            "入口世界坐标命中 UiMapAssignment",
+            "candidate_order = 1"
+          ],
+          "group_by": [],
+          "order_by": [
+            "journal_instance_id ASC"
+          ],
+          "row_granularity": "一行代表一个首选副本入口外部目标"
+        }
+      },
+      "candidates": {
+        "sql": "WITH instance_maps AS (SELECT CAST(ji.ID AS INTEGER) AS journal_instance_id, MIN(CAST(u.UiMapID AS INTEGER)) AS instance_ui_map_id, MIN(CAST(m.ParentUiMapID AS INTEGER)) AS instance_parent_ui_map_id FROM journalinstance ji JOIN uimapassignment u ON CAST(u.MapID AS INTEGER) = CAST(ji.MapID AS INTEGER) JOIN uimap m ON CAST(m.ID AS INTEGER) = CAST(u.UiMapID AS INTEGER) WHERE CAST(ji.ID AS INTEGER) > 0 AND CAST(ji.MapID AS INTEGER) > 0 AND CAST(u.UiMapID AS INTEGER) > 0 GROUP BY CAST(ji.ID AS INTEGER)), candidates AS (SELECT CAST(jie.JournalInstanceID AS INTEGER) AS journal_instance_id, CAST(jie.ID AS INTEGER) AS entrance_id, im.instance_parent_ui_map_id AS instance_parent_ui_map_id, CAST(a.ID AS INTEGER) AS assignment_id, CAST(a.UiMapID AS INTEGER) AS target_ui_map_id, u.Name_lang AS target_ui_map_name, CAST(COALESCE(u.Type, 0) AS INTEGER) AS target_ui_map_type, CAST(COALESCE(a.AreaID, 0) AS INTEGER) AS assignment_area_id, ROUND(CAST(a.UiMin_0 AS REAL) + ((CAST(jie.Position_0 AS REAL) - CAST(a.Region_0 AS REAL)) / (CAST(a.Region_3 AS REAL) - CAST(a.Region_0 AS REAL))) * (CAST(a.UiMax_0 AS REAL) - CAST(a.UiMin_0 AS REAL)), 6) AS target_x, ROUND(CAST(a.UiMin_1 AS REAL) + ((CAST(jie.Position_1 AS REAL) - CAST(a.Region_1 AS REAL)) / (CAST(a.Region_4 AS REAL) - CAST(a.Region_1 AS REAL))) * (CAST(a.UiMax_1 AS REAL) - CAST(a.UiMin_1 AS REAL)), 6) AS target_y, CASE WHEN CAST(a.UiMapID AS INTEGER) = im.instance_parent_ui_map_id THEN 0 WHEN CAST(COALESCE(a.AreaID, 0) AS INTEGER) = CAST(COALESCE(jie.AreaTableID, 0) AS INTEGER) THEN 1 WHEN CAST(COALESCE(u.Type, 0) AS INTEGER) = 3 THEN 2 WHEN CAST(COALESCE(u.Type, 0) AS INTEGER) = 2 THEN 3 ELSE 4 END AS candidate_rank FROM journalinstanceentrance jie JOIN journalinstance ji ON CAST(ji.ID AS INTEGER) = CAST(jie.JournalInstanceID AS INTEGER) LEFT JOIN instance_maps im ON im.journal_instance_id = CAST(jie.JournalInstanceID AS INTEGER) JOIN uimapassignment a ON CAST(a.MapID AS INTEGER) = CAST(jie.MapID AS INTEGER) JOIN uimap u ON CAST(u.ID AS INTEGER) = CAST(a.UiMapID AS INTEGER) WHERE CAST(jie.ID AS INTEGER) > 0 AND CAST(jie.JournalInstanceID AS INTEGER) > 0 AND CAST(jie.MapID AS INTEGER) > 0 AND CAST(a.Region_0 AS REAL) != CAST(a.Region_3 AS REAL) AND CAST(a.Region_1 AS REAL) != CAST(a.Region_4 AS REAL) AND CAST(jie.Position_0 AS REAL) BETWEEN MIN(CAST(a.Region_0 AS REAL), CAST(a.Region_3 AS REAL)) AND MAX(CAST(a.Region_0 AS REAL), CAST(a.Region_3 AS REAL)) AND CAST(jie.Position_1 AS REAL) BETWEEN MIN(CAST(a.Region_1 AS REAL), CAST(a.Region_4 AS REAL)) AND MAX(CAST(a.Region_1 AS REAL), CAST(a.Region_4 AS REAL))) SELECT journal_instance_id, entrance_id, assignment_id, target_ui_map_id, target_ui_map_name, target_ui_map_type, assignment_area_id, target_x, target_y, candidate_rank FROM candidates WHERE target_x BETWEEN 0 AND 1 AND target_y BETWEEN 0 AND 1 ORDER BY journal_instance_id, candidate_rank, target_ui_map_type DESC, target_ui_map_id, assignment_id",
+        "query": {
+          "from": "journalinstanceentrance",
+          "joins": [
+            "uimapassignment",
+            "uimap"
+          ],
+          "select": [
+            "journal_instance_id",
+            "entrance_id",
+            "assignment_id",
+            "target_ui_map_id",
+            "target_x",
+            "target_y",
+            "candidate_rank"
+          ],
+          "where": [
+            "入口世界坐标命中 UiMapAssignment"
+          ],
+          "group_by": [],
+          "order_by": [
+            "journal_instance_id ASC",
+            "candidate_rank ASC"
+          ],
+          "row_granularity": "一行代表一个副本入口外部 UiMap 候选"
+        }
+      }
+    }
+  },
+  "structure": {
+    "root_type": "document",
+    "lua_shape": "Toolbox.Data.NavigationInstanceEntrances = { schemaVersion, sourceMode, generatedAt, entrancesByJournalInstanceID, candidatesByJournalInstanceID }",
+    "fields": [],
+    "document_blocks": [
+      {
+        "name": "metadata",
+        "metadata": {
+          "schemaVersion": 1,
+          "sourceMode": "live",
+          "generatedAt": "@generated_at"
+        }
+      },
+      {
+        "name": "entrancesByJournalInstanceID",
+        "dataset": "entrances",
+        "block_type": "map_object",
+        "key_field": "journal_instance_id",
+        "dedupe_by": [
+          "journal_instance_id"
+        ],
+        "required_fields": [
+          "journal_instance_id",
+          "entrance_id",
+          "instance_name",
+          "instance_map_id",
+          "target_ui_map_id",
+          "target_x",
+          "target_y"
+        ],
+        "sort_by": [
+          "journal_instance_id"
+        ],
+        "value_template": {
+          "JournalInstanceID": "journal_instance_id",
+          "EntranceID": "entrance_id",
+          "Name_lang": "instance_name",
+          "InstanceMapID": "instance_map_id",
+          "WorldMapID": "world_map_id",
+          "AreaTableID": "area_table_id",
+          "Faction": "faction",
+          "WorldX": "world_x",
+          "WorldY": "world_y",
+          "WorldZ": "world_z",
+          "AreaPoiID": "area_poi_id",
+          "AreaPoiName_lang": "area_poi_name",
+          "InstanceUiMapID": "instance_ui_map_id",
+          "InstanceParentUiMapID": "instance_parent_ui_map_id",
+          "AssignmentID": "assignment_id",
+          "TargetUiMapID": "target_ui_map_id",
+          "TargetUiMapName_lang": "target_ui_map_name",
+          "TargetX": "target_x",
+          "TargetY": "target_y",
+          "CandidateRank": "candidate_rank"
+        }
+      },
+      {
+        "name": "candidatesByJournalInstanceID",
+        "dataset": "candidates",
+        "block_type": "map_array_objects_grouped",
+        "key_field": "journal_instance_id",
+        "dedupe_by": [
+          "journal_instance_id",
+          "assignment_id"
+        ],
+        "required_fields": [
+          "journal_instance_id",
+          "entrance_id",
+          "assignment_id",
+          "target_ui_map_id",
+          "target_x",
+          "target_y",
+          "candidate_rank"
+        ],
+        "sort_by": [
+          "journal_instance_id",
+          "candidate_rank",
+          "target_ui_map_id",
+          "assignment_id"
+        ],
+        "value_template": {
+          "EntranceID": "entrance_id",
+          "AssignmentID": "assignment_id",
+          "TargetUiMapID": "target_ui_map_id",
+          "TargetUiMapName_lang": "target_ui_map_name",
+          "TargetUiMapType": "target_ui_map_type",
+          "AssignmentAreaID": "assignment_area_id",
+          "TargetX": "target_x",
+          "TargetY": "target_y",
+          "CandidateRank": "candidate_rank"
+        }
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [
+      "journal_instance_id",
+      "entrance_id",
+      "instance_map_id",
+      "target_ui_map_id"
+    ],
+    "unique_keys": [
+      [
+        "journal_instance_id"
+      ]
+    ],
+    "non_null_fields": [
+      "journal_instance_id",
+      "entrance_id",
+      "instance_map_id",
+      "target_ui_map_id"
+    ],
+    "sort_rules": [
+      {
+        "field": "journal_instance_id",
+        "direction": "asc"
+      }
+    ]
+  },
+  "versioning": {
+    "current_schema_version": 1,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约版本，导出副本入口外部 UiMap 目标；首选规则优先使用副本内部 UiMap 的父地图"
+      }
+    ]
+  }
+}

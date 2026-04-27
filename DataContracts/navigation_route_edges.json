@@ -1,0 +1,261 @@
+{
+  "contract": {
+    "contract_id": "navigation_route_edges",
+    "schema_version": 14,
+    "summary": "navigation 运行时统一路线边（UiMapLink + waypoint 解析直连边）",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/NavigationRouteEdges.lua",
+    "lua_table": "Toolbox.Data.NavigationRouteEdges",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "uimap",
+      "uimaplink",
+      "uimapassignment",
+      "waypointnode",
+      "waypointedge",
+      "waypointsafelocs"
+    ],
+    "sql": "SELECT 1 AS placeholder",
+    "query": {
+      "from": "uimap / uimaplink / waypointedge",
+      "joins": [
+        "uimaplink.ParentUiMapID -> ChildUiMapID 提供 UiMap 显式链接",
+        "waypointedge.Start -> End 提供传送门 / 飞艇 / 船只等显式旅行边",
+        "uimapassignment 仅用于 UiMap <-> MapID 关系，不使用 Region 坐标"
+      ],
+      "select": [
+        "nodes dataset：node_key, route_source, source_id, ui_map_id, map_id, node_name",
+        "edges dataset：edge_index, route_source, source_row_id, from_node_key, to_node_key, edge_cost, edge_label, mode, portal_world_map_id, portal_world_x, portal_world_y, arrival_world_map_id, arrival_world_x, arrival_world_y"
+      ],
+      "where": [
+        "运行时统一边禁止手写 id",
+        "运行时统一边禁止使用 Region_*、矩形覆盖、轨迹坐标或 SafeLoc 坐标推导地图联接",
+        "运行时统一边允许使用 waypoint 节点名称与 portal SafeLoc 点位解析主城传送与公共交通直连边"
+      ],
+      "group_by": [],
+      "order_by": [
+        "nodes.node_key ASC",
+        "edges.edge_index ASC"
+      ],
+      "row_granularity": "nodes 一行代表一个运行时路线节点；edges 一行代表一条可直接进入路径图的运行时路线边"
+    },
+    "datasets": {
+      "nodes": {
+        "sql": "SELECT 'uimap_' || CAST(map.ID AS TEXT) AS node_key, 'uimap' AS route_source, CAST(map.ID AS INTEGER) AS source_id, CAST(map.ID AS INTEGER) AS ui_map_id, 0 AS map_id, COALESCE(NULLIF(TRIM(map.Name_lang), ''), 'Map #' || CAST(map.ID AS TEXT)) AS node_name, CAST(COALESCE(map.Flags, 0) AS INTEGER) AS node_flags, CAST(COALESCE(map.Type, 0) AS INTEGER) AS node_type, CAST(COALESCE(map.VisibilityPlayerConditionID, 0) AS INTEGER) AS condition_id FROM uimap map WHERE CAST(map.ID AS INTEGER) > 0 ORDER BY node_key",
+        "query": {
+          "from": "uimap",
+          "joins": [],
+          "select": [
+            "node_key",
+            "route_source",
+            "source_id",
+            "ui_map_id",
+            "map_id",
+            "node_name"
+          ],
+          "where": [
+            "uimap.ID > 0"
+          ],
+          "group_by": [],
+          "order_by": [
+            "node_key ASC"
+          ],
+          "row_granularity": "一行代表一个 UiMap 路线节点"
+        }
+      },
+      "edges": {
+        "sql": "WITH ui_map_candidates AS (SELECT DISTINCT CAST(u.ID AS INTEGER) AS ui_map_id, u.Name_lang AS ui_map_name, CAST(COALESCE(u.Type, 0) AS INTEGER) AS ui_map_type, CAST(COALESCE(u.System, 0) AS INTEGER) AS ui_map_system, CAST(COALESCE(a.MapID, 0) AS INTEGER) AS map_id FROM uimap u LEFT JOIN uimapassignment a ON CAST(a.UiMapID AS INTEGER) = CAST(u.ID AS INTEGER) WHERE CAST(u.ID AS INTEGER) > 0 AND CAST(COALESCE(u.System, 0) AS INTEGER) = 0 AND CAST(COALESCE(u.Type, 0) AS INTEGER) IN (3, 6)), waypoint_edge_rows AS (SELECT CAST(e.ID AS INTEGER) AS edge_id, sn.Name_lang AS start_name, en.Name_lang AS end_name, CAST(COALESCE(ss.MapID, 0) AS INTEGER) AS start_map_id, CAST(COALESCE(es.MapID, 0) AS INTEGER) AS end_map_id, CAST(COALESCE(ss.Pos_0, 0) AS REAL) AS start_world_x, CAST(COALESCE(ss.Pos_1, 0) AS REAL) AS start_world_y, CAST(COALESCE(es.Pos_0, 0) AS REAL) AS end_world_x, CAST(COALESCE(es.Pos_1, 0) AS REAL) AS end_world_y, CAST(COALESCE(e.PlayerConditionID, 0) AS INTEGER) AS player_condition_id, CASE WHEN CAST(COALESCE(e.Field_8_1_5_29281_005, 0) AS INTEGER) > 0 THEN CAST(e.Field_8_1_5_29281_005 AS INTEGER) ELSE 10 END AS edge_cost, TRIM(COALESCE(sn.Name_lang, '') || ' ' || COALESCE(en.Name_lang, '')) AS edge_text FROM waypointedge e JOIN waypointnode sn ON CAST(sn.ID AS INTEGER) = CAST(e.Start AS INTEGER) JOIN waypointnode en ON CAST(en.ID AS INTEGER) = CAST(e.End AS INTEGER) LEFT JOIN waypointsafelocs ss ON CAST(ss.ID AS INTEGER) = CAST(sn.SafeLocID AS INTEGER) LEFT JOIN waypointsafelocs es ON CAST(es.ID AS INTEGER) = CAST(en.SafeLocID AS INTEGER) WHERE CAST(e.ID AS INTEGER) > 0), from_candidates AS (SELECT wer.edge_id, c.ui_map_id, 0 AS priority, INSTR(COALESCE(wer.start_name, ''), c.ui_map_name) AS sort_pos, c.ui_map_type FROM waypoint_edge_rows wer JOIN ui_map_candidates c ON INSTR(COALESCE(wer.start_name, ''), c.ui_map_name) > 0 AND (wer.start_map_id <= 0 OR c.map_id = wer.start_map_id) UNION ALL SELECT wer.edge_id, c.ui_map_id, 1 AS priority, INSTR(wer.edge_text, c.ui_map_name) AS sort_pos, c.ui_map_type FROM waypoint_edge_rows wer JOIN ui_map_candidates c ON INSTR(wer.edge_text, c.ui_map_name) > 0 AND (wer.start_map_id <= 0 OR c.map_id = wer.start_map_id)), from_ranked AS (SELECT edge_id, ui_map_id, ROW_NUMBER() OVER (PARTITION BY edge_id ORDER BY priority ASC, sort_pos ASC, CASE ui_map_type WHEN 3 THEN 0 WHEN 6 THEN 1 ELSE 2 END, ui_map_id ASC) AS rank_index FROM from_candidates), from_resolved AS (SELECT edge_id, ui_map_id AS from_ui_map_id FROM from_ranked WHERE rank_index = 1), to_candidates AS (SELECT wer.edge_id, c.ui_map_id, 0 AS priority, INSTR(COALESCE(wer.end_name, ''), c.ui_map_name) AS sort_pos, c.ui_map_type FROM waypoint_edge_rows wer JOIN ui_map_candidates c ON INSTR(COALESCE(wer.end_name, ''), c.ui_map_name) > 0 AND (wer.end_map_id <= 0 OR c.map_id = wer.end_map_id) UNION ALL SELECT wer.edge_id, c.ui_map_id, 1 AS priority, -INSTR(wer.edge_text, c.ui_map_name) AS sort_pos, c.ui_map_type FROM waypoint_edge_rows wer JOIN ui_map_candidates c ON INSTR(wer.edge_text, c.ui_map_name) > 0 AND (wer.end_map_id <= 0 OR c.map_id = wer.end_map_id) JOIN from_resolved fr ON fr.edge_id = wer.edge_id WHERE c.ui_map_id <> fr.from_ui_map_id), to_ranked AS (SELECT edge_id, ui_map_id, ROW_NUMBER() OVER (PARTITION BY edge_id ORDER BY priority ASC, sort_pos ASC, CASE ui_map_type WHEN 3 THEN 0 WHEN 6 THEN 1 ELSE 2 END, ui_map_id ASC) AS rank_index FROM to_candidates), to_resolved AS (SELECT edge_id, ui_map_id AS to_ui_map_id FROM to_ranked WHERE rank_index = 1), link_edges AS (SELECT 'uimaplink_forward_' || CAST(link.ID AS TEXT) AS edge_key, 'uimaplink' AS route_source, CAST(link.ID AS INTEGER) AS source_row_id, 'uimap_' || CAST(link.ParentUiMapID AS TEXT) AS from_node_key, 'uimap_' || CAST(link.ChildUiMapID AS TEXT) AS to_node_key, CAST(link.ParentUiMapID AS INTEGER) AS from_ui_map_id, CAST(link.ChildUiMapID AS INTEGER) AS to_ui_map_id, 1 AS edge_cost, '前往' || COALESCE(child.Name_lang, ('Map #' || CAST(link.ChildUiMapID AS TEXT))) AS edge_label, 'MAP_LINK' AS mode, CAST(COALESCE(link.Flags, 0) AS INTEGER) AS flags, CAST(COALESCE(link.PlayerConditionID, 0) AS INTEGER) AS player_condition_id, 0 AS portal_world_map_id, 0 AS portal_world_x, 0 AS portal_world_y, 0 AS arrival_world_map_id, 0 AS arrival_world_x, 0 AS arrival_world_y FROM uimaplink link LEFT JOIN uimap child ON CAST(child.ID AS INTEGER) = CAST(link.ChildUiMapID AS INTEGER) WHERE CAST(link.ID AS INTEGER) > 0 AND CAST(link.ParentUiMapID AS INTEGER) > 0 AND CAST(link.ChildUiMapID AS INTEGER) > 0 UNION ALL SELECT 'uimaplink_reverse_' || CAST(link.ID AS TEXT) AS edge_key, 'uimaplink' AS route_source, CAST(link.ID AS INTEGER) AS source_row_id, 'uimap_' || CAST(link.ChildUiMapID AS TEXT) AS from_node_key, 'uimap_' || CAST(link.ParentUiMapID AS TEXT) AS to_node_key, CAST(link.ChildUiMapID AS INTEGER) AS from_ui_map_id, CAST(link.ParentUiMapID AS INTEGER) AS to_ui_map_id, 1 AS edge_cost, '前往' || COALESCE(parent.Name_lang, ('Map #' || CAST(link.ParentUiMapID AS TEXT))) AS edge_label, 'MAP_LINK' AS mode, CAST(COALESCE(link.Flags, 0) AS INTEGER) AS flags, CAST(COALESCE(link.PlayerConditionID, 0) AS INTEGER) AS player_condition_id, 0 AS portal_world_map_id, 0 AS portal_world_x, 0 AS portal_world_y, 0 AS arrival_world_map_id, 0 AS arrival_world_x, 0 AS arrival_world_y FROM uimaplink link LEFT JOIN uimap parent ON CAST(parent.ID AS INTEGER) = CAST(link.ParentUiMapID AS INTEGER) WHERE CAST(link.ID AS INTEGER) > 0 AND CAST(link.ParentUiMapID AS INTEGER) > 0 AND CAST(link.ChildUiMapID AS INTEGER) > 0), waypoint_link_edges AS (SELECT 'waypoint_resolved_' || CAST(wer.edge_id AS TEXT) AS edge_key, 'waypointedge_resolved' AS route_source, wer.edge_id AS source_row_id, 'uimap_' || CAST(fr.from_ui_map_id AS TEXT) AS from_node_key, 'uimap_' || CAST(tr.to_ui_map_id AS TEXT) AS to_node_key, fr.from_ui_map_id AS from_ui_map_id, tr.to_ui_map_id AS to_ui_map_id, wer.edge_cost AS edge_cost, COALESCE(NULLIF(TRIM(wer.start_name), ''), '使用传送点') AS edge_label, 'WAYPOINT_LINK' AS mode, 0 AS flags, wer.player_condition_id AS player_condition_id, wer.start_map_id AS portal_world_map_id, wer.start_world_x AS portal_world_x, wer.start_world_y AS portal_world_y, wer.end_map_id AS arrival_world_map_id, wer.end_world_x AS arrival_world_x, wer.end_world_y AS arrival_world_y FROM waypoint_edge_rows wer JOIN from_resolved fr ON fr.edge_id = wer.edge_id JOIN to_resolved tr ON tr.edge_id = wer.edge_id WHERE fr.from_ui_map_id > 0 AND tr.to_ui_map_id > 0 AND fr.from_ui_map_id <> tr.to_ui_map_id) SELECT ROW_NUMBER() OVER (ORDER BY edge_key) AS edge_index, * FROM (SELECT * FROM link_edges UNION ALL SELECT * FROM waypoint_link_edges) ORDER BY edge_index",
+        "query": {
+          "from": "uimaplink / waypointedge / waypointnode / waypointsafelocs / uimapassignment",
+          "joins": [
+            "uimap 自连接补齐地图名",
+            "waypoint 节点名称与 portal SafeLoc 点位用于解析主城传送 / 交通直连边",
+            "uimapassignment 仅用于 UiMap <-> MapID 关系，不使用 Region 坐标"
+          ],
+          "select": [
+            "edge_index",
+            "edge_key",
+            "route_source",
+            "source_row_id",
+            "from_node_key",
+            "to_node_key",
+            "edge_cost",
+            "edge_label",
+            "mode",
+            "portal_world_map_id",
+            "portal_world_x",
+            "portal_world_y",
+            "arrival_world_map_id",
+            "arrival_world_x",
+            "arrival_world_y"
+          ],
+          "where": [
+            "所有运行时边均由 DB 关系行生成",
+            "不包含 Region_*、矩形覆盖、轨迹点或 WAYPOINT_ACCESS 坐标接入边"
+          ],
+          "group_by": [],
+          "order_by": [
+            "edge_key ASC"
+          ],
+          "row_granularity": "一行代表一条统一运行时路线边"
+        }
+      }
+    }
+  },
+  "structure": {
+    "root_type": "document",
+    "lua_shape": "Toolbox.Data.NavigationRouteEdges = { schemaVersion, sourceMode, generatedAt, nodes, edges }",
+    "fields": [],
+    "document_blocks": [
+      {
+        "name": "metadata",
+        "metadata": {
+          "schemaVersion": 14,
+          "sourceMode": "live",
+          "generatedAt": "@generated_at"
+        }
+      },
+      {
+        "name": "nodes",
+        "dataset": "nodes",
+        "block_type": "map_object",
+        "key_field": "node_key",
+        "dedupe_by": [
+          "node_key"
+        ],
+        "required_fields": [
+          "node_key",
+          "route_source",
+          "source_id",
+          "node_name"
+        ],
+        "sort_by": [
+          "node_key"
+        ],
+        "value_template": {
+          "ID": "source_id",
+          "Source": "route_source",
+          "UiMapID": "ui_map_id",
+          "MapID": "map_id",
+          "Name_lang": "node_name",
+          "Flags": "node_flags",
+          "Type": "node_type",
+          "ConditionID": "condition_id"
+        }
+      },
+      {
+        "name": "edges",
+        "dataset": "edges",
+        "block_type": "map_object",
+        "key_field": "edge_index",
+        "dedupe_by": [
+          "edge_index"
+        ],
+        "required_fields": [
+          "edge_index",
+          "route_source",
+          "source_row_id",
+          "from_node_key",
+          "to_node_key",
+          "edge_label",
+          "mode"
+        ],
+        "sort_by": [
+          "edge_index"
+        ],
+        "value_template": {
+          "id": "source_row_id",
+          "source": "route_source",
+          "from": "from_node_key",
+          "to": "to_node_key",
+          "fromUiMapID": "from_ui_map_id",
+          "toUiMapID": "to_ui_map_id",
+          "cost": "edge_cost",
+          "label": "edge_label",
+          "mode": "mode",
+          "flags": "flags",
+          "playerConditionID": "player_condition_id",
+          "portalWorldMapID": "portal_world_map_id",
+          "portalWorldX": "portal_world_x",
+          "portalWorldY": "portal_world_y",
+          "arrivalWorldMapID": "arrival_world_map_id",
+          "arrivalWorldX": "arrival_world_x",
+          "arrivalWorldY": "arrival_world_y"
+        }
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [],
+    "unique_keys": [],
+    "non_null_fields": [],
+    "sort_rules": []
+  },
+  "versioning": {
+    "current_schema_version": 14,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约版本，建立 navigation 运行时统一路线边出口；第一版纳入 Taxi 公共交通最终边"
+      },
+      {
+        "schema_version": 2,
+        "summary": "运行时统一路线边改为 DB 显式 UiMap/UiMapLink/Waypoint 关系导出，移除 TaxiPath 运行时边"
+      },
+      {
+        "schema_version": 3,
+        "summary": "移除 uimap.ParentUiMapID 运行时低成本路线边，增加 taxipathnode 轨迹经过 UiMap 序列作为地图前往边来源"
+      },
+      {
+        "schema_version": 4,
+        "summary": "增加基于 uimapassignment Region 覆盖关系导出的 MAP_REGION 前往边，用于普通飞行经过地图链路"
+      },
+      {
+        "schema_version": 5,
+        "summary": "收紧 MAP_REGION 普通交叠边：小型 UiMap 只走最大覆盖区域边，避免城市地图直接跨到远端区域"
+      },
+      {
+        "schema_version": 6,
+        "summary": "MAP_REGION 仅纳入父级为大陆的顶层 UiMap，排除试炼谷等子区域路线节点"
+      },
+      {
+        "schema_version": 7,
+        "summary": "城市/小地图归并到承载顶层 Zone 时允许 85% DB 覆盖，覆盖东部王国主城边界不完全包含的情况"
+      },
+      {
+        "schema_version": 8,
+        "summary": "MAP_REGION 允许 MapID=0，覆盖东部王国老世界区域图"
+      },
+      {
+        "schema_version": 9,
+        "summary": "顶层 Zone-to-Zone MAP_REGION 接壤阈值降为 5%，覆盖东部王国相邻区域边界交叠"
+      },
+      {
+        "schema_version": 10,
+        "summary": "MAP_REGION 恢复严格顶层 Zone 重叠阈值；MAP_TRACE 允许 ContinentID=0 以覆盖东部王国老世界轨迹"
+      },
+      {
+        "schema_version": 11,
+        "summary": "删除 MAP_REGION 与 MAP_TRACE；UiMapAssignment Region 仅允许用于定位 waypoint 节点，不再生成地图联接关系"
+      },
+      {
+        "schema_version": 12,
+        "summary": "删除 Waypoint/SafeLoc 坐标接入链路；运行时路线边只保留 uimaplink 明确 UiMap 链接"
+      },
+      {
+        "schema_version": 13,
+        "summary": "恢复基于 waypointedge 的显式主城传送/交通直连边；解析仅使用节点名称与 UiMap/MapID 关系，不使用坐标"
+      },
+      {
+        "schema_version": 14,
+        "summary": "为 waypoint 解析直连边补导 portal SafeLoc 世界坐标，用于路线步骤显示传送门位置"
+      }
+    ]
+  }
+}

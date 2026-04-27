@@ -42,11 +42,17 @@ Modules\MinimapButton.lua
 # Data（静态数据）
 # ============================================================================
 Data\InstanceMapIDs.lua
+Data\InstanceEntrances.lua
 Data\InstanceDrops_Mount.lua
 Data\QuestTypeNames.lua
 Data\InstanceQuestlines.lua
 Data\NavigationMapNodes.lua
-Data\NavigationManualEdges.lua
+Data\NavigationMapAssignments.lua
+Data\NavigationInstanceEntrances.lua
+Data\NavigationTaxiEdges.lua
+Data\NavigationUiMapRelations.lua
+Data\NavigationWaypointEdges.lua
+Data\NavigationRouteEdges.lua
 
 # ============================================================================
 # Modules（功能模块 - 依赖 Data）

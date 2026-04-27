@@ -1,0 +1,221 @@
+{
+  "contract": {
+    "contract_id": "navigation_waypoint_edges",
+    "schema_version": 1,
+    "summary": "导航 Waypoint 显式传送与交通边来源",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/NavigationWaypointEdges.lua",
+    "lua_table": "Toolbox.Data.NavigationWaypointEdges",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "waypointedge",
+      "waypointnode",
+      "waypointsafelocs",
+      "uimapassignment"
+    ],
+    "sql": "SELECT 1 AS placeholder",
+    "query": {
+      "from": "waypointedge",
+      "joins": [
+        "waypointnode Start/End 补齐节点名称、SafeLocID、类型和条件",
+        "waypointsafelocs 补齐 DB 坐标与 MapID",
+        "uimapassignment 仅把 SafeLoc 坐标定位到 UiMap；不生成地图邻接边"
+      ],
+      "select": [
+        "waypoint_edge_id",
+        "from_waypoint_node_id",
+        "from_name",
+        "from_ui_map_id",
+        "to_waypoint_node_id",
+        "to_name",
+        "to_ui_map_id",
+        "flags",
+        "player_condition_id",
+        "cost"
+      ],
+      "where": [
+        "只导出 waypointedge.Start -> waypointedge.End 明确边",
+        "不使用 TaxiPath 飞行管理员路线，不使用手写 id"
+      ],
+      "group_by": [],
+      "order_by": [
+        "waypoint_edge_id ASC"
+      ],
+      "row_granularity": "一行代表一条 DB Waypoint 显式边"
+    },
+    "datasets": {
+      "nodes": {
+        "sql": "WITH located_nodes AS (SELECT CAST(node.ID AS INTEGER) AS waypoint_node_id, node.Name_lang AS node_name, CAST(COALESCE(node.SafeLocID, 0) AS INTEGER) AS safe_loc_id, CAST(COALESCE(node.PlayerConditionID, 0) AS INTEGER) AS player_condition_id, CAST(COALESCE(node.Flags, 0) AS INTEGER) AS node_flags, CAST(COALESCE(node.Type, 0) AS INTEGER) AS node_type, CAST(COALESCE(node.WaypointMapVolumeID, 0) AS INTEGER) AS waypoint_map_volume_id, CAST(COALESCE(loc.MapID, 0) AS INTEGER) AS map_id, CAST(COALESCE(loc.Pos_0, 0) AS REAL) AS world_x, CAST(COALESCE(loc.Pos_1, 0) AS REAL) AS world_y, CAST(COALESCE(loc.Pos_2, 0) AS REAL) AS world_z FROM waypointnode node LEFT JOIN waypointsafelocs loc ON CAST(loc.ID AS INTEGER) = CAST(node.SafeLocID AS INTEGER) WHERE CAST(node.ID AS INTEGER) > 0), ui_located_nodes AS (SELECT ln.*, CAST(COALESCE((SELECT CAST(uma.UiMapID AS INTEGER) FROM uimapassignment uma WHERE CAST(uma.MapID AS INTEGER) = ln.map_id AND ln.world_x BETWEEN CASE WHEN CAST(uma.Region_0 AS REAL) < CAST(uma.Region_3 AS REAL) THEN CAST(uma.Region_0 AS REAL) ELSE CAST(uma.Region_3 AS REAL) END AND CASE WHEN CAST(uma.Region_0 AS REAL) > CAST(uma.Region_3 AS REAL) THEN CAST(uma.Region_0 AS REAL) ELSE CAST(uma.Region_3 AS REAL) END AND ln.world_y BETWEEN CASE WHEN CAST(uma.Region_1 AS REAL) < CAST(uma.Region_4 AS REAL) THEN CAST(uma.Region_1 AS REAL) ELSE CAST(uma.Region_4 AS REAL) END AND CASE WHEN CAST(uma.Region_1 AS REAL) > CAST(uma.Region_4 AS REAL) THEN CAST(uma.Region_1 AS REAL) ELSE CAST(uma.Region_4 AS REAL) END ORDER BY CAST(COALESCE(uma.OrderIndex, 0) AS INTEGER), CAST(uma.UiMapID AS INTEGER), CAST(uma.ID AS INTEGER) LIMIT 1), 0) AS INTEGER) AS ui_map_id FROM located_nodes ln) SELECT 'waypoint_' || CAST(waypoint_node_id AS TEXT) AS node_key, waypoint_node_id, node_name, safe_loc_id, player_condition_id, node_flags, node_type, waypoint_map_volume_id, map_id, ui_map_id, world_x, world_y, world_z FROM ui_located_nodes ORDER BY waypoint_node_id",
+        "query": {
+          "from": "waypointnode",
+          "joins": [
+            "waypointsafelocs ON SafeLocID",
+            "uimapassignment 用 SafeLoc 坐标定位 UiMap"
+          ],
+          "select": [
+            "node_key",
+            "waypoint_node_id",
+            "node_name",
+            "safe_loc_id",
+            "map_id",
+            "ui_map_id",
+            "world_x",
+            "world_y",
+            "world_z"
+          ],
+          "where": [
+            "waypoint_node_id > 0"
+          ],
+          "group_by": [],
+          "order_by": [
+            "waypoint_node_id ASC"
+          ],
+          "row_granularity": "一行代表一个 Waypoint 节点"
+        }
+      },
+      "edges": {
+        "sql": "SELECT CAST(edge.ID AS INTEGER) AS waypoint_edge_id, 'waypoint_' || CAST(edge.Start AS TEXT) AS from_node_key, CAST(edge.Start AS INTEGER) AS from_waypoint_node_id, start_node.Name_lang AS from_name, CAST(COALESCE(start_node.PlayerConditionID, 0) AS INTEGER) AS from_player_condition_id, CAST(COALESCE(start_node.Type, 0) AS INTEGER) AS from_node_type, CAST(COALESCE(start_loc.MapID, 0) AS INTEGER) AS from_map_id, CAST(COALESCE(start_loc.Pos_0, 0) AS REAL) AS from_world_x, CAST(COALESCE(start_loc.Pos_1, 0) AS REAL) AS from_world_y, 'waypoint_' || CAST(edge.End AS TEXT) AS to_node_key, CAST(edge.End AS INTEGER) AS to_waypoint_node_id, end_node.Name_lang AS to_name, CAST(COALESCE(end_node.PlayerConditionID, 0) AS INTEGER) AS to_player_condition_id, CAST(COALESCE(end_node.Type, 0) AS INTEGER) AS to_node_type, CAST(COALESCE(end_loc.MapID, 0) AS INTEGER) AS to_map_id, CAST(COALESCE(end_loc.Pos_0, 0) AS REAL) AS to_world_x, CAST(COALESCE(end_loc.Pos_1, 0) AS REAL) AS to_world_y, CAST(COALESCE(edge.Flags, 0) AS INTEGER) AS flags, CAST(COALESCE(edge.PlayerConditionID, 0) AS INTEGER) AS player_condition_id, CAST(COALESCE(edge.Field_8_1_5_29281_005, 1) AS INTEGER) AS cost FROM waypointedge edge LEFT JOIN waypointnode start_node ON CAST(start_node.ID AS INTEGER) = CAST(edge.Start AS INTEGER) LEFT JOIN waypointnode end_node ON CAST(end_node.ID AS INTEGER) = CAST(edge.End AS INTEGER) LEFT JOIN waypointsafelocs start_loc ON CAST(start_loc.ID AS INTEGER) = CAST(start_node.SafeLocID AS INTEGER) LEFT JOIN waypointsafelocs end_loc ON CAST(end_loc.ID AS INTEGER) = CAST(end_node.SafeLocID AS INTEGER) WHERE CAST(edge.ID AS INTEGER) > 0 AND CAST(edge.Start AS INTEGER) > 0 AND CAST(edge.End AS INTEGER) > 0 ORDER BY CAST(edge.ID AS INTEGER)",
+        "query": {
+          "from": "waypointedge",
+          "joins": [
+            "waypointnode Start/End",
+            "waypointsafelocs Start/End"
+          ],
+          "select": [
+            "waypoint_edge_id",
+            "from_node_key",
+            "to_node_key",
+            "flags",
+            "player_condition_id",
+            "cost"
+          ],
+          "where": [
+            "Start/End 均大于 0"
+          ],
+          "group_by": [],
+          "order_by": [
+            "waypoint_edge_id ASC"
+          ],
+          "row_granularity": "一行代表一条 Waypoint 显式边"
+        }
+      }
+    }
+  },
+  "structure": {
+    "root_type": "document",
+    "lua_shape": "Toolbox.Data.NavigationWaypointEdges = { schemaVersion, sourceMode, generatedAt, nodes, edges }",
+    "fields": [],
+    "document_blocks": [
+      {
+        "name": "metadata",
+        "metadata": {
+          "schemaVersion": 1,
+          "sourceMode": "live",
+          "generatedAt": "@generated_at"
+        }
+      },
+      {
+        "name": "nodes",
+        "dataset": "nodes",
+        "block_type": "map_object",
+        "key_field": "node_key",
+        "dedupe_by": [
+          "node_key"
+        ],
+        "required_fields": [
+          "node_key",
+          "waypoint_node_id",
+          "node_name"
+        ],
+        "sort_by": [
+          "waypoint_node_id"
+        ],
+        "value_template": {
+          "ID": "waypoint_node_id",
+          "Name_lang": "node_name",
+          "SafeLocID": "safe_loc_id",
+          "UiMapID": "ui_map_id",
+          "MapID": "map_id",
+          "WorldX": "world_x",
+          "WorldY": "world_y",
+          "WorldZ": "world_z",
+          "Flags": "node_flags",
+          "Type": "node_type",
+          "PlayerConditionID": "player_condition_id",
+          "WaypointMapVolumeID": "waypoint_map_volume_id"
+        }
+      },
+      {
+        "name": "edges",
+        "dataset": "edges",
+        "block_type": "map_object",
+        "key_field": "waypoint_edge_id",
+        "dedupe_by": [
+          "waypoint_edge_id"
+        ],
+        "required_fields": [
+          "waypoint_edge_id",
+          "from_node_key",
+          "to_node_key"
+        ],
+        "sort_by": [
+          "waypoint_edge_id"
+        ],
+        "value_template": {
+          "ID": "waypoint_edge_id",
+          "From": "from_node_key",
+          "FromWaypointNodeID": "from_waypoint_node_id",
+          "FromName_lang": "from_name",
+          "FromMapID": "from_map_id",
+          "FromWorldX": "from_world_x",
+          "FromWorldY": "from_world_y",
+          "To": "to_node_key",
+          "ToWaypointNodeID": "to_waypoint_node_id",
+          "ToName_lang": "to_name",
+          "ToMapID": "to_map_id",
+          "ToWorldX": "to_world_x",
+          "ToWorldY": "to_world_y",
+          "Flags": "flags",
+          "PlayerConditionID": "player_condition_id",
+          "Cost": "cost"
+        }
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [
+      "waypoint_node_id",
+      "node_key"
+    ],
+    "unique_keys": [
+      [
+        "node_key"
+      ]
+    ],
+    "non_null_fields": [
+      "waypoint_node_id",
+      "node_key"
+    ],
+    "sort_rules": [
+      {
+        "field": "waypoint_node_id",
+        "direction": "asc"
+      }
+    ]
+  },
+  "versioning": {
+    "current_schema_version": 1,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约版本，导出 waypointedge.Start -> End 显式边和节点 SafeLoc 定位"
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 --[[
   navigation 世界地图入口：在 WorldMapFrame 显示时创建“规划路线”按钮。
-  目标坐标读取当前用户 waypoint；若不存在有效 waypoint，则按钮点击后静默返回。
+  目标坐标读取当前用户 waypoint；若不存在有效 waypoint 或规划失败，需要给玩家明确反馈。
 ]]
 
 Toolbox.NavigationModule = Toolbox.NavigationModule or {}
@@ -15,6 +15,17 @@ local targetButton = nil -- 世界地图规划按钮
 ---@return table
 local function getModuleDb()
   return Toolbox.Config.GetModule("navigation")
+end
+
+--- 输出一条导航相关聊天提示。
+---@param messageText string|nil 玩家提示文案
+local function printNavigationMessage(messageText)
+  if not messageText or messageText == "" then
+    return
+  end
+  if Toolbox.Chat and type(Toolbox.Chat.PrintAddonMessage) == "function" then
+    Toolbox.Chat.PrintAddonMessage(messageText)
+  end
 end
 
 --- 从 Vector2DMixin 或普通表读取归一化坐标。
@@ -63,10 +74,33 @@ local function getUserWaypointTarget()
   return mapID, targetX, targetY
 end
 
+--- 将路线规划错误转换成玩家可见文案。
+---@param errorObject table|nil 路线规划错误对象
+---@return string|nil
+local function getRouteFailureMessage(errorObject)
+  local localeTable = Toolbox.L or {} -- 本地化字符串表
+  local errorCode = type(errorObject) == "table" and errorObject.code or nil -- 路线错误码
+  if errorCode == "NAVIGATION_ERR_UNSUPPORTED_MAP_LEVEL" or errorCode == "NAVIGATION_ERR_BAD_TARGET" then
+    return localeTable.NAVIGATION_ROUTE_UNSUPPORTED_TARGET or "当前目标层级暂不支持规划路线，请缩放到区域或子地图后再试。"
+  end
+  if errorCode == "NAVIGATION_ERR_NO_ROUTE" then
+    return localeTable.NAVIGATION_ROUTE_NO_ROUTE or "当前目标暂无可用路线。"
+  end
+  if errorCode then
+    return localeTable.NAVIGATION_ROUTE_PLAN_FAILED or "路线规划失败。"
+  end
+  return nil
+end
+
 --- 规划当前用户 waypoint 目标，并刷新顶部路径条。
 local function planRouteFromCurrentWaypointTarget()
+  local routeBar = Toolbox.NavigationModule and Toolbox.NavigationModule.RouteBar or nil -- 顶部路径条模块
   local mapID, targetX, targetY = getUserWaypointTarget() -- 当前用户 waypoint
   if not mapID or not targetX or not targetY then
+    if routeBar and type(routeBar.ClearRoute) == "function" then
+      routeBar.ClearRoute()
+    end
+    printNavigationMessage((Toolbox.L or {}).NAVIGATION_ROUTE_NEEDS_WAYPOINT or "请先在世界地图上放置目标标记。")
     return
   end
 
@@ -75,17 +109,24 @@ local function planRouteFromCurrentWaypointTarget()
   moduleDb.lastTargetX = targetX
   moduleDb.lastTargetY = targetY
 
-  local spellIDList = Toolbox.Navigation.GetRequiredSpellIDList() -- 需要确认的路径技能列表
+  local spellIDList = Toolbox.Navigation.GetRequiredSpellIDList(Toolbox.Data and Toolbox.Data.NavigationRouteEdges) -- 需要确认的统一路线边技能列表
   local availabilityContext = Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList) -- 当前角色可用性快照
-  local routeResult = Toolbox.Navigation.PlanRouteToMapTarget({
+  local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
     uiMapID = mapID,
     x = targetX,
     y = targetY,
   }, availabilityContext)
 
-  local routeBar = Toolbox.NavigationModule and Toolbox.NavigationModule.RouteBar or nil -- 顶部路径条模块
   if routeResult and routeBar and type(routeBar.ShowRoute) == "function" then
     routeBar.ShowRoute(routeResult)
+    return
+  end
+  if routeBar and type(routeBar.ClearRoute) == "function" then
+    routeBar.ClearRoute()
+  end
+  local failureMessage = getRouteFailureMessage(errorObject) -- 规划失败提示
+  if failureMessage then
+    printNavigationMessage(failureMessage)
   end
 end
 
@@ -120,7 +161,23 @@ function WorldMap.Refresh()
   if moduleDb.enabled == false then
     button:Hide()
   else
-    button:SetText((Toolbox.L or {}).NAVIGATION_WORLD_MAP_BUTTON or "Route")
+    local localeTable = Toolbox.L or {} -- 本地化字符串表
+    local mapID = getUserWaypointTarget() -- 当前用户 waypoint 地图 ID
+    if mapID then
+      button:SetText(localeTable.NAVIGATION_WORLD_MAP_BUTTON or "Route")
+      if type(button.Enable) == "function" then
+        button:Enable()
+      else
+        button:SetEnabled(true)
+      end
+    else
+      button:SetText(localeTable.NAVIGATION_WORLD_MAP_BUTTON_NEEDS_WAYPOINT or "Set waypoint")
+      if type(button.Disable) == "function" then
+        button:Disable()
+      else
+        button:SetEnabled(false)
+      end
+    end
     button:Show()
   end
 end

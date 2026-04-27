@@ -1,0 +1,223 @@
+{
+  "contract": {
+    "contract_id": "instance_entrances",
+    "schema_version": 3,
+    "summary": "数据库导出的副本入口候选数据；精确 areapoi 优先，并导出目标区域 HintUiMapID",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/InstanceEntrances.lua",
+    "lua_table": "Toolbox.Data.InstanceEntrances",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "areapoi",
+      "journalinstanceentrance",
+      "journalinstance",
+      "areatable",
+      "uimapassignment",
+      "uimap"
+    ],
+    "sql": "SELECT 1 AS placeholder",
+    "query": {
+      "from": "areapoi + journalinstanceentrance",
+      "joins": [
+        "areapoi: PoiDataType=1 且 PoiData 指向 journalinstance.ID 时作为精确副本 POI",
+        "journalinstanceentrance: areapoi 精确记录不存在时作为分翼入口候选",
+        "journalinstance: journalinstance.ID = 来源 JournalInstanceID",
+        "areatable: areatable.ID = journalinstanceentrance.AreaTableID",
+        "uimapassignment/uimap: 通过 AreaTableID 父链推断首个 System=0 UiMapID"
+      ],
+      "select": [
+        "journal_instance_id",
+        "entrance_id",
+        "area_poi_id",
+        "instance_name",
+        "world_map_id",
+        "area_table_id",
+        "area_name",
+        "parent_area_id",
+        "parent_area_name",
+        "hint_ui_map_id",
+        "world_x",
+        "world_y",
+        "world_z",
+        "faction",
+        "source_key"
+      ],
+      "where": [
+        "JournalInstanceID / PoiData > 0",
+        "MapID / ContinentID > 0",
+        "Position_0 / Position_1 或 Pos_0 / Pos_1 非空"
+      ],
+      "group_by": [],
+      "order_by": [
+        "journal_instance_id ASC",
+        "source_priority ASC",
+        "entrance_id ASC"
+      ],
+      "row_granularity": "一行代表一个精确 areapoi 或 journalinstanceentrance 入口候选"
+    },
+    "datasets": {
+      "entrances": {
+        "sql": "WITH instance_parent_ui_map AS ( SELECT CAST(ji.ID AS INTEGER) AS journal_instance_id, MIN(CASE WHEN CAST(COALESCE(um.ParentUiMapID, 0) AS INTEGER) > 0 THEN CAST(um.ParentUiMapID AS INTEGER) END) AS instance_parent_hint_ui_map_id FROM journalinstance ji JOIN uimapassignment uma ON CAST(uma.MapID AS INTEGER) = CAST(ji.MapID AS INTEGER) JOIN uimap um ON CAST(um.ID AS INTEGER) = CAST(uma.UiMapID AS INTEGER) WHERE CAST(ji.ID AS INTEGER) > 0 AND CAST(ji.MapID AS INTEGER) > 0 AND CAST(COALESCE(um.System, 0) AS INTEGER) = 0 GROUP BY CAST(ji.ID AS INTEGER) ), area_poi_entrance AS ( SELECT CAST(ap.ID AS INTEGER) AS entrance_id, CAST(ap.ID AS INTEGER) AS area_poi_id, CAST(ap.PoiData AS INTEGER) AS journal_instance_id, ji.Name_lang AS instance_name, CAST(ap.ContinentID AS INTEGER) AS world_map_id, CAST(COALESCE(ap.AreaID, 0) AS INTEGER) AS area_table_id, ap.Name_lang AS area_name, 0 AS parent_area_id, NULL AS parent_area_name, CAST(ap.Pos_0 AS REAL) AS world_x, CAST(ap.Pos_1 AS REAL) AS world_y, CAST(COALESCE(ap.Pos_2, 0) AS REAL) AS world_z, -1 AS faction, 'areapoi' AS source_key, 0 AS source_priority, ipm.instance_parent_hint_ui_map_id AS instance_parent_hint_ui_map_id FROM areapoi ap JOIN journalinstance ji ON CAST(ji.ID AS INTEGER) = CAST(ap.PoiData AS INTEGER) LEFT JOIN instance_parent_ui_map ipm ON ipm.journal_instance_id = CAST(ap.PoiData AS INTEGER) WHERE CAST(COALESCE(ap.PoiDataType, 0) AS INTEGER) = 1 AND TRIM(COALESCE(ap.PoiData, '')) <> '' AND CAST(ap.PoiData AS INTEGER) > 0 AND TRIM(COALESCE(ap.ContinentID, '')) <> '' AND CAST(ap.ContinentID AS INTEGER) > 0 AND TRIM(COALESCE(ap.Pos_0, '')) <> '' AND TRIM(COALESCE(ap.Pos_1, '')) <> '' ), jie_entrance AS ( SELECT CAST(jie.ID AS INTEGER) AS entrance_id, NULL AS area_poi_id, CAST(jie.JournalInstanceID AS INTEGER) AS journal_instance_id, ji.Name_lang AS instance_name, CAST(jie.MapID AS INTEGER) AS world_map_id, CAST(jie.AreaTableID AS INTEGER) AS area_table_id, area.AreaName_lang AS area_name, CAST(COALESCE(area.ParentAreaID, 0) AS INTEGER) AS parent_area_id, parent.AreaName_lang AS parent_area_name, CAST(jie.Position_0 AS REAL) AS world_x, CAST(jie.Position_1 AS REAL) AS world_y, CAST(COALESCE(jie.Position_2, 0) AS REAL) AS world_z, CAST(COALESCE(jie.Faction, -1) AS INTEGER) AS faction, 'journalinstanceentrance' AS source_key, 1 AS source_priority, ipm.instance_parent_hint_ui_map_id AS instance_parent_hint_ui_map_id FROM journalinstanceentrance jie LEFT JOIN journalinstance ji ON CAST(ji.ID AS INTEGER) = CAST(jie.JournalInstanceID AS INTEGER) LEFT JOIN instance_parent_ui_map ipm ON ipm.journal_instance_id = CAST(jie.JournalInstanceID AS INTEGER) LEFT JOIN areatable area ON CAST(area.ID AS INTEGER) = CAST(jie.AreaTableID AS INTEGER) LEFT JOIN areatable parent ON CAST(parent.ID AS INTEGER) = CAST(area.ParentAreaID AS INTEGER) WHERE TRIM(COALESCE(jie.JournalInstanceID, '')) <> '' AND CAST(jie.JournalInstanceID AS INTEGER) > 0 AND TRIM(COALESCE(jie.MapID, '')) <> '' AND CAST(jie.MapID AS INTEGER) > 0 AND TRIM(COALESCE(jie.Position_0, '')) <> '' AND TRIM(COALESCE(jie.Position_1, '')) <> '' AND NOT EXISTS ( SELECT 1 FROM area_poi_entrance ape WHERE ape.journal_instance_id = CAST(jie.JournalInstanceID AS INTEGER) ) ), entrance AS ( SELECT * FROM area_poi_entrance UNION ALL SELECT * FROM jie_entrance ), area_chain AS ( SELECT entrance_id, source_key, area_table_id AS candidate_area_id, 0 AS depth FROM entrance WHERE area_table_id > 0 UNION ALL SELECT ac.entrance_id, ac.source_key, CAST(a.ParentAreaID AS INTEGER) AS candidate_area_id, ac.depth + 1 AS depth FROM area_chain ac JOIN areatable a ON CAST(a.ID AS INTEGER) = ac.candidate_area_id WHERE CAST(a.ParentAreaID AS INTEGER) > 0 AND ac.depth < 8 ), area_ui_candidate AS ( SELECT ac.entrance_id, ac.source_key, CAST(uma.UiMapID AS INTEGER) AS hint_ui_map_id, ac.depth, CAST(COALESCE(uma.OrderIndex, 0) AS INTEGER) AS order_index, CAST(COALESCE(um.Type, 0) AS INTEGER) AS ui_map_type FROM area_chain ac JOIN entrance e ON e.entrance_id = ac.entrance_id AND e.source_key = ac.source_key JOIN uimapassignment uma ON CAST(uma.MapID AS INTEGER) = e.world_map_id AND CAST(uma.AreaID AS INTEGER) = ac.candidate_area_id JOIN uimap um ON CAST(um.ID AS INTEGER) = CAST(uma.UiMapID AS INTEGER) WHERE CAST(COALESCE(um.System, 0) AS INTEGER) = 0 ), best_area_ui AS ( SELECT * FROM ( SELECT auc.*, ROW_NUMBER() OVER ( PARTITION BY auc.entrance_id, auc.source_key ORDER BY auc.depth ASC, auc.ui_map_type DESC, auc.order_index ASC, auc.hint_ui_map_id ASC ) AS row_num FROM area_ui_candidate auc ) WHERE row_num = 1 ), coordinate_ui_candidate AS ( SELECT e.entrance_id, e.source_key, CAST(uma.UiMapID AS INTEGER) AS hint_ui_map_id, CASE WHEN CAST(uma.UiMapID AS INTEGER) = CAST(COALESCE(e.instance_parent_hint_ui_map_id, 0) AS INTEGER) THEN 0 WHEN CAST(COALESCE(uma.AreaID, 0) AS INTEGER) = CAST(COALESCE(e.area_table_id, 0) AS INTEGER) AND CAST(COALESCE(e.area_table_id, 0) AS INTEGER) > 0 THEN 1 WHEN CAST(COALESCE(um.Type, 0) AS INTEGER) = 3 THEN 2 WHEN CAST(COALESCE(um.Type, 0) AS INTEGER) = 2 THEN 3 ELSE 4 END AS candidate_rank, CAST(COALESCE(um.Type, 0) AS INTEGER) AS ui_map_type, CAST(COALESCE(uma.OrderIndex, 0) AS INTEGER) AS order_index FROM entrance e JOIN uimapassignment uma ON CAST(uma.MapID AS INTEGER) = e.world_map_id JOIN uimap um ON CAST(um.ID AS INTEGER) = CAST(uma.UiMapID AS INTEGER) WHERE CAST(COALESCE(um.System, 0) AS INTEGER) = 0 AND e.world_x BETWEEN MIN(CAST(uma.Region_0 AS REAL), CAST(uma.Region_3 AS REAL)) AND MAX(CAST(uma.Region_0 AS REAL), CAST(uma.Region_3 AS REAL)) AND e.world_y BETWEEN MIN(CAST(uma.Region_1 AS REAL), CAST(uma.Region_4 AS REAL)) AND MAX(CAST(uma.Region_1 AS REAL), CAST(uma.Region_4 AS REAL)) ), best_coordinate_ui AS ( SELECT * FROM ( SELECT cuc.*, ROW_NUMBER() OVER ( PARTITION BY cuc.entrance_id, cuc.source_key ORDER BY cuc.candidate_rank ASC, cuc.ui_map_type DESC, cuc.order_index ASC, cuc.hint_ui_map_id ASC ) AS row_num FROM coordinate_ui_candidate cuc ) WHERE row_num = 1 ) SELECT e.journal_instance_id, e.entrance_id, e.area_poi_id, e.instance_name, e.world_map_id, e.area_table_id, e.area_name, e.parent_area_id, e.parent_area_name, CAST(COALESCE(best_area_ui.hint_ui_map_id, e.instance_parent_hint_ui_map_id, best_coordinate_ui.hint_ui_map_id, 0) AS INTEGER) AS hint_ui_map_id, e.world_x, e.world_y, e.world_z, e.faction, e.source_key, e.source_priority FROM entrance e LEFT JOIN best_area_ui ON best_area_ui.entrance_id = e.entrance_id AND best_area_ui.source_key = e.source_key LEFT JOIN best_coordinate_ui ON best_coordinate_ui.entrance_id = e.entrance_id AND best_coordinate_ui.source_key = e.source_key ORDER BY e.journal_instance_id ASC, e.source_priority ASC, e.entrance_id ASC",
+        "query": {
+          "from": "areapoi + journalinstanceentrance",
+          "joins": [
+            "areapoi",
+            "journalinstanceentrance",
+            "journalinstance",
+            "areatable",
+            "uimapassignment",
+            "uimap"
+          ],
+          "select": [
+            "journal_instance_id",
+            "entrance_id",
+            "area_poi_id",
+            "instance_name",
+            "world_map_id",
+            "area_table_id",
+            "area_name",
+            "parent_area_id",
+            "parent_area_name",
+            "hint_ui_map_id",
+            "world_x",
+            "world_y",
+            "world_z",
+            "faction",
+            "source_key"
+          ],
+          "where": [
+            "精确 areapoi 存在时排除同 journalInstanceID 的 journalinstanceentrance 候选",
+            "来源世界坐标非空"
+          ],
+          "group_by": [],
+          "order_by": [
+            "journal_instance_id ASC",
+            "source_priority ASC",
+            "entrance_id ASC"
+          ],
+          "row_granularity": "一行代表一个精确 areapoi 或 journalinstanceentrance 入口候选"
+        }
+      }
+    }
+  },
+  "structure": {
+    "root_type": "document",
+    "lua_shape": "Toolbox.Data.InstanceEntrances = { schemaVersion, sourceMode, generatedAt, entrances }",
+    "fields": [],
+    "document_blocks": [
+      {
+        "name": "metadata",
+        "metadata": {
+          "schemaVersion": 3,
+          "sourceMode": "mixed_exact_areapoi_journalinstanceentrance_hint_ui_map",
+          "generatedAt": "@generated_at"
+        }
+      },
+      {
+        "name": "entrances",
+        "dataset": "entrances",
+        "block_type": "map_array_objects_grouped",
+        "key_field": "journal_instance_id",
+        "required_fields": [
+          "journal_instance_id",
+          "entrance_id",
+          "instance_name",
+          "world_map_id",
+          "hint_ui_map_id",
+          "world_x",
+          "world_y",
+          "world_z",
+          "faction",
+          "source_key"
+        ],
+        "dedupe_by": [
+          "source_key",
+          "entrance_id"
+        ],
+        "sort_by": [
+          "journal_instance_id",
+          "source_priority",
+          "entrance_id"
+        ],
+        "value_template": {
+          "Source": "source_key",
+          "EntranceID": "entrance_id",
+          "AreaPoiID": "area_poi_id",
+          "JournalInstanceID": "journal_instance_id",
+          "InstanceName": "instance_name",
+          "WorldMapID": "world_map_id",
+          "AreaTableID": "area_table_id",
+          "AreaName": "area_name",
+          "ParentAreaID": "parent_area_id",
+          "ParentAreaName": "parent_area_name",
+          "HintUiMapID": "hint_ui_map_id",
+          "WorldX": "world_x",
+          "WorldY": "world_y",
+          "WorldZ": "world_z",
+          "Faction": "faction"
+        }
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [
+      "journal_instance_id",
+      "entrance_id",
+      "world_map_id",
+      "world_x",
+      "world_y",
+      "source_key"
+    ],
+    "unique_keys": [
+      [
+        "source_key",
+        "entrance_id"
+      ]
+    ],
+    "non_null_fields": [
+      "journal_instance_id",
+      "entrance_id",
+      "world_map_id",
+      "world_x",
+      "world_y",
+      "source_key"
+    ],
+    "sort_rules": [
+      {
+        "field": "journal_instance_id",
+        "direction": "asc"
+      },
+      {
+        "field": "source_priority",
+        "direction": "asc"
+      },
+      {
+        "field": "entrance_id",
+        "direction": "asc"
+      }
+    ]
+  },
+  "versioning": {
+    "current_schema_version": 3,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约版本：从 journalinstanceentrance 导出副本入口世界坐标"
+      },
+      {
+        "schema_version": 2,
+        "summary": "精确 areapoi 入口优先；修正厄运之槌 - 中心花园不应使用分翼门候选坐标"
+      },
+      {
+        "schema_version": 3,
+        "summary": "为 areapoi 来源补充 HintUiMapID：优先使用实例地图父 UiMap，确保点击后打开对应区域地图"
+      }
+    ]
+  }
+}

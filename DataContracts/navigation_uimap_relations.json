@@ -1,0 +1,178 @@
+{
+  "contract": {
+    "contract_id": "navigation_uimap_relations",
+    "schema_version": 1,
+    "summary": "导航 UiMap 显式关系图来源",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/NavigationUiMapRelations.lua",
+    "lua_table": "Toolbox.Data.NavigationUiMapRelations",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "uimap",
+      "uimaplink"
+    ],
+    "sql": "SELECT 1 AS placeholder",
+    "query": {
+      "from": "uimap / uimaplink",
+      "joins": [
+        "uimap.ParentUiMapID 是 UiMap 表内显式父级关系",
+        "uimaplink.ParentUiMapID -> uimaplink.ChildUiMapID 是 UiMapLink 显式链接关系"
+      ],
+      "select": [
+        "relation_key",
+        "relation_source",
+        "source_row_id",
+        "from_ui_map_id",
+        "from_name",
+        "to_ui_map_id",
+        "to_name",
+        "flags",
+        "player_condition_id"
+      ],
+      "where": [
+        "只导出数据库中已经存在的 UiMap 父子关系与 UiMapLink 关系",
+        "不使用矩形相交、采样、同父级推导或手写 id"
+      ],
+      "group_by": [],
+      "order_by": [
+        "relation_source ASC",
+        "from_ui_map_id ASC",
+        "to_ui_map_id ASC"
+      ],
+      "row_granularity": "一行代表一条来自 DB 显式字段的 UiMap 关系"
+    },
+    "datasets": {
+      "relations": {
+        "sql": "WITH parent_relations AS (SELECT 'uimap_parent_' || CAST(child.ID AS TEXT) AS relation_key, 'uimap_parent' AS relation_source, CAST(child.ID AS INTEGER) AS source_row_id, CAST(child.ID AS INTEGER) AS from_ui_map_id, child.Name_lang AS from_name, CAST(child.ParentUiMapID AS INTEGER) AS to_ui_map_id, parent.Name_lang AS to_name, CAST(COALESCE(child.Flags, 0) AS INTEGER) AS flags, CAST(COALESCE(child.VisibilityPlayerConditionID, 0) AS INTEGER) AS player_condition_id, CAST(COALESCE(child.System, 0) AS INTEGER) AS from_system, CAST(COALESCE(child.Type, 0) AS INTEGER) AS from_type, CAST(COALESCE(parent.Type, 0) AS INTEGER) AS to_type FROM uimap child LEFT JOIN uimap parent ON CAST(parent.ID AS INTEGER) = CAST(child.ParentUiMapID AS INTEGER) WHERE CAST(child.ID AS INTEGER) > 0 AND CAST(child.ParentUiMapID AS INTEGER) > 0), link_relations AS (SELECT 'uimaplink_' || CAST(link.ID AS TEXT) AS relation_key, 'uimaplink' AS relation_source, CAST(link.ID AS INTEGER) AS source_row_id, CAST(link.ParentUiMapID AS INTEGER) AS from_ui_map_id, parent.Name_lang AS from_name, CAST(link.ChildUiMapID AS INTEGER) AS to_ui_map_id, child.Name_lang AS to_name, CAST(COALESCE(link.Flags, 0) AS INTEGER) AS flags, CAST(COALESCE(link.PlayerConditionID, 0) AS INTEGER) AS player_condition_id, CAST(COALESCE(parent.System, 0) AS INTEGER) AS from_system, CAST(COALESCE(parent.Type, 0) AS INTEGER) AS from_type, CAST(COALESCE(child.Type, 0) AS INTEGER) AS to_type FROM uimaplink link LEFT JOIN uimap parent ON CAST(parent.ID AS INTEGER) = CAST(link.ParentUiMapID AS INTEGER) LEFT JOIN uimap child ON CAST(child.ID AS INTEGER) = CAST(link.ChildUiMapID AS INTEGER) WHERE CAST(link.ID AS INTEGER) > 0 AND CAST(link.ParentUiMapID AS INTEGER) > 0 AND CAST(link.ChildUiMapID AS INTEGER) > 0) SELECT * FROM parent_relations UNION ALL SELECT * FROM link_relations ORDER BY relation_source, from_ui_map_id, to_ui_map_id, source_row_id",
+        "query": {
+          "from": "uimap / uimaplink",
+          "joins": [
+            "uimap 自连接补齐 from/to 名称"
+          ],
+          "select": [
+            "relation_key",
+            "relation_source",
+            "source_row_id",
+            "from_ui_map_id",
+            "from_name",
+            "to_ui_map_id",
+            "to_name",
+            "flags",
+            "player_condition_id",
+            "from_system",
+            "from_type",
+            "to_type"
+          ],
+          "where": [
+            "from/to UiMapID 均大于 0"
+          ],
+          "group_by": [],
+          "order_by": [
+            "relation_source",
+            "from_ui_map_id",
+            "to_ui_map_id",
+            "source_row_id"
+          ],
+          "row_granularity": "一行代表一条 UiMap 显式关系"
+        }
+      }
+    }
+  },
+  "structure": {
+    "root_type": "document",
+    "lua_shape": "Toolbox.Data.NavigationUiMapRelations = { schemaVersion, sourceMode, generatedAt, relations }",
+    "fields": [],
+    "document_blocks": [
+      {
+        "name": "metadata",
+        "metadata": {
+          "schemaVersion": 1,
+          "sourceMode": "live",
+          "generatedAt": "@generated_at"
+        }
+      },
+      {
+        "name": "relations",
+        "dataset": "relations",
+        "block_type": "map_object",
+        "key_field": "relation_key",
+        "dedupe_by": [
+          "relation_key"
+        ],
+        "required_fields": [
+          "relation_key",
+          "relation_source",
+          "from_ui_map_id",
+          "to_ui_map_id"
+        ],
+        "sort_by": [
+          "relation_source",
+          "from_ui_map_id",
+          "to_ui_map_id",
+          "source_row_id"
+        ],
+        "value_template": {
+          "Source": "relation_source",
+          "SourceRowID": "source_row_id",
+          "FromUiMapID": "from_ui_map_id",
+          "FromName_lang": "from_name",
+          "ToUiMapID": "to_ui_map_id",
+          "ToName_lang": "to_name",
+          "Flags": "flags",
+          "PlayerConditionID": "player_condition_id",
+          "FromSystem": "from_system",
+          "FromType": "from_type",
+          "ToType": "to_type"
+        }
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [
+      "relation_key",
+      "relation_source",
+      "from_ui_map_id",
+      "to_ui_map_id"
+    ],
+    "unique_keys": [
+      [
+        "relation_key"
+      ]
+    ],
+    "non_null_fields": [
+      "relation_key",
+      "relation_source",
+      "from_ui_map_id",
+      "to_ui_map_id"
+    ],
+    "sort_rules": [
+      {
+        "field": "relation_source",
+        "direction": "asc"
+      },
+      {
+        "field": "from_ui_map_id",
+        "direction": "asc"
+      },
+      {
+        "field": "to_ui_map_id",
+        "direction": "asc"
+      }
+    ]
+  },
+  "versioning": {
+    "current_schema_version": 1,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约版本，仅导出 uimap.ParentUiMapID 与 uimaplink 显式关系；不生成推导邻接"
+      }
+    ]
+  }
+}

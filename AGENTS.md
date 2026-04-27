@@ -73,6 +73,14 @@
 
 适用范围：`Toolbox/Data/*.lua` 中由数据库生成的静态数据文件。
 
+### Navigation 数据源约束（强制）
+
+- **所有 `navigation` 路径规划数据必须走导出契约**：凡会被 `Toolbox.Navigation` 路径图、目标规则、入口落点、公共交通、地图父链、区域归属、职业 / 阵营 / 技能可用性规则或路线成本模型消费的数据，均必须定义 `DataContracts/<contract_id>.json` 并由 `scripts/export/` 从权威数据源正式导出。
+- **所有运行时路线边必须统一导出**：`Toolbox.Navigation` 构图只能消费统一运行时路线边表（当前为 `Toolbox.Data.NavigationRouteEdges` / `navigation_route_edges`），不得直接读取来源侧边表或手工边表。`NavigationTaxiEdges` 这类文件只能作为来源侧导出与追溯数据，后续传送门、职业技能、特殊交通等边必须先进入统一路线边导出后才能被运行时消费。
+- 禁止在手工维护 Lua 中写 navigation 数据，包括但不限于 `uiMapID`、`journalInstanceID`、`areaPoiID`、Taxi 节点 / 路径 ID、入口地图 ID、目标规则、路径边、节点、候选枢纽、落点坐标、职业技能边、阵营限制、成本与标签。
+- `Toolbox/Data/NavigationManualEdges.lua` 不得作为运行时数据源；后续新增、修正或迁移 navigation 数据时，必须改为新增或更新对应 DataContracts 契约并实跑导出。若历史文件仍存在，必须从 TOC 与 `Toolbox.Navigation` 消费链路中移除，不得继续追加数据。
+- 若当前缺少可导出的源表或表关系未确认，必须先停在方案评估 / 契约设计阶段，列出待确认的数据源与字段，不得用“先手写一个 ID 顶上”的方式绕过导出契约。
+
 ### 权威源与目录
 
 - 生成型静态数据的唯一权威源位于：`DataContracts/<contract_id>.json`

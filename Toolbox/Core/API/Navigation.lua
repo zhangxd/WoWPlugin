@@ -202,14 +202,14 @@ function Toolbox.Navigation.PlanRoute(routeGraph, startNodeId, targetNodeId, ava
 end
 
 --- 从路径数据中收集所有需要检查的 spellID，供运行时构建当前角色可用性快照。
----@param routeData table|nil 路径数据，默认使用 `Toolbox.Data.NavigationManualEdges`
+---@param routeData table|nil 路径数据；导航运行时只允许传入契约导出的数据表
 ---@return table spellIDList 去重后的技能 ID 序列
 function Toolbox.Navigation.GetRequiredSpellIDList(routeData)
-  local manualData = routeData or (Toolbox.Data and Toolbox.Data.NavigationManualEdges) or {} -- 手工路径数据
+  local exportedData = routeData or {} -- 契约导出的路径数据
   local seenSpellID = {} -- 已收集技能 ID 集合
   local spellIDList = {} -- 技能 ID 序列
 
-  for _, edge in ipairs(type(manualData.edges) == "table" and manualData.edges or {}) do
+  for _, edge in ipairs(type(exportedData.edges) == "table" and exportedData.edges or {}) do
     local requirements = type(edge) == "table" and edge.requirements or nil -- 边可用性要求
     local spellID = type(requirements) == "table" and tonumber(requirements.spellID) or nil -- 技能 ID
     if spellID and not seenSpellID[spellID] then
@@ -375,6 +375,243 @@ local function addTargetViaNodeEdge(routeGraph, viaNodeDef, target, targetNodeId
   }
 end
 
+--- 将世界坐标转换为指定 UiMap 的归一化坐标。
+---@param worldMapID number|nil 世界坐标所属 MapID
+---@param worldX number|nil 世界坐标 X
+---@param worldY number|nil 世界坐标 Y
+---@param hintUiMapID number|nil 目标 UiMap 提示
+---@return number|nil, number|nil
+local function convertWorldPositionToUiMapPosition(worldMapID, worldX, worldY, hintUiMapID)
+  if not tonumber(worldMapID) or tonumber(worldMapID) <= 0 or type(CreateVector2D) ~= "function" then
+    return nil, nil
+  end
+  local mapApi = type(C_Map) == "table" and C_Map or nil -- 地图 API 表
+  local getMapPosFromWorldPos = mapApi and mapApi.GetMapPosFromWorldPos or nil -- 世界坐标转地图坐标
+  if type(getMapPosFromWorldPos) ~= "function" then
+    return nil, nil
+  end
+
+  local vectorSuccess, worldPosition = pcall(CreateVector2D, worldX, worldY) -- 世界坐标向量
+  if not vectorSuccess or not worldPosition then
+    return nil, nil
+  end
+
+  local convertSuccess = false -- 坐标转换是否成功
+  local targetUiMapID = nil -- 转换得到的地图 ID
+  local targetPosition = nil -- 转换得到的归一化坐标
+  if tonumber(hintUiMapID) and tonumber(hintUiMapID) > 0 then
+    convertSuccess, targetUiMapID, targetPosition = pcall(getMapPosFromWorldPos, worldMapID, worldPosition, hintUiMapID)
+  else
+    convertSuccess, targetUiMapID, targetPosition = pcall(getMapPosFromWorldPos, worldMapID, worldPosition)
+  end
+  if not convertSuccess or not tonumber(targetUiMapID) or tonumber(targetUiMapID) <= 0 or not targetPosition then
+    return nil, nil
+  end
+
+  return readVectorXY(targetPosition)
+end
+
+--- 生成最终目标坐标点的步骤文案。
+---@param target table 地图目标
+---@param targetName string 目标显示名
+---@return string
+local function buildTargetPointLabel(target, targetName)
+  local targetX = tonumber(target and target.x) -- 目标 X
+  local targetY = tonumber(target and target.y) -- 目标 Y
+  if isNormalizedPosition(targetX, targetY) then
+    return string.format("目标位置：%s %.1f, %.1f", tostring(targetName), targetX * 100, targetY * 100)
+  end
+  return "目标位置：" .. tostring(targetName)
+end
+
+--- 为指定地图 ID 建立一组可回退的候选地图 ID。
+---@param mapID number|nil 原始地图 ID
+---@param mapNodes table 地图节点表
+---@return table
+local function buildRouteMapCandidateSet(mapID, mapNodes)
+  local candidateSet = {} -- 可回退地图 ID 集合
+  local currentMapID = tonumber(mapID) -- 当前候选地图 ID
+  local guardCount = 0 -- 父链保护计数
+
+  while currentMapID and currentMapID > 0 and guardCount < 16 do
+    if candidateSet[currentMapID] then
+      break
+    end
+    candidateSet[currentMapID] = true
+    local nodeDef = type(mapNodes) == "table" and mapNodes[currentMapID] or nil -- 当前地图定义
+    currentMapID = tonumber(nodeDef and nodeDef.ParentUiMapID) -- 父地图 ID
+    guardCount = guardCount + 1
+  end
+
+  return candidateSet
+end
+
+--- 统计每个 UiMap 节点参与的路线边数量。
+---@param edgeList table|nil 路线边列表
+---@return table
+local function buildEdgeDegreeByUiMapID(edgeList)
+  local degreeByUiMapID = {} -- 地图节点关联边数量
+  for _, edge in ipairs(type(edgeList) == "table" and edgeList or {}) do
+    local fromUiMapID = tonumber(edge and edge.fromUiMapID) -- 边起点地图 ID
+    local toUiMapID = tonumber(edge and edge.toUiMapID) -- 边终点地图 ID
+    if fromUiMapID and fromUiMapID > 0 then
+      degreeByUiMapID[fromUiMapID] = (degreeByUiMapID[fromUiMapID] or 0) + 1
+    end
+    if toUiMapID and toUiMapID > 0 then
+      degreeByUiMapID[toUiMapID] = (degreeByUiMapID[toUiMapID] or 0) + 1
+    end
+  end
+  return degreeByUiMapID
+end
+
+--- 将地图 ID 解析为更适合参与导航的路线节点地图 ID。
+---@param rawMapID number|nil 原始地图 ID
+---@param resolvedAtPositionMapID number|nil 指定点位解析出的地图 ID
+---@param mapNodes table 地图节点表
+---@param edgeDegreeByUiMapID table 地图边数量表
+---@return number|nil
+local function resolveRouteMapID(rawMapID, resolvedAtPositionMapID, mapNodes, edgeDegreeByUiMapID)
+  local searchMapIDList = {} -- 需要展开候选的地图 ID 列表
+  local searchSet = {} -- 已加入的地图 ID 集合
+  local function appendSearchMapID(mapID)
+    local numericMapID = tonumber(mapID) -- 目标地图 ID
+    if numericMapID and numericMapID > 0 and not searchSet[numericMapID] then
+      searchSet[numericMapID] = true
+      searchMapIDList[#searchMapIDList + 1] = numericMapID
+    end
+  end
+
+  appendSearchMapID(rawMapID)
+  appendSearchMapID(resolvedAtPositionMapID)
+
+  local rankedCandidateList = {} -- 排序后的候选地图列表
+  local rankedSet = {} -- 已加入候选的地图 ID 集合
+  local function pushRankedCandidate(mapID)
+    local numericMapID = tonumber(mapID) -- 候选地图 ID
+    if numericMapID and numericMapID > 0 and not rankedSet[numericMapID] then
+      rankedSet[numericMapID] = true
+      rankedCandidateList[#rankedCandidateList + 1] = numericMapID
+    end
+  end
+
+  for _, searchMapID in ipairs(searchMapIDList) do
+    local parentCandidateSet = buildRouteMapCandidateSet(searchMapID, mapNodes) -- 原始地图与父链候选
+    pushRankedCandidate(searchMapID)
+    for candidateMapID in pairs(parentCandidateSet) do
+      if candidateMapID ~= searchMapID then
+        pushRankedCandidate(candidateMapID)
+      end
+    end
+
+    local searchNode = type(mapNodes) == "table" and mapNodes[searchMapID] or nil -- 搜索地图定义
+    local searchName = tostring(searchNode and searchNode.Name_lang or "") -- 搜索地图名称
+    if searchName ~= "" then
+      for candidateMapID, nodeDef in pairs(type(mapNodes) == "table" and mapNodes or {}) do
+        if tostring(nodeDef and nodeDef.Name_lang or "") == searchName then
+          pushRankedCandidate(candidateMapID)
+        end
+      end
+    end
+  end
+
+  local bestMapID = nil -- 最优候选地图 ID
+  local bestScore = nil -- 最优候选评分
+  for _, candidateMapID in ipairs(rankedCandidateList) do
+    local nodeDef = type(mapNodes) == "table" and mapNodes[candidateMapID] or nil -- 候选地图定义
+    local mapType = tonumber(nodeDef and nodeDef.MapType) or 99 -- 候选地图类型
+    local degree = tonumber(edgeDegreeByUiMapID and edgeDegreeByUiMapID[candidateMapID]) or 0 -- 候选地图关联边数量
+    local mapTypeRank = 4 -- 地图类型优先级
+    if mapType == 3 then
+      mapTypeRank = 0
+    elseif mapType == 6 then
+      mapTypeRank = 1
+    elseif mapType == 4 or mapType == 5 then
+      mapTypeRank = 2
+    elseif mapType < 3 then
+      mapTypeRank = 3
+    end
+    local score = string.format("%d:%d:%05d", mapTypeRank, degree > 0 and 0 or 1, candidateMapID) -- 候选排序分数
+    if bestScore == nil or score < bestScore then
+      bestScore = score
+      bestMapID = candidateMapID
+    end
+  end
+
+  return bestMapID or tonumber(rawMapID)
+end
+
+--- 若目标点位于更具体的子图，优先把目标解析为该子图。
+---@param target table 地图目标
+---@return table
+local function resolveConcreteTarget(target)
+  if type(target) ~= "table" then
+    return target
+  end
+  local targetMapID = tonumber(target.uiMapID) -- 原始目标地图 ID
+  local targetX = tonumber(target.x) -- 原始目标 X
+  local targetY = tonumber(target.y) -- 原始目标 Y
+  local mapNodes = Toolbox.Data and Toolbox.Data.NavigationMapNodes and Toolbox.Data.NavigationMapNodes.nodes or {} -- 地图基础节点
+  local routeEdgeData = Toolbox.Data and Toolbox.Data.NavigationRouteEdges or {} -- 契约导出的统一路线边数据
+  local edgeDegreeByUiMapID = buildEdgeDegreeByUiMapID(routeEdgeData.edges) -- 地图边数量
+  if not targetMapID then
+    return target
+  end
+
+  local mapApi = type(C_Map) == "table" and C_Map or nil -- 地图 API 表
+  local getMapInfoAtPosition = mapApi and mapApi.GetMapInfoAtPosition or nil -- 指定点位命中的更具体地图
+  local resolvedAtPositionMapID = nil -- 指定点位解析出的更具体地图 ID
+  local resolvedName = nil -- 指定点位解析出的地图名
+  if isNormalizedPosition(targetX, targetY) and type(getMapInfoAtPosition) == "function" then
+    local success, mapInfo = pcall(getMapInfoAtPosition, targetMapID, targetX, targetY) -- 命中的地图信息
+    resolvedAtPositionMapID = success and type(mapInfo) == "table" and tonumber(mapInfo.mapID) or nil
+    resolvedName = success and type(mapInfo) == "table" and mapInfo.name or nil
+  end
+
+  local resolvedMapID = resolveRouteMapID(targetMapID, resolvedAtPositionMapID, mapNodes, edgeDegreeByUiMapID) -- 参与导航的目标地图 ID
+  if not resolvedMapID or resolvedMapID <= 0 or resolvedMapID == targetMapID then
+    return target
+  end
+
+  local resolvedTarget = {} -- 解析后的目标
+  for key, value in pairs(target) do
+    resolvedTarget[key] = value
+  end
+  resolvedTarget.uiMapID = resolvedMapID
+  if type(resolvedName) == "string" and resolvedName ~= "" then
+    resolvedTarget.name = resolvedName
+  elseif type(mapNodes[resolvedMapID]) == "table" and type(mapNodes[resolvedMapID].Name_lang) == "string" then
+    resolvedTarget.name = mapNodes[resolvedMapID].Name_lang
+  end
+  return resolvedTarget
+end
+
+--- 为含 portal 点位的路线边补充地图坐标文案。
+---@param edge table|nil 路线边
+---@return string|nil
+local function buildRouteEdgeLabel(edge)
+  local baseLabel = type(edge) == "table" and edge.label or nil -- 原始步骤文案
+  if type(baseLabel) ~= "string" or baseLabel == "" then
+    return baseLabel
+  end
+  if edge.mode ~= "WAYPOINT_LINK" then
+    return baseLabel
+  end
+
+  local portalWorldMapID = tonumber(edge.portalWorldMapID) -- portal 世界坐标 MapID
+  local portalWorldX = tonumber(edge.portalWorldX) -- portal 世界坐标 X
+  local portalWorldY = tonumber(edge.portalWorldY) -- portal 世界坐标 Y
+  local fromUiMapID = tonumber(edge.fromUiMapID) -- 边起点 UiMapID
+  local fromX, fromY = convertWorldPositionToUiMapPosition(portalWorldMapID, portalWorldX, portalWorldY, fromUiMapID) -- portal 在起点地图上的归一化坐标
+  if not isNormalizedPosition(fromX, fromY) then
+    return baseLabel
+  end
+
+  local routeGraphNode = Toolbox.Data and Toolbox.Data.NavigationMapNodes and Toolbox.Data.NavigationMapNodes.nodes or {} -- 地图基础节点
+  local fromNode = routeGraphNode[fromUiMapID] -- 起点地图定义
+  local fromName = tostring((fromNode and fromNode.Name_lang) or ("Map #" .. tostring(fromUiMapID))) -- 起点地图显示名
+  return string.format("%s %.1f, %.1f；%s", fromName, fromX * 100, fromY * 100, baseLabel)
+end
+
 --- 向路径图写入一组节点定义。
 ---@param routeGraph table 正在构建的路径图
 ---@param nodeTable table|nil 节点定义表
@@ -394,7 +631,12 @@ end
 ---@param edgeList table|nil 边定义列表
 local function addRouteGraphEdges(routeGraph, edgeList)
   for _, edge in ipairs(type(edgeList) == "table" and edgeList or {}) do
-    routeGraph.edges[#routeGraph.edges + 1] = edge
+    local edgeCopy = {} -- 运行时路线边副本
+    for key, value in pairs(type(edge) == "table" and edge or {}) do
+      edgeCopy[key] = value
+    end
+    edgeCopy.label = buildRouteEdgeLabel(edgeCopy) or edgeCopy.label
+    routeGraph.edges[#routeGraph.edges + 1] = edgeCopy
   end
 end
 
@@ -408,9 +650,25 @@ local function addCurrentLocationEdges(routeGraph, nodeTable, availabilityContex
     return
   end
 
+  local currentX = tonumber(availabilityContext and availabilityContext.currentX) -- 当前角色 X
+  local currentY = tonumber(availabilityContext and availabilityContext.currentY) -- 当前角色 Y
+  local resolvedAtPositionMapID = nil -- 当前点位命中的更具体地图 ID
+  local mapApi = type(C_Map) == "table" and C_Map or nil -- 地图 API 表
+  local getMapInfoAtPosition = mapApi and mapApi.GetMapInfoAtPosition or nil -- 指定点位命中的更具体地图
+  if isNormalizedPosition(currentX, currentY) and type(getMapInfoAtPosition) == "function" then
+    local success, mapInfo = pcall(getMapInfoAtPosition, currentMapID, currentX, currentY) -- 当前点位命中的地图信息
+    resolvedAtPositionMapID = success and type(mapInfo) == "table" and tonumber(mapInfo.mapID) or nil
+  end
+
+  local mapNodes = Toolbox.Data and Toolbox.Data.NavigationMapNodes and Toolbox.Data.NavigationMapNodes.nodes or {} -- 地图基础节点
+  local routeEdgeData = Toolbox.Data and Toolbox.Data.NavigationRouteEdges or {} -- 契约导出的统一路线边数据
+  local edgeDegreeByUiMapID = buildEdgeDegreeByUiMapID(routeEdgeData.edges) -- 地图边数量
+  local resolvedCurrentMapID = resolveRouteMapID(currentMapID, resolvedAtPositionMapID, mapNodes, edgeDegreeByUiMapID) -- 可参与导航的当前地图 ID
+
   for nodeId, nodeDef in pairs(type(nodeTable) == "table" and nodeTable or {}) do
-    local nodeMapID = tonumber(nodeDef and nodeDef.UiMapID) -- 手工节点对应地图
-    if nodeMapID == currentMapID then
+    local nodeSource = nodeDef and nodeDef.Source -- 导出节点来源
+    local nodeMapID = tonumber(nodeDef and nodeDef.UiMapID) -- 导出节点对应地图
+    if nodeSource == "uimap" and nodeMapID == resolvedCurrentMapID then
       routeGraph.edges[#routeGraph.edges + 1] = {
         from = "current",
         to = nodeId,
@@ -449,38 +707,42 @@ end
 local function buildMapTargetRouteGraph(target, availabilityContext)
   local targetMapID = tonumber(target and target.uiMapID) or 0 -- 目标地图 ID
   local mapNodes = Toolbox.Data and Toolbox.Data.NavigationMapNodes and Toolbox.Data.NavigationMapNodes.nodes or {} -- 地图基础节点
-  local manualData = Toolbox.Data and Toolbox.Data.NavigationManualEdges or {} -- 手工玩法路径数据
-  local taxiData = Toolbox.Data and Toolbox.Data.NavigationTaxiEdges or {} -- 模拟公共交通路径数据
-  local targetRules = type(manualData.targetRules) == "table" and manualData.targetRules or {} -- 目标规则表
+  local routeEdgeData = Toolbox.Data and Toolbox.Data.NavigationRouteEdges or {} -- 契约导出的统一路线边数据
+  local targetRules = type(routeEdgeData.targetRules) == "table" and routeEdgeData.targetRules or {} -- 契约导出的目标规则表
   local targetRule = targetRules[targetMapID] or {} -- 当前目标规则
   local targetNodeId = "target" -- 目标节点 ID
+  local targetMapNodeId = "uimap_" .. tostring(targetMapID) -- 目标 UiMap 节点 ID
   local targetNode = mapNodes[targetMapID] -- 目标地图节点
   local targetName = tostring((target and target.name) or (targetNode and targetNode.Name_lang) or ("Map #" .. tostring(targetMapID))) -- 目标显示名
-  local directLabel = "前往" .. targetName -- 直接前往步骤文案
-  local mergedNodes = {} -- 手工节点与模拟公共交通节点的合并视图
+  local targetPointLabel = buildTargetPointLabel(target, targetName) -- 目标坐标点步骤文案
+  local mergedNodes = {} -- 契约导出节点的合并视图
   local routeGraph = {
     nodes = {
       current = { id = "current", name = "当前位置" },
       target = { id = targetNodeId, name = targetName },
     },
-    edges = {
-      { from = "current", to = targetNodeId, cost = buildDirectTargetCost(target, availabilityContext, targetRule), label = directLabel },
-    },
-  } -- 第一版目标路径图
+    edges = {},
+  } -- 目标路径图；所有跨地图路线边由契约导出，运行时只补当前位置与目标坐标点
 
-  for nodeId, nodeDef in pairs(type(manualData.nodes) == "table" and manualData.nodes or {}) do
-    mergedNodes[nodeId] = nodeDef
-  end
-  for nodeId, nodeDef in pairs(type(taxiData.nodes) == "table" and taxiData.nodes or {}) do
+  for nodeId, nodeDef in pairs(type(routeEdgeData.nodes) == "table" and routeEdgeData.nodes or {}) do
     if mergedNodes[nodeId] == nil then
       mergedNodes[nodeId] = nodeDef
     end
   end
 
   addRouteGraphNodes(routeGraph, mergedNodes)
-  addRouteGraphEdges(routeGraph, manualData.edges)
-  addRouteGraphEdges(routeGraph, taxiData.edges)
+  addRouteGraphEdges(routeGraph, routeEdgeData.edges)
   addCurrentLocationEdges(routeGraph, mergedNodes, availabilityContext)
+
+  if routeGraph.nodes[targetMapNodeId] ~= nil then
+    routeGraph.edges[#routeGraph.edges + 1] = {
+      from = targetMapNodeId,
+      to = targetNodeId,
+      cost = buildDirectTargetCost(target, { currentUiMapID = targetMapID }, targetRule),
+      label = targetPointLabel,
+      mode = "TARGET_POINT",
+    }
+  end
 
   for _, viaNodeDef in ipairs(type(targetRule.viaNodes) == "table" and targetRule.viaNodes or {}) do
     addTargetViaNodeEdge(routeGraph, viaNodeDef, target, targetNodeId, targetName)
@@ -498,6 +760,14 @@ function Toolbox.Navigation.PlanRouteToMapTarget(target, availabilityContext)
   if type(target) ~= "table" or type(target.uiMapID) ~= "number" then
     return nil, { code = "NAVIGATION_ERR_BAD_TARGET" }
   end
-  local routeGraph = buildMapTargetRouteGraph(target, availabilityContext) -- 第一版目标路径图
+  local resolvedTarget = resolveConcreteTarget(target) -- 解析后的具体目标
+  local targetMapID = tonumber(resolvedTarget.uiMapID) -- 目标地图 ID
+  local mapNodes = Toolbox.Data and Toolbox.Data.NavigationMapNodes and Toolbox.Data.NavigationMapNodes.nodes or {} -- 地图基础节点
+  local targetMapNode = mapNodes[targetMapID] -- 目标地图定义
+  local targetMapType = tonumber(targetMapNode and targetMapNode.MapType) -- 目标地图类型
+  if targetMapType and targetMapType < 3 then
+    return nil, { code = "NAVIGATION_ERR_UNSUPPORTED_MAP_LEVEL" }
+  end
+  local routeGraph = buildMapTargetRouteGraph(resolvedTarget, availabilityContext) -- 第一版目标路径图
   return Toolbox.Navigation.PlanRoute(routeGraph, "current", "target", availabilityContext)
 end

@@ -28,7 +28,7 @@
       ],
       "where": [
         "ui_map_id > 0",
-        "map_name 非空"
+        "ui_map_id > 0；Name_lang 为空时使用 Map #ID 占位，避免丢失 DB 关系节点"
       ],
       "group_by": [],
       "order_by": [
@@ -38,7 +38,7 @@
     },
     "datasets": {
       "nodes": {
-        "sql": "SELECT\n  CAST(ID AS INTEGER) AS ui_map_id,\n  CAST(COALESCE(ParentUiMapID, 0) AS INTEGER) AS parent_ui_map_id,\n  CAST(COALESCE(Type, 0) AS INTEGER) AS map_type,\n  Name_lang AS map_name\nFROM uimap\nWHERE TRIM(COALESCE(ID, '')) <> ''\n  AND CAST(ID AS INTEGER) > 0\n  AND TRIM(COALESCE(Name_lang, '')) <> ''\nORDER BY CAST(ID AS INTEGER), ID",
+        "sql": "SELECT\n  CAST(ID AS INTEGER) AS ui_map_id,\n  CAST(COALESCE(ParentUiMapID, 0) AS INTEGER) AS parent_ui_map_id,\n  CAST(COALESCE(Type, 0) AS INTEGER) AS map_type,\n  COALESCE(NULLIF(TRIM(Name_lang), ''), 'Map #' || CAST(ID AS TEXT)) AS map_name\nFROM uimap\nWHERE TRIM(COALESCE(ID, '')) <> ''\n  AND CAST(ID AS INTEGER) > 0\nORDER BY CAST(ID AS INTEGER), ID",
         "query": {
           "from": "uimap",
           "joins": [],
@@ -50,7 +50,7 @@
           ],
           "where": [
             "ui_map_id > 0",
-            "map_name 非空"
+            "ui_map_id > 0；Name_lang 为空时使用 Map #ID 占位，避免丢失 DB 关系节点"
           ],
           "group_by": [],
           "order_by": [

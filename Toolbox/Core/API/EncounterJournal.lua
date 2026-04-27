@@ -527,39 +527,176 @@ local function buildDungeonEntranceCandidateMapIDs(journalInstanceID, options)
   return mapIDList
 end
 
---- 查询某个副本在地图上的入口位置。
----@param journalInstanceID number 冒险指南副本 ID
----@param options table|nil 可选：candidateMapIDs 用于测试或调用方传入更小地图范围
----@return table|nil entrance 入口信息，含 uiMapID / position / areaPoiID / name / journalInstanceID
-function Toolbox.EJ.FindDungeonEntranceForJournalInstance(journalInstanceID, options)
-  if type(journalInstanceID) ~= "number" or journalInstanceID <= 0 then
-    return nil
+--- 构建可传给 UiMapPoint 的归一化坐标对象。
+---@param x number 归一化 X 坐标
+---@param y number 归一化 Y 坐标
+---@return table position 坐标对象
+local function createEntrancePosition(x, y)
+  if type(CreateVector2D) == "function" then
+    local vectorSuccess, vectorValue = pcall(CreateVector2D, x, y) -- 暴雪 Vector2D 构造结果
+    if vectorSuccess and type(vectorValue) == "table" then
+      return vectorValue
+    end
   end
+
+  return {
+    x = x,
+    y = y,
+    GetXY = function(self)
+      return self.x, self.y
+    end,
+  }
+end
+
+--- 从运行时冒险指南 API 精确查找副本入口；只接受 journalInstanceID 完全相同的记录。
+---@param journalInstanceID number 冒险指南副本 ID
+---@param options table|nil 可选：candidateMapIDs 直接指定候选地图
+---@return table|nil entrance 入口信息
+local function findRuntimeDungeonEntranceForJournalInstance(journalInstanceID, options)
   if not C_EncounterJournal or type(C_EncounterJournal.GetDungeonEntrancesForMap) ~= "function" then
     return nil
   end
 
-  local candidateMapIDs = buildDungeonEntranceCandidateMapIDs(journalInstanceID, options) -- 候选地图
-  for _, uiMapID in ipairs(candidateMapIDs) do
-    local entranceSuccess, entranceList = pcall(C_EncounterJournal.GetDungeonEntrancesForMap, uiMapID)
+  local mapIDList = buildDungeonEntranceCandidateMapIDs(journalInstanceID, options) -- 候选地图 ID 列表
+  for _, uiMapID in ipairs(mapIDList) do
+    local entranceSuccess, entranceList = pcall(C_EncounterJournal.GetDungeonEntrancesForMap, uiMapID) -- 运行时入口列表
     if entranceSuccess and type(entranceList) == "table" then
-      for _, entranceInfo in ipairs(entranceList) do
-        if type(entranceInfo) == "table" and entranceInfo.journalInstanceID == journalInstanceID and entranceInfo.position then
-          return {
-            uiMapID = uiMapID,
-            position = entranceInfo.position,
-            areaPoiID = entranceInfo.areaPoiID,
-            name = entranceInfo.name,
-            description = entranceInfo.description,
-            atlasName = entranceInfo.atlasName,
-            journalInstanceID = entranceInfo.journalInstanceID,
-          }
+      for _, runtimeEntrance in ipairs(entranceList) do
+        local runtimeJournalInstanceID = type(runtimeEntrance) == "table" and tonumber(runtimeEntrance.journalInstanceID) or nil -- 入口所属副本 ID
+        if runtimeJournalInstanceID == journalInstanceID and runtimeEntrance.position then
+          runtimeEntrance.uiMapID = uiMapID
+          runtimeEntrance.source = "runtime"
+          return runtimeEntrance
         end
       end
     end
   end
 
   return nil
+end
+
+--- 获取 DB 契约导出的静态副本入口列表。
+---@param journalInstanceID number 冒险指南副本 ID
+---@return table|nil entranceList 静态入口列表
+local function getStaticEntranceList(journalInstanceID)
+  local staticData = Toolbox.Data and Toolbox.Data.InstanceEntrances -- DB 导出的静态入口数据
+  local entrancesByJournalInstanceID = type(staticData) == "table" and staticData.entrances or nil -- 按副本 ID 索引的入口表
+  local entranceList = type(entrancesByJournalInstanceID) == "table" and entrancesByJournalInstanceID[journalInstanceID] or nil -- 命中的入口列表
+  if type(entranceList) ~= "table" then
+    return nil
+  end
+
+  return entranceList
+end
+
+--- 将 DB 世界坐标入口转换为可设置 waypoint 的地图坐标入口。
+---@param entranceRecord table DB 导出的入口记录
+---@return table|nil entrance 入口信息
+local function buildStaticDungeonEntrance(entranceRecord)
+  if type(entranceRecord) ~= "table" then
+    return nil
+  end
+  if not C_Map or type(C_Map.GetMapPosFromWorldPos) ~= "function" or type(CreateVector2D) ~= "function" then
+    return nil
+  end
+
+  local worldMapID = tonumber(entranceRecord.WorldMapID) -- 世界坐标所属 WorldMapArea ID
+  local worldX = tonumber(entranceRecord.WorldX) -- 世界坐标 X
+  local worldY = tonumber(entranceRecord.WorldY) -- 世界坐标 Y
+  local hintUiMapID = tonumber(entranceRecord.HintUiMapID) -- 坐标转换时使用的目标地图提示
+  if not worldMapID or worldMapID <= 0 or not worldX or not worldY then
+    return nil
+  end
+
+  local vectorSuccess, worldPosition = pcall(CreateVector2D, worldX, worldY) -- 暴雪世界坐标向量
+  if not vectorSuccess or not worldPosition then
+    return nil
+  end
+
+  local convertSuccess = false -- 坐标转换是否成功
+  local targetUiMapID = nil -- 转换后的地图 ID
+  local targetPosition = nil -- 转换后的归一化地图坐标
+  if hintUiMapID and hintUiMapID > 0 then
+    convertSuccess, targetUiMapID, targetPosition = pcall(C_Map.GetMapPosFromWorldPos, worldMapID, worldPosition, hintUiMapID)
+  else
+    convertSuccess, targetUiMapID, targetPosition = pcall(C_Map.GetMapPosFromWorldPos, worldMapID, worldPosition)
+  end
+  if not convertSuccess or type(targetUiMapID) ~= "number" or targetUiMapID <= 0 or not targetPosition then
+    return nil
+  end
+
+  return {
+    uiMapID = targetUiMapID,
+    position = targetPosition,
+    areaPoiID = tonumber(entranceRecord.AreaPoiID),
+    name = entranceRecord.InstanceName,
+    description = entranceRecord.AreaName,
+    atlasName = nil,
+    journalInstanceID = tonumber(entranceRecord.JournalInstanceID),
+    source = "static",
+    entranceID = tonumber(entranceRecord.EntranceID),
+  }
+end
+
+--- 从 DB 契约导出的静态入口表精确查找副本入口。
+---@param journalInstanceID number 冒险指南副本 ID
+---@return table|nil entrance 入口信息
+local function findStaticDungeonEntranceForJournalInstance(journalInstanceID)
+  local entranceList = getStaticEntranceList(journalInstanceID) -- 静态入口候选列表
+  if not entranceList then
+    return nil
+  end
+
+  for _, entranceRecord in ipairs(entranceList) do
+    local entranceInfo = buildStaticDungeonEntrance(entranceRecord) -- 转换后的入口信息
+    if entranceInfo then
+      return entranceInfo
+    end
+  end
+
+  return nil
+end
+
+--- 从契约导出的副本入口表读取入口位置。
+---@param journalInstanceID number 冒险指南副本 ID
+---@param options table|nil 可选：candidateMapIDs 用于运行时入口扫描
+---@return table|nil entrance 入口信息，含 uiMapID / position / areaPoiID / name / journalInstanceID
+function Toolbox.EJ.FindDungeonEntranceForJournalInstance(journalInstanceID, options)
+  if type(journalInstanceID) ~= "number" or journalInstanceID <= 0 then
+    return nil
+  end
+
+  local staticEntrance = findStaticDungeonEntranceForJournalInstance(journalInstanceID) -- DB 静态精确入口
+  if staticEntrance then
+    return staticEntrance
+  end
+
+  local entranceData = Toolbox.Data and Toolbox.Data.NavigationInstanceEntrances -- 导出的副本入口数据
+  local entrancesByJournalInstanceID = type(entranceData) == "table" and entranceData.entrancesByJournalInstanceID or nil -- 按副本 ID 索引
+  local exportedEntrance = type(entrancesByJournalInstanceID) == "table" and entrancesByJournalInstanceID[journalInstanceID] or nil -- 命中的入口记录
+  if type(exportedEntrance) == "table" then
+    local targetUiMapID = tonumber(exportedEntrance.TargetUiMapID) -- 外部目标地图
+    local targetX = tonumber(exportedEntrance.TargetX) -- 外部目标 X
+    local targetY = tonumber(exportedEntrance.TargetY) -- 外部目标 Y
+    if targetUiMapID and targetUiMapID > 0 and targetX and targetY and targetX >= 0 and targetX <= 1 and targetY >= 0 and targetY <= 1 then
+      return {
+        source = "exported",
+        uiMapID = targetUiMapID,
+        position = createEntrancePosition(targetX, targetY),
+        entranceID = exportedEntrance.EntranceID,
+        areaPoiID = exportedEntrance.AreaPoiID,
+        name = exportedEntrance.Name_lang or exportedEntrance.AreaPoiName_lang,
+        journalInstanceID = exportedEntrance.JournalInstanceID or journalInstanceID,
+        instanceMapID = exportedEntrance.InstanceMapID,
+        worldMapID = exportedEntrance.WorldMapID,
+        worldX = exportedEntrance.WorldX,
+        worldY = exportedEntrance.WorldY,
+        worldZ = exportedEntrance.WorldZ,
+      }
+    end
+  end
+
+  return findRuntimeDungeonEntranceForJournalInstance(journalInstanceID, options)
 end
 
 --- 打开世界地图到指定地图 ID。优先使用 OpenWorldMap，回退到 ToggleWorldMap + WorldMapFrame:SetMapID。

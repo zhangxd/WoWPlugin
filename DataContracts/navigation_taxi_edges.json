@@ -2,9 +2,9 @@
   "contract": {
     "contract_id": "navigation_taxi_edges",
     "schema_version": 1,
-    "summary": "navigation 公共交通 Taxi* 静态边（draft，待真实环境导出验证）",
+    "summary": "navigation 公共交通 Taxi* 静态边",
     "source_of_truth": "WoWPlugin",
-    "status": "draft"
+    "status": "active"
   },
   "output": {
     "lua_file": "Toolbox/Data/NavigationTaxiEdges.lua",
@@ -47,7 +47,7 @@
     },
     "datasets": {
       "nodes": {
-        "sql": "WITH public_paths AS (\n  SELECT\n    CAST(tp.ID AS INTEGER) AS path_id,\n    CAST(tp.FromTaxiNode AS INTEGER) AS from_taxi_node_id,\n    CAST(tp.ToTaxiNode AS INTEGER) AS to_taxi_node_id,\n    CAST(COALESCE(tp.Cost, 0) AS INTEGER) AS path_cost\n  FROM taxipath tp\n  WHERE TRIM(COALESCE(tp.ID, '')) <> ''\n    AND TRIM(COALESCE(tp.FromTaxiNode, '')) <> ''\n    AND TRIM(COALESCE(tp.ToTaxiNode, '')) <> ''\n    AND CAST(tp.ID AS INTEGER) > 0\n    AND CAST(tp.FromTaxiNode AS INTEGER) > 0\n    AND CAST(tp.ToTaxiNode AS INTEGER) > 0\n    AND EXISTS (\n      SELECT 1\n      FROM taxipathnode tpn\n      WHERE CAST(tpn.PathID AS INTEGER) = CAST(tp.ID AS INTEGER)\n        AND (\n          CAST(COALESCE(tpn.Delay, 0) AS INTEGER) > 0\n          OR (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 2) <> 0\n        )\n    )\n), used_nodes AS (\n  SELECT from_taxi_node_id AS taxi_node_id FROM public_paths\n  UNION\n  SELECT to_taxi_node_id AS taxi_node_id FROM public_paths\n)\nSELECT\n  CAST(tn.ID AS INTEGER) AS taxi_node_id,\n  CAST(COALESCE((\n    SELECT MIN(CAST(uma.UiMapID AS INTEGER))\n    FROM uimapassignment uma\n    WHERE CAST(uma.MapID AS INTEGER) = CAST(tn.ContinentID AS INTEGER)\n      AND CAST(COALESCE(uma.UiMapID, 0) AS INTEGER) > 0\n  ), 0) AS INTEGER) AS ui_map_id,\n  CAST(COALESCE(tn.ContinentID, 0) AS INTEGER) AS map_id,\n  Name_lang AS node_name,\n  CAST(COALESCE(tn.Flags, 0) AS INTEGER) AS node_flags,\n  CAST(COALESCE(tn.ConditionID, 0) AS INTEGER) AS condition_id,\n  CAST(COALESCE(tn.VisibilityConditionID, 0) AS INTEGER) AS visibility_condition_id\nFROM taxinodes tn\nJOIN used_nodes un ON un.taxi_node_id = CAST(tn.ID AS INTEGER)\nWHERE TRIM(COALESCE(tn.ID, '')) <> ''\n  AND CAST(tn.ID AS INTEGER) > 0\n  AND TRIM(COALESCE(Name_lang, '')) <> ''\nORDER BY CAST(tn.ID AS INTEGER), tn.ID",
+        "sql": "WITH public_path_ids AS (\n  SELECT CAST(PathID AS INTEGER) AS path_id\n  FROM taxipathnode\n  WHERE TRIM(COALESCE(PathID, '')) <> ''\n    AND CAST(PathID AS INTEGER) > 0\n    AND (\n      CAST(COALESCE(Delay, 0) AS INTEGER) > 0\n      OR (CAST(COALESCE(Flags, 0) AS INTEGER) & 2) <> 0\n    )\n  GROUP BY CAST(PathID AS INTEGER)\n), public_paths AS (\n  SELECT\n    CAST(tp.ID AS INTEGER) AS path_id,\n    CAST(tp.FromTaxiNode AS INTEGER) AS from_taxi_node_id,\n    CAST(tp.ToTaxiNode AS INTEGER) AS to_taxi_node_id,\n    CAST(COALESCE(tp.Cost, 0) AS INTEGER) AS path_cost\n  FROM taxipath tp\n  JOIN public_path_ids ppi ON ppi.path_id = CAST(tp.ID AS INTEGER)\n  WHERE TRIM(COALESCE(tp.ID, '')) <> ''\n    AND TRIM(COALESCE(tp.FromTaxiNode, '')) <> ''\n    AND TRIM(COALESCE(tp.ToTaxiNode, '')) <> ''\n    AND CAST(tp.ID AS INTEGER) > 0\n    AND CAST(tp.FromTaxiNode AS INTEGER) > 0\n    AND CAST(tp.ToTaxiNode AS INTEGER) > 0\n), used_nodes AS (\n  SELECT from_taxi_node_id AS taxi_node_id FROM public_paths\n  UNION\n  SELECT to_taxi_node_id AS taxi_node_id FROM public_paths\n)\nSELECT\n  'taxi_' || CAST(tn.ID AS TEXT) AS taxi_node_key,\n  CAST(tn.ID AS INTEGER) AS taxi_node_id,\n  CAST(COALESCE((\n    SELECT MIN(CAST(uma.UiMapID AS INTEGER))\n    FROM uimapassignment uma\n    WHERE CAST(uma.MapID AS INTEGER) = CAST(tn.ContinentID AS INTEGER)\n      AND CAST(COALESCE(uma.UiMapID, 0) AS INTEGER) > 0\n  ), 0) AS INTEGER) AS ui_map_id,\n  CAST(COALESCE(tn.ContinentID, 0) AS INTEGER) AS map_id,\n  Name_lang AS node_name,\n  CAST(COALESCE(tn.Flags, 0) AS INTEGER) AS node_flags,\n  CAST(COALESCE(tn.ConditionID, 0) AS INTEGER) AS condition_id,\n  CAST(COALESCE(tn.VisibilityConditionID, 0) AS INTEGER) AS visibility_condition_id\nFROM taxinodes tn\nJOIN used_nodes un ON un.taxi_node_id = CAST(tn.ID AS INTEGER)\nWHERE TRIM(COALESCE(tn.ID, '')) <> ''\n  AND CAST(tn.ID AS INTEGER) > 0\n  AND TRIM(COALESCE(Name_lang, '')) <> ''\nORDER BY CAST(tn.ID AS INTEGER), tn.ID",
         "query": {
           "from": "taxinodes tn",
           "joins": [
@@ -75,7 +75,7 @@
         }
       },
       "edges": {
-        "sql": "WITH public_paths AS (\n  SELECT\n    CAST(tp.ID AS INTEGER) AS path_id,\n    CAST(tp.FromTaxiNode AS INTEGER) AS from_taxi_node_id,\n    CAST(tp.ToTaxiNode AS INTEGER) AS to_taxi_node_id,\n    CAST(COALESCE(tp.Cost, 0) AS INTEGER) AS path_cost\n  FROM taxipath tp\n  WHERE TRIM(COALESCE(tp.ID, '')) <> ''\n    AND TRIM(COALESCE(tp.FromTaxiNode, '')) <> ''\n    AND TRIM(COALESCE(tp.ToTaxiNode, '')) <> ''\n    AND CAST(tp.ID AS INTEGER) > 0\n    AND CAST(tp.FromTaxiNode AS INTEGER) > 0\n    AND CAST(tp.ToTaxiNode AS INTEGER) > 0\n    AND EXISTS (\n      SELECT 1\n      FROM taxipathnode tpn\n      WHERE CAST(tpn.PathID AS INTEGER) = CAST(tp.ID AS INTEGER)\n        AND (\n          CAST(COALESCE(tpn.Delay, 0) AS INTEGER) > 0\n          OR (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 2) <> 0\n        )\n    )\n), path_stats AS (\n  SELECT\n    CAST(tpn.PathID AS INTEGER) AS path_id,\n    MAX(CASE WHEN CAST(COALESCE(tpn.Delay, 0) AS INTEGER) > 0 THEN 1 ELSE 0 END) AS has_delay_node,\n    MAX(CASE WHEN (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 2) <> 0 THEN 1 ELSE 0 END) AS has_stop_node,\n    MAX(CASE WHEN (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 1) <> 0 THEN 1 ELSE 0 END) AS has_map_change_node\n  FROM taxipathnode tpn\n  WHERE TRIM(COALESCE(tpn.PathID, '')) <> ''\n    AND CAST(tpn.PathID AS INTEGER) > 0\n  GROUP BY CAST(tpn.PathID AS INTEGER)\n)\nSELECT\n  ROW_NUMBER() OVER (ORDER BY pp.path_id ASC) AS edge_index,\n  CAST(pp.path_id AS INTEGER) AS path_id,\n  CAST(pp.from_taxi_node_id AS INTEGER) AS from_node_id,\n  CAST(pp.to_taxi_node_id AS INTEGER) AS to_node_id,\n  CAST(COALESCE(pp.path_cost, 0) AS INTEGER) AS edge_cost,\n  'PUBLIC_TRANSPORT' AS mode,\n  '乘坐公共交通前往' || COALESCE(tn_to.Name_lang, ('Taxi Node #' || CAST(pp.to_taxi_node_id AS TEXT))) AS edge_label,\n  CAST(COALESCE(ps.has_delay_node, 0) AS INTEGER) AS has_delay_node,\n  CAST(COALESCE(ps.has_stop_node, 0) AS INTEGER) AS has_stop_node,\n  CAST(COALESCE(ps.has_map_change_node, 0) AS INTEGER) AS has_map_change_node\nFROM public_paths pp\nLEFT JOIN path_stats ps ON ps.path_id = pp.path_id\nLEFT JOIN taxinodes tn_to ON CAST(tn_to.ID AS INTEGER) = pp.to_taxi_node_id\nORDER BY pp.path_id ASC",
+        "sql": "WITH public_path_ids AS (\n  SELECT CAST(PathID AS INTEGER) AS path_id\n  FROM taxipathnode\n  WHERE TRIM(COALESCE(PathID, '')) <> ''\n    AND CAST(PathID AS INTEGER) > 0\n    AND (\n      CAST(COALESCE(Delay, 0) AS INTEGER) > 0\n      OR (CAST(COALESCE(Flags, 0) AS INTEGER) & 2) <> 0\n    )\n  GROUP BY CAST(PathID AS INTEGER)\n), public_paths AS (\n  SELECT\n    CAST(tp.ID AS INTEGER) AS path_id,\n    CAST(tp.FromTaxiNode AS INTEGER) AS from_taxi_node_id,\n    CAST(tp.ToTaxiNode AS INTEGER) AS to_taxi_node_id,\n    CAST(COALESCE(tp.Cost, 0) AS INTEGER) AS path_cost\n  FROM taxipath tp\n  JOIN public_path_ids ppi ON ppi.path_id = CAST(tp.ID AS INTEGER)\n  WHERE TRIM(COALESCE(tp.ID, '')) <> ''\n    AND TRIM(COALESCE(tp.FromTaxiNode, '')) <> ''\n    AND TRIM(COALESCE(tp.ToTaxiNode, '')) <> ''\n    AND CAST(tp.ID AS INTEGER) > 0\n    AND CAST(tp.FromTaxiNode AS INTEGER) > 0\n    AND CAST(tp.ToTaxiNode AS INTEGER) > 0\n), path_stats AS (\n  SELECT\n    CAST(tpn.PathID AS INTEGER) AS path_id,\n    MAX(CASE WHEN CAST(COALESCE(tpn.Delay, 0) AS INTEGER) > 0 THEN 1 ELSE 0 END) AS has_delay_node,\n    MAX(CASE WHEN (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 2) <> 0 THEN 1 ELSE 0 END) AS has_stop_node,\n    MAX(CASE WHEN (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 1) <> 0 THEN 1 ELSE 0 END) AS has_map_change_node\n  FROM taxipathnode tpn\n  JOIN public_path_ids ppi ON ppi.path_id = CAST(tpn.PathID AS INTEGER)\n  WHERE TRIM(COALESCE(tpn.PathID, '')) <> ''\n    AND CAST(tpn.PathID AS INTEGER) > 0\n  GROUP BY CAST(tpn.PathID AS INTEGER)\n)\nSELECT\n  ROW_NUMBER() OVER (ORDER BY pp.path_id ASC) AS edge_index,\n  CAST(pp.path_id AS INTEGER) AS path_id,\n  'taxi_' || CAST(pp.from_taxi_node_id AS TEXT) AS from_node_key,\n  'taxi_' || CAST(pp.to_taxi_node_id AS TEXT) AS to_node_key,\n  CAST(pp.from_taxi_node_id AS INTEGER) AS from_node_id,\n  CAST(pp.to_taxi_node_id AS INTEGER) AS to_node_id,\n  CAST(COALESCE(pp.path_cost, 0) AS INTEGER) AS edge_cost,\n  'PUBLIC_TRANSPORT' AS mode,\n  '乘坐公共交通前往' || COALESCE(tn_to.Name_lang, ('Taxi Node #' || CAST(pp.to_taxi_node_id AS TEXT))) AS edge_label,\n  CAST(COALESCE(ps.has_delay_node, 0) AS INTEGER) AS has_delay_node,\n  CAST(COALESCE(ps.has_stop_node, 0) AS INTEGER) AS has_stop_node,\n  CAST(COALESCE(ps.has_map_change_node, 0) AS INTEGER) AS has_map_change_node\nFROM public_paths pp\nLEFT JOIN path_stats ps ON ps.path_id = pp.path_id\nLEFT JOIN taxinodes tn_to ON CAST(tn_to.ID AS INTEGER) = pp.to_taxi_node_id\nORDER BY pp.path_id ASC",
         "query": {
           "from": "taxipath tp",
           "joins": [
@@ -123,11 +123,12 @@
         "name": "nodes",
         "dataset": "nodes",
         "block_type": "map_object",
-        "key_field": "taxi_node_id",
+        "key_field": "taxi_node_key",
         "dedupe_by": [
           "taxi_node_id"
         ],
         "required_fields": [
+          "taxi_node_key",
           "taxi_node_id",
           "ui_map_id",
           "map_id",
@@ -157,8 +158,8 @@
         "required_fields": [
           "edge_index",
           "path_id",
-          "from_node_id",
-          "to_node_id",
+          "from_node_key",
+          "to_node_key",
           "edge_cost",
           "edge_label"
         ],
@@ -167,8 +168,8 @@
         ],
         "value_template": {
           "id": "path_id",
-          "from": "from_node_id",
-          "to": "to_node_id",
+          "from": "from_node_key",
+          "to": "to_node_key",
           "cost": "edge_cost",
           "label": "edge_label",
           "mode": "mode",
@@ -190,7 +191,11 @@
     "change_log": [
       {
         "schema_version": 1,
-        "summary": "初始 draft 契约：基于 TaxiNodes / TaxiPath / TaxiPathNode 定义 navigation 公共交通导出形状，按当前实现输出 nodes + edges"
+        "summary": "初始契约：基于 TaxiNodes / TaxiPath / TaxiPathNode 定义 navigation 公共交通导出形状，按当前实现输出 nodes + edges"
+      },
+      {
+        "schema_version": 1,
+        "summary": "按用户确认从 draft 推进为 active，从真实 wow.db 导出 NavigationTaxiEdges.lua 供 navigation 消费"
       }
     ]
   }

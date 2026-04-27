@@ -6,6 +6,7 @@ describe("Navigation WorldMap integration", function()
   local originalCreateFrame = nil -- 原始 CreateFrame 全局
   local originalCMap = nil -- 原始 C_Map 全局
   local shownRoute = nil -- RouteBar 显示的路线
+  local chatMessages = nil -- 聊天提示记录
 
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
@@ -13,6 +14,7 @@ describe("Navigation WorldMap integration", function()
     originalCreateFrame = rawget(_G, "CreateFrame")
     originalCMap = rawget(_G, "C_Map")
     shownRoute = nil
+    chatMessages = {}
 
     local worldMapFrame = FakeFrame.new({ frameType = "Frame", frameName = "WorldMapFrame" }) -- 大地图 Frame
     worldMapFrame.BorderFrame = FakeFrame.new({ frameType = "Frame", parentFrame = worldMapFrame })
@@ -72,6 +74,11 @@ describe("Navigation WorldMap integration", function()
           end,
         },
       },
+      Chat = {
+        PrintAddonMessage = function(messageText)
+          chatMessages[#chatMessages + 1] = messageText
+        end,
+      },
       Config = {
         GetModule = function()
           return {
@@ -84,6 +91,11 @@ describe("Navigation WorldMap integration", function()
       },
       L = {
         NAVIGATION_WORLD_MAP_BUTTON = "规划路线",
+        NAVIGATION_WORLD_MAP_BUTTON_NEEDS_WAYPOINT = "先放地图标记",
+        NAVIGATION_ROUTE_NEEDS_WAYPOINT = "请先在世界地图上放置目标标记。",
+        NAVIGATION_ROUTE_NO_ROUTE = "当前目标暂无可用路线。",
+        NAVIGATION_ROUTE_UNSUPPORTED_TARGET = "当前目标层级暂不支持规划路线，请缩放到区域或子地图后再试。",
+        NAVIGATION_ROUTE_PLAN_FAILED = "路线规划失败。",
       },
     })
 
@@ -109,13 +121,14 @@ describe("Navigation WorldMap integration", function()
     local targetButton = Toolbox.NavigationModule.WorldMap.GetTargetButton() -- 规划按钮
     assert.is_table(targetButton)
     assert.equals("规划路线", targetButton:GetText())
+    assert.is_true(targetButton:IsEnabled())
 
     targetButton:RunScript("OnClick")
     assert.is_table(shownRoute)
     assert.equals(35, shownRoute.totalCost)
   end)
 
-  it("does_not_plan_route_when_user_waypoint_is_missing", function()
+  it("shows_disabled_button_and_chat_hint_when_user_waypoint_is_missing", function()
     rawset(_G, "C_Map", {
       GetUserWaypoint = function()
         return nil
@@ -126,8 +139,26 @@ describe("Navigation WorldMap integration", function()
     WorldMapFrame:Show()
 
     local targetButton = Toolbox.NavigationModule.WorldMap.GetTargetButton() -- 规划按钮
+    assert.equals("先放地图标记", targetButton:GetText())
+    assert.is_false(targetButton:IsEnabled())
     targetButton:RunScript("OnClick")
 
+    assert.same({ "请先在世界地图上放置目标标记。" }, chatMessages)
+    assert.is_nil(shownRoute)
+  end)
+
+  it("prints_reason_when_route_planning_returns_an_error", function()
+    Toolbox.Navigation.PlanRouteToMapTarget = function()
+      return nil, { code = "NAVIGATION_ERR_UNSUPPORTED_MAP_LEVEL" }
+    end
+
+    Toolbox.NavigationModule.WorldMap.Install()
+    WorldMapFrame:Show()
+
+    local targetButton = Toolbox.NavigationModule.WorldMap.GetTargetButton() -- 规划按钮
+    targetButton:RunScript("OnClick")
+
+    assert.same({ "当前目标层级暂不支持规划路线，请缩放到区域或子地图后再试。" }, chatMessages)
     assert.is_nil(shownRoute)
   end)
 end)

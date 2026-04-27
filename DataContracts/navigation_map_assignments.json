@@ -1,0 +1,167 @@
+{
+  "contract": {
+    "contract_id": "navigation_map_assignments",
+    "schema_version": 2,
+    "summary": "导航 UiMap 到 MapID 关系",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/NavigationMapAssignments.lua",
+    "lua_table": "Toolbox.Data.NavigationMapAssignments",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "uimapassignment",
+      "uimap"
+    ],
+    "sql": "SELECT 1 AS placeholder",
+    "query": {
+      "from": "uimapassignment",
+      "joins": [
+        "uimap ON uimap.ID = uimapassignment.UiMapID"
+      ],
+      "select": [
+        "relation_key",
+        "ui_map_id",
+        "ui_map_name",
+        "parent_ui_map_id",
+        "ui_map_type",
+        "map_id",
+        "area_id",
+        "order_index"
+      ],
+      "where": [
+        "UiMapID > 0",
+        "MapID >= 0",
+        "只导出 UiMap <-> MapID 关系，不导出 Region / Ui 坐标字段"
+      ],
+      "group_by": [
+        "ui_map_id",
+        "map_id"
+      ],
+      "order_by": [
+        "map_id ASC",
+        "ui_map_id ASC"
+      ],
+      "row_granularity": "一行代表一个 UiMap 与 MapID 的关系"
+    },
+    "datasets": {
+      "assignments": {
+        "sql": "SELECT 'uimap_' || CAST(a.UiMapID AS TEXT) || '_map_' || CAST(a.MapID AS TEXT) AS relation_key, CAST(a.UiMapID AS INTEGER) AS ui_map_id, u.Name_lang AS ui_map_name, CAST(COALESCE(u.ParentUiMapID, 0) AS INTEGER) AS parent_ui_map_id, CAST(COALESCE(u.Type, 0) AS INTEGER) AS ui_map_type, CAST(a.MapID AS INTEGER) AS map_id, MIN(CAST(COALESCE(a.AreaID, 0) AS INTEGER)) AS area_id, MIN(CAST(COALESCE(a.OrderIndex, 0) AS INTEGER)) AS order_index FROM uimapassignment a LEFT JOIN uimap u ON CAST(u.ID AS INTEGER) = CAST(a.UiMapID AS INTEGER) WHERE CAST(a.ID AS INTEGER) > 0 AND CAST(a.UiMapID AS INTEGER) > 0 AND CAST(a.MapID AS INTEGER) >= 0 GROUP BY CAST(a.UiMapID AS INTEGER), u.Name_lang, CAST(COALESCE(u.ParentUiMapID, 0) AS INTEGER), CAST(COALESCE(u.Type, 0) AS INTEGER), CAST(a.MapID AS INTEGER) ORDER BY CAST(a.MapID AS INTEGER), CAST(a.UiMapID AS INTEGER)",
+        "query": {
+          "from": "uimapassignment",
+          "joins": [
+            "uimap ON uimap.ID = uimapassignment.UiMapID"
+          ],
+          "select": [
+            "relation_key",
+            "ui_map_id",
+            "parent_ui_map_id",
+            "ui_map_type",
+            "map_id",
+            "area_id",
+            "order_index"
+          ],
+          "where": [
+            "UiMapID > 0",
+            "MapID >= 0"
+          ],
+          "group_by": [
+            "ui_map_id",
+            "map_id"
+          ],
+          "order_by": [
+            "map_id ASC",
+            "ui_map_id ASC"
+          ],
+          "row_granularity": "一行代表一个 UiMap 与 MapID 的关系"
+        }
+      }
+    }
+  },
+  "structure": {
+    "root_type": "document",
+    "lua_shape": "Toolbox.Data.NavigationMapAssignments = { schemaVersion, sourceMode, generatedAt, assignments }",
+    "fields": [],
+    "document_blocks": [
+      {
+        "name": "metadata",
+        "metadata": {
+          "schemaVersion": 2,
+          "sourceMode": "live",
+          "generatedAt": "@generated_at"
+        }
+      },
+      {
+        "name": "assignments",
+        "dataset": "assignments",
+        "block_type": "map_object",
+        "key_field": "relation_key",
+        "dedupe_by": [
+          "relation_key"
+        ],
+        "required_fields": [
+          "relation_key",
+          "ui_map_id",
+          "map_id"
+        ],
+        "sort_by": [
+          "map_id",
+          "ui_map_id"
+        ],
+        "value_template": {
+          "UiMapID": "ui_map_id",
+          "ParentUiMapID": "parent_ui_map_id",
+          "UiMapType": "ui_map_type",
+          "MapID": "map_id",
+          "AreaID": "area_id",
+          "OrderIndex": "order_index",
+          "Name_lang": "ui_map_name"
+        }
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [
+      "relation_key",
+      "ui_map_id",
+      "map_id"
+    ],
+    "unique_keys": [
+      [
+        "relation_key"
+      ]
+    ],
+    "non_null_fields": [
+      "relation_key",
+      "ui_map_id",
+      "map_id"
+    ],
+    "sort_rules": [
+      {
+        "field": "map_id",
+        "direction": "asc"
+      },
+      {
+        "field": "ui_map_id",
+        "direction": "asc"
+      }
+    ]
+  },
+  "versioning": {
+    "current_schema_version": 2,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约版本，导出 UiMapAssignment 覆盖范围用于导航世界坐标归一化"
+      },
+      {
+        "schema_version": 2,
+        "summary": "收紧为 UiMap <-> MapID 关系导出，不再导出 Region / Ui 坐标字段"
+      }
+    ]
+  }
+}
