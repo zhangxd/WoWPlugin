@@ -19,6 +19,7 @@
 - 当前实现里，`encounter_journal` 已经不再承载任务浏览或 Quest Inspector，但历史文档仍把任务能力算在本模块里，导致模块边界与代码现状不一致。
 - 需要用当前代码重新收口 `encounter_journal` 的设计，只保留副本列表、详情页与锁定摘要相关能力。
 - 2026-04-27 新增已确认需求，并经用户反馈修正落点：在冒险指南副本列表条目右下角提供图钉按钮，点击后打开目标地图并创建系统导航目标，行为接近在地图中点击副本入口图标。
+- 2026-04-27 新增已确认交互增强：副本列表单击建立焦点、双击进入副本，图钉按钮支持“焦点 / 悬停显示”与“常驻显示”两种模式，并将现有图钉替换为更高辨识度的高亮版资源。
 
 ## 2. 设计目标
 
@@ -90,6 +91,7 @@
 | 副本详情页“仅坐骑”筛选 | `Toolbox/Modules/EncounterJournal/DetailEnhancer.lua` | 仅在掉落页生效，按当前副本的坐骑掉落集合过滤显示。 |
 | 副本详情页重置标签 | `Toolbox/Modules/EncounterJournal/DetailEnhancer.lua` + `Toolbox.EJ` | 读取当前选中难度的锁定数据，展示“重置：xx”。 |
 | 副本列表图钉导航 | `Toolbox/Modules/EncounterJournal/DetailEnhancer.lua` + `Toolbox.EJ` | 在地下城 / 团队副本列表条目右下角创建图钉按钮；点击后查找该条目副本入口，打开世界地图到入口地图，并设置系统 waypoint / super tracking。 |
+| 副本列表焦点 / 双击交互 | `Toolbox/Modules/EncounterJournal/DetailEnhancer.lua` | 在副本列表行上维护当前焦点副本 ID、悬停态与双击判定；焦点或悬停驱动图钉显隐，双击沿用 Blizzard 默认进入行为。 |
 | `EJMicroButton` tooltip 锁定摘要 | `Toolbox/Modules/EncounterJournal.lua` | 在右下角微型按钮 tooltip 末尾追加当前锁定摘要。 |
 | 小地图“冒险手册”入口摘要 | `Toolbox/Modules/MinimapButton.lua` + `Toolbox.EJ` | 小地图飞出项打开冒险指南，并在 tooltip 中显示同源锁定摘要。 |
 
@@ -100,7 +102,7 @@
 - `Toolbox/Modules/EncounterJournal/Shared.lua`
   负责模块内共享状态、宿主查找与公共工具。
 - `Toolbox/Modules/EncounterJournal/DetailEnhancer.lua`
-  负责详情页“仅坐骑”筛选与重置标签。
+  负责详情页“仅坐骑”筛选、重置标签，以及副本列表图钉 / 焦点 / 双击交互。
 - `Toolbox/Modules/EncounterJournal/LockoutOverlay.lua`
   负责副本列表 CD 叠加与 tooltip 详情。
 
@@ -124,6 +126,10 @@
 - 在掉落页内可切换“仅坐骑”，只保留当前副本掉落列表中的坐骑物品。
 - 详情页标题区会优先显示当前选中难度的重置时间；若当前难度未命中但该副本存在其他难度锁定，则回退显示最近重置时间；若该副本无任何锁定，显示“重置：无”。
 - 副本列表条目右下角显示图钉按钮；点击后打开世界地图到入口地图，创建系统用户导航目标并开始追踪。
+- 未勾选“定位图标常驻显示”时，只有当前焦点行或当前悬停行显示图钉。
+- 勾选“定位图标常驻显示”后，所有可导航列表行都显示图钉。
+- 单击某个副本列表行时，该行进入焦点态；双击同一行时进入该副本。
+- 图钉资源替换为 Blizzard 已存在的高亮版图标，提高与列表文本、CD 叠加的区分度。
 - 若当前副本没有可用入口数据、地图不允许设置 waypoint 或相关 API 不可用，按钮不可用或点击时给出聊天提示，且不抛 Lua 错误。
 - 小地图飞出菜单中的“冒险手册”入口和 `EJMicroButton` tooltip 都会显示当前副本锁定摘要。
 
@@ -134,16 +140,17 @@
 - `mountFilterEnabled`
 - `lockoutOverlayEnabled`
 - `detailMountOnlyEnabled`
+- `listPinAlwaysVisible`
 
 说明：
 
 - 旧的任务浏览、Quest Inspector、根页签顺序与显隐字段已经迁移到 `quest` 模块或被清理，不再属于 `ToolboxDB.modules.encounter_journal`。
-- “列表图钉导航”第一版不新增 `ToolboxDB.modules.encounter_journal` 字段，跟随模块总开关。
+- `listPinAlwaysVisible` 默认值为 `false`；关闭时按“焦点或悬停显示”规则，开启时所有可导航条目常驻显示图钉。
 
 ## 6. 影响面
 
 - 数据与存档：
-  `ToolboxDB.modules.encounter_journal` 收敛为副本列表和详情页增强专用字段。
+  `ToolboxDB.modules.encounter_journal` 收敛为副本列表和详情页增强专用字段；本轮新增 `listPinAlwaysVisible` 控制图钉是否常驻显示。
 - API 与模块边界：
   `encounter_journal` 只消费 `Toolbox.EJ`；任务浏览与任务运行时接口由 `quest` / `Toolbox.Questlines` 承接。副本入口查找与 waypoint 设置作为 `Toolbox.EJ` 的冒险指南领域能力暴露给详情页 UI。
 - 文件与目录：
@@ -169,7 +176,7 @@
 - 逻辑验证：
   运行 `python tests/run_all.py --ci`，确认自动化校验继续通过。
 - 游戏内验证：
-  检查副本列表“仅坐骑”、列表图钉导航、CD 叠加、tooltip 详情、详情页“仅坐骑”、详情页重置标签、小地图与 `EJMicroButton` 锁定摘要是否均可用。
+  检查副本列表“仅坐骑”、单击焦点、双击进入、列表图钉焦点 / 悬停 / 常驻显示、CD 叠加、tooltip 详情、详情页“仅坐骑”、详情页重置标签、小地图与 `EJMicroButton` 锁定摘要是否均可用。
 - 文档验证：
   `encounter-journal-features/spec/plan/test`、`quest-*`、`FEATURES.md` 与 `Toolbox-addon-design.md` 的模块边界必须一致。
 
@@ -182,3 +189,4 @@
 | 2026-04-21 | 锁定映射策略改为运行时 API 优先（`C_EncounterJournal.GetInstanceForGameMap` + `EJ_GetInstanceInfo` mapID 对齐），`InstanceMapIDs` 仅做单向兜底；当 SavedInstances 的 mapID 不可判定时按副本名兜底匹配；详情页重置时间新增“当前难度未命中时回退可用锁定”规则 |
 | 2026-04-27 | 确认副本入口导航方案：不新增模块 / 存档，扩展 `Toolbox.EJ` 查找入口并设置系统 waypoint |
 | 2026-04-27 | 按用户反馈修正导航入口落点：从详情页按钮改为副本列表条目右下角图钉 |
+| 2026-04-27 | 增补列表交互设计：单击焦点、双击进入、图钉高亮版与 `listPinAlwaysVisible` 设置 |

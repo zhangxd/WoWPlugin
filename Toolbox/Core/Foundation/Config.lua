@@ -69,6 +69,8 @@ local defaults = {
       mountFilterEnabled = true,
       lockoutOverlayEnabled = true,
       detailMountOnlyEnabled = false,
+      -- 副本列表入口图钉是否常驻显示；false 时仅焦点行或悬停行显示
+      listPinAlwaysVisible = false,
     },
     navigation = {
       enabled = true,

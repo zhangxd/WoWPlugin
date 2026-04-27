@@ -460,6 +460,7 @@ Toolbox.RegisterModule({
       DetailEnhancer:refresh()
     else
       RefreshScheduler:cancel()
+      ListNavigationPin:clearInteractionState()
       LockoutOverlay:clearAllFrames()
       ListNavigationPin:clearAllFrames()
     end
@@ -471,6 +472,7 @@ Toolbox.RegisterModule({
 
   ResetToDefaultsAndRebuild = function()
     Toolbox.Config.ResetModule(MODULE_ID)
+    ListNavigationPin:clearInteractionState()
     DetailEnhancer:refresh()
     MountFilter:syncCheckbox()
     ListNavigationPin:updateFrames()
@@ -507,6 +509,16 @@ Toolbox.RegisterModule({
         LockoutOverlay:clearAllFrames()
       end
       RefreshScheduler:schedule("settings_change")
+    end)
+    yOffset = yOffset - 36
+
+    local pinAlwaysVisibleCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 图钉常驻显示开关
+    pinAlwaysVisibleCheck:SetPoint("TOPLEFT", 20, yOffset)
+    pinAlwaysVisibleCheck.Text:SetText(localeTable.EJ_LIST_PIN_ALWAYS_VISIBLE_LABEL or "定位图标常驻显示")
+    pinAlwaysVisibleCheck:SetChecked(moduleDb.listPinAlwaysVisible == true)
+    pinAlwaysVisibleCheck:SetScript("OnClick", function(checkButton)
+      moduleDb.listPinAlwaysVisible = checkButton:GetChecked() and true or false
+      ListNavigationPin:updateFrames()
     end)
     yOffset = yOffset - 36
 

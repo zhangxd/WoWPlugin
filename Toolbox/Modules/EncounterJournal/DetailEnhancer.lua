@@ -34,6 +34,18 @@ local function getEncounterInfoFrame()
   return Internal.GetEncounterInfoFrame()
 end
 
+local function isListPinAlwaysVisible()
+  return Internal.IsListPinAlwaysVisible()
+end
+
+local function getListNavigationState()
+  return Internal.GetListNavigationState()
+end
+
+local function resetListNavigationState()
+  return Internal.ResetListNavigationState()
+end
+
 local MountFilter = {
   checkButton = nil,
   label = nil,
@@ -41,6 +53,38 @@ local MountFilter = {
 
 local ListNavigationPin = {}
 local PIN_BUTTON_KEY = "_ToolboxEntrancePinButton"
+local ROW_FOCUS_TEXTURE_KEY = "_ToolboxEntranceFocusTexture"
+local ROW_HOOKS_INSTALLED_KEY = "_ToolboxEntranceRowHooksInstalled"
+
+local function callFrameScript(handler, frameObject, ...)
+  if type(handler) ~= "function" then
+    return
+  end
+  pcall(handler, frameObject, ...)
+end
+
+local function ensureRowFocusTexture(rowFrame)
+  local focusTexture = rowFrame[ROW_FOCUS_TEXTURE_KEY] -- 行焦点底纹
+  if focusTexture then
+    return focusTexture
+  end
+
+  focusTexture = rowFrame:CreateTexture(nil, "BACKGROUND")
+  focusTexture:SetPoint("TOPLEFT", rowFrame, "TOPLEFT", 2, -2)
+  focusTexture:SetPoint("BOTTOMRIGHT", rowFrame, "BOTTOMRIGHT", -2, 2)
+  focusTexture:SetColorTexture(1, 0.82, 0.1, 0.14)
+  if focusTexture.SetBlendMode then
+    focusTexture:SetBlendMode("ADD")
+  end
+  focusTexture:Hide()
+  rowFrame[ROW_FOCUS_TEXTURE_KEY] = focusTexture
+  return focusTexture
+end
+
+local function setRowFocusedVisual(rowFrame, shouldShow)
+  local focusTexture = ensureRowFocusTexture(rowFrame) -- 行焦点底纹
+  focusTexture:SetShown(shouldShow == true)
+end
 
 --- 检查是否应显示坐骑筛选 UI
 ---@return boolean
@@ -188,17 +232,17 @@ function ListNavigationPin:createButton(rowFrame)
 
   local loc = Toolbox.L or {} -- 本地化文案
   button = CreateFrame("Button", nil, rowFrame)
-  button:SetSize(24, 24)
-  button:SetPoint("BOTTOMRIGHT", rowFrame, "BOTTOMRIGHT", -6, 4)
+  button:SetSize(30, 30)
+  button:SetPoint("BOTTOMRIGHT", rowFrame, "BOTTOMRIGHT", -4, 2)
   if button.SetMotionScriptsWhileDisabled then
     button:SetMotionScriptsWhileDisabled(true)
   end
 
   local iconTexture = button:CreateTexture(nil, "ARTWORK") -- 地图标记图标
-  iconTexture:SetSize(22, 22)
+  iconTexture:SetSize(30, 30)
   iconTexture:SetPoint("CENTER", button, "CENTER", 0, 0)
   if iconTexture.SetAtlas then
-    iconTexture:SetAtlas("Waypoint-MapPin-ChatIcon", true)
+    iconTexture:SetAtlas("Waypoint-MapPin-Tracked", true)
   else
     iconTexture:SetTexture("Interface\\MINIMAP\\POIIcons")
     iconTexture:SetTexCoord(0.125, 0.25, 0.125, 0.25)
@@ -206,11 +250,15 @@ function ListNavigationPin:createButton(rowFrame)
   button._ToolboxEntrancePinIcon = iconTexture
 
   local highlightTexture = button:CreateTexture(nil, "HIGHLIGHT") -- 悬停高亮
-  highlightTexture:SetPoint("TOPLEFT", button, "TOPLEFT", 2, -2)
-  highlightTexture:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 2)
-  highlightTexture:SetColorTexture(1, 0.82, 0.1, 0.22)
-  if highlightTexture.SetBlendMode then
-    highlightTexture:SetBlendMode("ADD")
+  highlightTexture:SetSize(30, 30)
+  highlightTexture:SetPoint("CENTER", button, "CENTER", 0, 0)
+  if highlightTexture.SetAtlas then
+    highlightTexture:SetAtlas("Waypoint-MapPin-Highlight", true)
+  else
+    highlightTexture:SetColorTexture(1, 0.82, 0.1, 0.22)
+    if highlightTexture.SetBlendMode then
+      highlightTexture:SetBlendMode("ADD")
+    end
   end
   button._ToolboxEntrancePinHighlight = highlightTexture
 
@@ -260,6 +308,89 @@ function ListNavigationPin:createButton(rowFrame)
   return button
 end
 
+--- 检查指定列表行是否应显示图钉。
+---@param journalInstanceID number|nil 副本 ID
+---@return boolean
+function ListNavigationPin:shouldShowForJournalInstance(journalInstanceID)
+  if type(journalInstanceID) ~= "number" then
+    return false
+  end
+  if isListPinAlwaysVisible() then
+    return true
+  end
+
+  local state = getListNavigationState() -- 列表交互状态
+  return state.focusedJournalInstanceID == journalInstanceID
+    or state.hoveredJournalInstanceID == journalInstanceID
+end
+
+--- 为副本列表行安装单击 / 双击 / 悬停脚本。
+---@param rowFrame table 副本列表行
+function ListNavigationPin:ensureRowHooks(rowFrame)
+  if not rowFrame or rowFrame[ROW_HOOKS_INSTALLED_KEY] == true or not rowFrame.SetScript then
+    return
+  end
+
+  rowFrame[ROW_HOOKS_INSTALLED_KEY] = true
+  rowFrame._ToolboxOriginalOnClick = rowFrame.GetScript and rowFrame:GetScript("OnClick") or nil
+  rowFrame._ToolboxOriginalOnDoubleClick = rowFrame.GetScript and rowFrame:GetScript("OnDoubleClick") or nil
+  rowFrame._ToolboxOriginalOnEnter = rowFrame.GetScript and rowFrame:GetScript("OnEnter") or nil
+  rowFrame._ToolboxOriginalOnLeave = rowFrame.GetScript and rowFrame:GetScript("OnLeave") or nil
+
+  if rowFrame.RegisterForClicks then
+    pcall(function()
+      rowFrame:RegisterForClicks("LeftButtonUp", "LeftButtonDown")
+    end)
+  end
+
+  rowFrame:SetScript("OnClick", function(buttonFrame, mouseButton, ...)
+    if mouseButton ~= "LeftButton" then
+      callFrameScript(buttonFrame._ToolboxOriginalOnClick, buttonFrame, mouseButton, ...)
+      return
+    end
+
+    local journalInstanceID = buttonFrame._ToolboxJournalInstanceID -- 当前点击行副本 ID
+    if type(journalInstanceID) == "number" then
+      getListNavigationState().focusedJournalInstanceID = journalInstanceID
+    end
+    ListNavigationPin:updateFrames()
+  end)
+
+  rowFrame:SetScript("OnDoubleClick", function(buttonFrame, mouseButton, ...)
+    if mouseButton ~= "LeftButton" then
+      callFrameScript(buttonFrame._ToolboxOriginalOnDoubleClick, buttonFrame, mouseButton, ...)
+      return
+    end
+
+    local journalInstanceID = buttonFrame._ToolboxJournalInstanceID -- 当前双击行副本 ID
+    if type(journalInstanceID) == "number" then
+      getListNavigationState().focusedJournalInstanceID = journalInstanceID
+    end
+    ListNavigationPin:updateFrames()
+
+    local originalHandler = buttonFrame._ToolboxOriginalOnDoubleClick or buttonFrame._ToolboxOriginalOnClick -- 原生进入逻辑
+    callFrameScript(originalHandler, buttonFrame, mouseButton, ...)
+  end)
+
+  rowFrame:SetScript("OnEnter", function(buttonFrame, ...)
+    callFrameScript(buttonFrame._ToolboxOriginalOnEnter, buttonFrame, ...)
+    local journalInstanceID = buttonFrame._ToolboxJournalInstanceID -- 当前悬停行副本 ID
+    if type(journalInstanceID) == "number" then
+      getListNavigationState().hoveredJournalInstanceID = journalInstanceID
+    end
+    ListNavigationPin:updateFrames()
+  end)
+
+  rowFrame:SetScript("OnLeave", function(buttonFrame, ...)
+    callFrameScript(buttonFrame._ToolboxOriginalOnLeave, buttonFrame, ...)
+    local state = getListNavigationState() -- 列表交互状态
+    if state.hoveredJournalInstanceID == buttonFrame._ToolboxJournalInstanceID then
+      state.hoveredJournalInstanceID = nil
+    end
+    ListNavigationPin:updateFrames()
+  end)
+end
+
 --- 刷新副本列表行图钉。
 function ListNavigationPin:updateFrames()
   if not isModuleEnabled() or Toolbox.EJ.IsRaidOrDungeonInstanceListTab() ~= true then
@@ -284,15 +415,20 @@ function ListNavigationPin:updateFrames()
         if oldButton then
           oldButton:Hide()
         end
+        setRowFocusedVisual(rowFrame, false)
         return
       end
 
+      rowFrame._ToolboxJournalInstanceID = journalInstanceID
+      self:ensureRowHooks(rowFrame)
+
       local button = self:createButton(rowFrame)
       button._ToolboxJournalInstanceID = journalInstanceID
-      button:Show()
+      button:SetShown(self:shouldShowForJournalInstance(journalInstanceID))
       if button.SetEnabled then
         button:SetEnabled(true)
       end
+      setRowFocusedVisual(rowFrame, getListNavigationState().focusedJournalInstanceID == journalInstanceID)
     end)
   end)
 end
@@ -301,17 +437,27 @@ end
 function ListNavigationPin:clearAllFrames()
   local box = getCurrentScrollBox()
   if not box or type(box.ForEachFrame) ~= "function" then
+    getListNavigationState().hoveredJournalInstanceID = nil
     return
   end
 
+  getListNavigationState().hoveredJournalInstanceID = nil
   pcall(function()
     box:ForEachFrame(function(rowFrame)
       local button = rowFrame and rowFrame[PIN_BUTTON_KEY] or nil -- 当前行图钉按钮
       if button then
         button:Hide()
       end
+      if rowFrame then
+        setRowFocusedVisual(rowFrame, false)
+      end
     end)
   end)
+end
+
+--- 清理副本列表焦点与悬停状态。
+function ListNavigationPin:clearInteractionState()
+  resetListNavigationState()
 end
 
 -- ============================================================================

@@ -17,6 +17,10 @@ Internal.scrollBoxCache = Internal.scrollBoxCache or {
   lastUpdate = 0,
   ttl = 5,
 }
+Internal.listNavigationState = Internal.listNavigationState or {
+  focusedJournalInstanceID = nil,
+  hoveredJournalInstanceID = nil,
+}
 
 --- 读取模块存档。
 ---@return table
@@ -41,6 +45,12 @@ end
 ---@return boolean
 function Internal.IsOverlayEnabled()
   return Internal.IsModuleEnabled() and Internal.GetModuleDb().lockoutOverlayEnabled ~= false
+end
+
+--- 检查副本列表图钉是否常驻显示。
+---@return boolean
+function Internal.IsListPinAlwaysVisible()
+  return Internal.IsModuleEnabled() and Internal.GetModuleDb().listPinAlwaysVisible == true
 end
 
 --- 检查任务页签是否启用。
@@ -107,6 +117,18 @@ end
 function Internal.ResetScrollBoxCache()
   Internal.scrollBoxCache.ref = nil
   Internal.scrollBoxCache.lastUpdate = 0
+end
+
+--- 读取当前列表交互状态。
+---@return table
+function Internal.GetListNavigationState()
+  return Internal.listNavigationState
+end
+
+--- 清空当前列表交互状态。
+function Internal.ResetListNavigationState()
+  Internal.listNavigationState.focusedJournalInstanceID = nil
+  Internal.listNavigationState.hoveredJournalInstanceID = nil
 end
 
 --- 获取详情信息面板。

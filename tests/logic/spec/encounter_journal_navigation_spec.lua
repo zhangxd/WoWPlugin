@@ -194,7 +194,7 @@ describe("EncounterJournal entrance navigation", function()
     assert.is_nil(buttonObject.templateName)
     assert.equals("", buttonObject:GetText())
     assert.is_truthy(buttonObject._ToolboxEntrancePinIcon)
-    assert.equals("Waypoint-MapPin-ChatIcon", buttonObject._ToolboxEntrancePinIcon._atlas)
+    assert.equals("Waypoint-MapPin-Tracked", buttonObject._ToolboxEntrancePinIcon._atlas)
 
     buttonObject:RunScript("OnClick")
 
@@ -203,5 +203,113 @@ describe("EncounterJournal entrance navigation", function()
     local lastTrace = traceList[#traceList]
     assert.equals("chat_print", lastTrace.kind)
     assert.matches("测试副本入口", lastTrace.text)
+  end)
+
+  it("single_click_focuses_row_without_entering_and_hover_reveals_non_focused_pin", function()
+    harness:teardown()
+    harness = Harness.new({
+      locale = "zhCN",
+      addonLoadedSeed = { Blizzard_EncounterJournal = false },
+    })
+
+    harness.moduleDb.listPinAlwaysVisible = false
+
+    local encounterJournalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal", UIParent) -- 冒险指南根框体
+    local instanceSelectFrame = harness.runtime.CreateFrame("Frame", nil, encounterJournalFrame) -- 副本列表面板
+    local scrollBoxFrame = harness.runtime.CreateFrame("Frame", nil, instanceSelectFrame) -- 列表滚动框
+    local enterCallCount = 0 -- 进入副本调用次数
+
+    local firstRow = harness.runtime.CreateFrame("Button", nil, scrollBoxFrame) -- 第一行
+    firstRow.GetElementData = function()
+      return { instanceID = 2001, name = "测试副本一" }
+    end
+    firstRow:SetScript("OnClick", function()
+      enterCallCount = enterCallCount + 1
+    end)
+
+    local secondRow = harness.runtime.CreateFrame("Button", nil, scrollBoxFrame) -- 第二行
+    secondRow.GetElementData = function()
+      return { instanceID = 2002, name = "测试副本二" }
+    end
+    secondRow:SetScript("OnClick", function()
+      enterCallCount = enterCallCount + 1
+    end)
+
+    scrollBoxFrame.ForEachFrame = function(_, callback)
+      callback(firstRow)
+      callback(secondRow)
+    end
+    instanceSelectFrame.ScrollBox = scrollBoxFrame
+    encounterJournalFrame.instanceSelect = instanceSelectFrame
+    encounterJournalFrame:Show()
+    instanceSelectFrame:Show()
+    scrollBoxFrame:Show()
+    firstRow:Show()
+    secondRow:Show()
+
+    harness:loadEncounterJournalModule()
+    harness.moduleDef.OnModuleEnable()
+
+    local firstButton = firstRow._ToolboxEntrancePinButton -- 第一行图钉
+    local secondButton = secondRow._ToolboxEntrancePinButton -- 第二行图钉
+    assert.is_false(firstButton:IsShown())
+    assert.is_false(secondButton:IsShown())
+    assert.equals("Waypoint-MapPin-Tracked", firstButton._ToolboxEntrancePinIcon._atlas)
+    assert.equals("Waypoint-MapPin-Highlight", firstButton._ToolboxEntrancePinHighlight._atlas)
+
+    firstRow:RunScript("OnClick", "LeftButton")
+
+    assert.equals(0, enterCallCount)
+    assert.is_true(firstButton:IsShown())
+    assert.is_false(secondButton:IsShown())
+
+    secondRow:RunScript("OnEnter")
+    assert.is_true(secondButton:IsShown())
+
+    secondRow:RunScript("OnLeave")
+    assert.is_false(secondButton:IsShown())
+    assert.is_true(firstButton:IsShown())
+  end)
+
+  it("double_click_uses_original_enter_behavior_for_focused_row", function()
+    harness:teardown()
+    harness = Harness.new({
+      locale = "zhCN",
+      addonLoadedSeed = { Blizzard_EncounterJournal = false },
+    })
+
+    harness.moduleDb.listPinAlwaysVisible = false
+
+    local encounterJournalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal", UIParent) -- 冒险指南根框体
+    local instanceSelectFrame = harness.runtime.CreateFrame("Frame", nil, encounterJournalFrame) -- 副本列表面板
+    local scrollBoxFrame = harness.runtime.CreateFrame("Frame", nil, instanceSelectFrame) -- 列表滚动框
+    local enterCallCount = 0 -- 进入副本调用次数
+
+    local rowFrame = harness.runtime.CreateFrame("Button", nil, scrollBoxFrame) -- 副本列表行
+    rowFrame.GetElementData = function()
+      return { instanceID = 2001, name = "测试副本" }
+    end
+    rowFrame:SetScript("OnClick", function()
+      enterCallCount = enterCallCount + 1
+    end)
+
+    scrollBoxFrame.ForEachFrame = function(_, callback)
+      callback(rowFrame)
+    end
+    instanceSelectFrame.ScrollBox = scrollBoxFrame
+    encounterJournalFrame.instanceSelect = instanceSelectFrame
+    encounterJournalFrame:Show()
+    instanceSelectFrame:Show()
+    scrollBoxFrame:Show()
+    rowFrame:Show()
+
+    harness:loadEncounterJournalModule()
+    harness.moduleDef.OnModuleEnable()
+
+    rowFrame:RunScript("OnClick", "LeftButton")
+    assert.equals(0, enterCallCount)
+
+    rowFrame:RunScript("OnDoubleClick", "LeftButton")
+    assert.equals(1, enterCallCount)
   end)
 end)

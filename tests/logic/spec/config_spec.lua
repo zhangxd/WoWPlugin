@@ -194,6 +194,41 @@ describe("Toolbox.Config navigation module defaults", function()
   end)
 end)
 
+describe("Toolbox.Config encounter_journal list pin defaults", function()
+  local originalToolbox = nil -- 原始 Toolbox 全局
+  local originalToolboxDB = nil -- 原始 ToolboxDB 全局
+  local originalCopyTable = nil -- 原始 CopyTable 全局
+
+  before_each(function()
+    originalToolbox = rawget(_G, "Toolbox")
+    originalToolboxDB = rawget(_G, "ToolboxDB")
+    originalCopyTable = rawget(_G, "CopyTable")
+
+    rawset(_G, "Toolbox", {
+      Config = {},
+    })
+    rawset(_G, "CopyTable", deepCopyTable)
+  end)
+
+  after_each(function()
+    rawset(_G, "Toolbox", originalToolbox)
+    rawset(_G, "ToolboxDB", originalToolboxDB)
+    rawset(_G, "CopyTable", originalCopyTable)
+  end)
+
+  it("creates_encounter_journal_list_pin_visibility_default", function()
+    rawset(_G, "ToolboxDB", nil)
+
+    local configChunk = assert(loadfile("Toolbox/Core/Foundation/Config.lua")) -- Config chunk
+    configChunk()
+    Toolbox.Config.Init()
+
+    local moduleDb = ToolboxDB.modules.encounter_journal -- 冒险指南默认存档
+    assert.is_table(moduleDb)
+    assert.is_false(moduleDb.listPinAlwaysVisible)
+  end)
+end)
+
 describe("Toolbox.Config tooltip_anchor rollback cleanup", function()
   local originalToolbox = nil -- 原始 Toolbox 全局
   local originalToolboxDB = nil -- 原始 ToolboxDB 全局
