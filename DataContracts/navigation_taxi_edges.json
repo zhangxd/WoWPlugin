@@ -1,0 +1,197 @@
+{
+  "contract": {
+    "contract_id": "navigation_taxi_edges",
+    "schema_version": 1,
+    "summary": "navigation 公共交通 Taxi* 静态边（draft，待真实环境导出验证）",
+    "source_of_truth": "WoWPlugin",
+    "status": "draft"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/NavigationTaxiEdges.lua",
+    "lua_table": "Toolbox.Data.NavigationTaxiEdges",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "taxinodes",
+      "taxipath",
+      "taxipathnode",
+      "uimapassignment"
+    ],
+    "sql": "SELECT 1 AS placeholder",
+    "query": {
+      "from": "taxipath",
+      "joins": [
+        "taxinodes（起点 / 终点节点名称与地图信息）",
+        "taxipathnode（用于过滤公共交通候选路径）",
+        "uimapassignment（把 MapID 保守映射到 UiMapID）"
+      ],
+      "select": [
+        "nodes dataset：taxi_node_id, ui_map_id, map_id, node_name, node_flags, condition_id, visibility_condition_id",
+        "edges dataset：edge_index, path_id, from_node_id, to_node_id, edge_cost, edge_label, mode, has_delay_node, has_stop_node, has_map_change_node"
+      ],
+      "where": [
+        "只保留至少存在一个 Delay > 0 或 stop flag 节点的 TaxiPath，作为飞艇 / 船 / 电车等公共交通候选",
+        "不把普通飞行点路径直接并入当前推荐逻辑"
+      ],
+      "group_by": [
+        "nodes dataset：taxi_node_id",
+        "edges dataset：path_id"
+      ],
+      "order_by": [
+        "nodes dataset：taxi_node_id ASC",
+        "edges dataset：path_id ASC"
+      ],
+      "row_granularity": "nodes 一行代表一个 Taxi 节点；edges 一行代表一条公共交通候选路径"
+    },
+    "datasets": {
+      "nodes": {
+        "sql": "WITH public_paths AS (\n  SELECT\n    CAST(tp.ID AS INTEGER) AS path_id,\n    CAST(tp.FromTaxiNode AS INTEGER) AS from_taxi_node_id,\n    CAST(tp.ToTaxiNode AS INTEGER) AS to_taxi_node_id,\n    CAST(COALESCE(tp.Cost, 0) AS INTEGER) AS path_cost\n  FROM taxipath tp\n  WHERE TRIM(COALESCE(tp.ID, '')) <> ''\n    AND TRIM(COALESCE(tp.FromTaxiNode, '')) <> ''\n    AND TRIM(COALESCE(tp.ToTaxiNode, '')) <> ''\n    AND CAST(tp.ID AS INTEGER) > 0\n    AND CAST(tp.FromTaxiNode AS INTEGER) > 0\n    AND CAST(tp.ToTaxiNode AS INTEGER) > 0\n    AND EXISTS (\n      SELECT 1\n      FROM taxipathnode tpn\n      WHERE CAST(tpn.PathID AS INTEGER) = CAST(tp.ID AS INTEGER)\n        AND (\n          CAST(COALESCE(tpn.Delay, 0) AS INTEGER) > 0\n          OR (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 2) <> 0\n        )\n    )\n), used_nodes AS (\n  SELECT from_taxi_node_id AS taxi_node_id FROM public_paths\n  UNION\n  SELECT to_taxi_node_id AS taxi_node_id FROM public_paths\n)\nSELECT\n  CAST(tn.ID AS INTEGER) AS taxi_node_id,\n  CAST(COALESCE((\n    SELECT MIN(CAST(uma.UiMapID AS INTEGER))\n    FROM uimapassignment uma\n    WHERE CAST(uma.MapID AS INTEGER) = CAST(tn.ContinentID AS INTEGER)\n      AND CAST(COALESCE(uma.UiMapID, 0) AS INTEGER) > 0\n  ), 0) AS INTEGER) AS ui_map_id,\n  CAST(COALESCE(tn.ContinentID, 0) AS INTEGER) AS map_id,\n  Name_lang AS node_name,\n  CAST(COALESCE(tn.Flags, 0) AS INTEGER) AS node_flags,\n  CAST(COALESCE(tn.ConditionID, 0) AS INTEGER) AS condition_id,\n  CAST(COALESCE(tn.VisibilityConditionID, 0) AS INTEGER) AS visibility_condition_id\nFROM taxinodes tn\nJOIN used_nodes un ON un.taxi_node_id = CAST(tn.ID AS INTEGER)\nWHERE TRIM(COALESCE(tn.ID, '')) <> ''\n  AND CAST(tn.ID AS INTEGER) > 0\n  AND TRIM(COALESCE(Name_lang, '')) <> ''\nORDER BY CAST(tn.ID AS INTEGER), tn.ID",
+        "query": {
+          "from": "taxinodes tn",
+          "joins": [
+            "used_nodes（由 TaxiPath 公共交通候选集合反查所需节点）",
+            "uimapassignment uma（按 MapID 保守映射到最小 UiMapID）"
+          ],
+          "select": [
+            "taxi_node_id",
+            "ui_map_id",
+            "map_id",
+            "node_name",
+            "node_flags",
+            "condition_id",
+            "visibility_condition_id"
+          ],
+          "where": [
+            "只导出被公共交通候选路径引用的 TaxiNode",
+            "节点名称非空"
+          ],
+          "group_by": [],
+          "order_by": [
+            "taxi_node_id ASC"
+          ],
+          "row_granularity": "一行代表一个可被 navigation 消费的 Taxi 节点"
+        }
+      },
+      "edges": {
+        "sql": "WITH public_paths AS (\n  SELECT\n    CAST(tp.ID AS INTEGER) AS path_id,\n    CAST(tp.FromTaxiNode AS INTEGER) AS from_taxi_node_id,\n    CAST(tp.ToTaxiNode AS INTEGER) AS to_taxi_node_id,\n    CAST(COALESCE(tp.Cost, 0) AS INTEGER) AS path_cost\n  FROM taxipath tp\n  WHERE TRIM(COALESCE(tp.ID, '')) <> ''\n    AND TRIM(COALESCE(tp.FromTaxiNode, '')) <> ''\n    AND TRIM(COALESCE(tp.ToTaxiNode, '')) <> ''\n    AND CAST(tp.ID AS INTEGER) > 0\n    AND CAST(tp.FromTaxiNode AS INTEGER) > 0\n    AND CAST(tp.ToTaxiNode AS INTEGER) > 0\n    AND EXISTS (\n      SELECT 1\n      FROM taxipathnode tpn\n      WHERE CAST(tpn.PathID AS INTEGER) = CAST(tp.ID AS INTEGER)\n        AND (\n          CAST(COALESCE(tpn.Delay, 0) AS INTEGER) > 0\n          OR (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 2) <> 0\n        )\n    )\n), path_stats AS (\n  SELECT\n    CAST(tpn.PathID AS INTEGER) AS path_id,\n    MAX(CASE WHEN CAST(COALESCE(tpn.Delay, 0) AS INTEGER) > 0 THEN 1 ELSE 0 END) AS has_delay_node,\n    MAX(CASE WHEN (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 2) <> 0 THEN 1 ELSE 0 END) AS has_stop_node,\n    MAX(CASE WHEN (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 1) <> 0 THEN 1 ELSE 0 END) AS has_map_change_node\n  FROM taxipathnode tpn\n  WHERE TRIM(COALESCE(tpn.PathID, '')) <> ''\n    AND CAST(tpn.PathID AS INTEGER) > 0\n  GROUP BY CAST(tpn.PathID AS INTEGER)\n)\nSELECT\n  ROW_NUMBER() OVER (ORDER BY pp.path_id ASC) AS edge_index,\n  CAST(pp.path_id AS INTEGER) AS path_id,\n  CAST(pp.from_taxi_node_id AS INTEGER) AS from_node_id,\n  CAST(pp.to_taxi_node_id AS INTEGER) AS to_node_id,\n  CAST(COALESCE(pp.path_cost, 0) AS INTEGER) AS edge_cost,\n  'PUBLIC_TRANSPORT' AS mode,\n  '乘坐公共交通前往' || COALESCE(tn_to.Name_lang, ('Taxi Node #' || CAST(pp.to_taxi_node_id AS TEXT))) AS edge_label,\n  CAST(COALESCE(ps.has_delay_node, 0) AS INTEGER) AS has_delay_node,\n  CAST(COALESCE(ps.has_stop_node, 0) AS INTEGER) AS has_stop_node,\n  CAST(COALESCE(ps.has_map_change_node, 0) AS INTEGER) AS has_map_change_node\nFROM public_paths pp\nLEFT JOIN path_stats ps ON ps.path_id = pp.path_id\nLEFT JOIN taxinodes tn_to ON CAST(tn_to.ID AS INTEGER) = pp.to_taxi_node_id\nORDER BY pp.path_id ASC",
+        "query": {
+          "from": "taxipath tp",
+          "joins": [
+            "taxipathnode tpn（聚合 Delay / Flags 特征）",
+            "taxinodes tn_to（生成目标名称文案）"
+          ],
+          "select": [
+            "edge_index",
+            "path_id",
+            "from_node_id",
+            "to_node_id",
+            "edge_cost",
+            "mode",
+            "edge_label",
+            "has_delay_node",
+            "has_stop_node",
+            "has_map_change_node"
+          ],
+          "where": [
+            "只保留至少存在一个 Delay > 0 或 stop flag 节点的 TaxiPath"
+          ],
+          "group_by": [],
+          "order_by": [
+            "path_id ASC"
+          ],
+          "row_granularity": "一行代表一条可直接写入 NavigationTaxiEdges.edges 的公共交通边"
+        }
+      }
+    }
+  },
+  "structure": {
+    "root_type": "document",
+    "lua_shape": "Toolbox.Data.NavigationTaxiEdges = { schemaVersion, sourceMode, generatedAt, nodes, edges }",
+    "fields": [],
+    "document_blocks": [
+      {
+        "name": "metadata",
+        "metadata": {
+          "schemaVersion": 1,
+          "sourceMode": "live",
+          "generatedAt": "@generated_at"
+        }
+      },
+      {
+        "name": "nodes",
+        "dataset": "nodes",
+        "block_type": "map_object",
+        "key_field": "taxi_node_id",
+        "dedupe_by": [
+          "taxi_node_id"
+        ],
+        "required_fields": [
+          "taxi_node_id",
+          "ui_map_id",
+          "map_id",
+          "node_name"
+        ],
+        "sort_by": [
+          "taxi_node_id"
+        ],
+        "value_template": {
+          "ID": "taxi_node_id",
+          "UiMapID": "ui_map_id",
+          "MapID": "map_id",
+          "Name_lang": "node_name",
+          "Flags": "node_flags",
+          "ConditionID": "condition_id",
+          "VisibilityConditionID": "visibility_condition_id"
+        }
+      },
+      {
+        "name": "edges",
+        "dataset": "edges",
+        "block_type": "map_object",
+        "key_field": "edge_index",
+        "dedupe_by": [
+          "edge_index"
+        ],
+        "required_fields": [
+          "edge_index",
+          "path_id",
+          "from_node_id",
+          "to_node_id",
+          "edge_cost",
+          "edge_label"
+        ],
+        "sort_by": [
+          "edge_index"
+        ],
+        "value_template": {
+          "id": "path_id",
+          "from": "from_node_id",
+          "to": "to_node_id",
+          "cost": "edge_cost",
+          "label": "edge_label",
+          "mode": "mode",
+          "hasDelayNode": "has_delay_node",
+          "hasStopNode": "has_stop_node",
+          "hasMapChangeNode": "has_map_change_node"
+        }
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [],
+    "unique_keys": [],
+    "non_null_fields": [],
+    "sort_rules": []
+  },
+  "versioning": {
+    "current_schema_version": 1,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始 draft 契约：基于 TaxiNodes / TaxiPath / TaxiPathNode 定义 navigation 公共交通导出形状，按当前实现输出 nodes + edges"
+      }
+    ]
+  }
+}

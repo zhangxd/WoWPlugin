@@ -1,6 +1,6 @@
 --[[
   navigation 世界地图入口：在 WorldMapFrame 显示时创建“规划路线”按钮。
-  目标坐标读取沿用 WorldMapFrame.ScrollContainer:GetNormalizedCursorPosition()；按钮点击时才取值。
+  目标坐标读取当前用户 waypoint；若不存在有效 waypoint，则按钮点击后静默返回。
 ]]
 
 Toolbox.NavigationModule = Toolbox.NavigationModule or {}
@@ -17,42 +17,55 @@ local function getModuleDb()
   return Toolbox.Config.GetModule("navigation")
 end
 
---- 读取当前世界地图显示的 UiMapID。
----@return number|nil
-local function getWorldMapID()
-  local worldMapFrame = _G.WorldMapFrame -- 大地图根 Frame
-  if not worldMapFrame or type(worldMapFrame.GetMapID) ~= "function" then
-    return nil
-  end
-  local success, mapID = pcall(worldMapFrame.GetMapID, worldMapFrame) -- 地图 ID 查询结果
-  if not success or type(mapID) ~= "number" or mapID <= 0 then
-    return nil
-  end
-  return mapID
-end
-
---- 读取当前鼠标在世界地图上的归一化坐标。
+--- 从 Vector2DMixin 或普通表读取归一化坐标。
+---@param vectorValue table|nil 地图坐标对象
 ---@return number|nil, number|nil
-local function getWorldMapMousePosition()
-  local worldMapFrame = _G.WorldMapFrame -- 大地图根 Frame
-  local scrollContainer = worldMapFrame and worldMapFrame.ScrollContainer or nil -- 地图滚动容器
-  if not scrollContainer or type(scrollContainer.GetNormalizedCursorPosition) ~= "function" then
+local function readVectorXY(vectorValue)
+  if type(vectorValue) ~= "table" then
     return nil, nil
   end
-  local success, x, y = pcall(scrollContainer.GetNormalizedCursorPosition, scrollContainer) -- 鼠标坐标查询结果
-  if not success or type(x) ~= "number" or type(y) ~= "number" then
-    return nil, nil
+  if type(vectorValue.GetXY) == "function" then
+    local success, x, y = pcall(vectorValue.GetXY, vectorValue) -- GetXY 返回值
+    if success and type(x) == "number" and type(y) == "number" then
+      return x, y
+    end
   end
-  if x < 0 or x > 1 or y < 0 or y > 1 then
+  local x = vectorValue.x -- 坐标 X
+  local y = vectorValue.y -- 坐标 Y
+  if type(x) ~= "number" or type(y) ~= "number" then
     return nil, nil
   end
   return x, y
 end
 
---- 规划当前鼠标所指地图目标，并刷新顶部路径条。
-local function planRouteFromCurrentMouseTarget()
-  local mapID = getWorldMapID() -- 当前地图 ID
-  local targetX, targetY = getWorldMapMousePosition() -- 当前鼠标坐标
+--- 读取当前用户 waypoint。
+---@return number|nil, number|nil, number|nil
+local function getUserWaypointTarget()
+  local mapApi = type(C_Map) == "table" and C_Map or nil -- 地图 API 表
+  local getUserWaypoint = mapApi and mapApi.GetUserWaypoint or nil -- 用户 waypoint 查询
+  if type(getUserWaypoint) ~= "function" then
+    return nil, nil, nil
+  end
+
+  local success, pointValue = pcall(getUserWaypoint) -- waypoint 查询结果
+  if not success or type(pointValue) ~= "table" then
+    return nil, nil, nil
+  end
+
+  local mapID = tonumber(pointValue.uiMapID) -- waypoint 地图 ID
+  local targetX, targetY = readVectorXY(pointValue.position) -- waypoint 坐标
+  if not mapID or mapID <= 0 or type(targetX) ~= "number" or type(targetY) ~= "number" then
+    return nil, nil, nil
+  end
+  if targetX < 0 or targetX > 1 or targetY < 0 or targetY > 1 then
+    return nil, nil, nil
+  end
+  return mapID, targetX, targetY
+end
+
+--- 规划当前用户 waypoint 目标，并刷新顶部路径条。
+local function planRouteFromCurrentWaypointTarget()
+  local mapID, targetX, targetY = getUserWaypointTarget() -- 当前用户 waypoint
   if not mapID or not targetX or not targetY then
     return
   end
@@ -92,7 +105,7 @@ local function ensureTargetButton()
   targetButton:SetSize(96, 24)
   targetButton:SetPoint("TOP", parentFrame, "TOP", 0, -36)
   targetButton:SetText((Toolbox.L or {}).NAVIGATION_WORLD_MAP_BUTTON or "Route")
-  targetButton:SetScript("OnClick", planRouteFromCurrentMouseTarget)
+  targetButton:SetScript("OnClick", planRouteFromCurrentWaypointTarget)
   targetButton:Show()
   return targetButton
 end

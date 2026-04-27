@@ -4,23 +4,20 @@ describe("Navigation WorldMap integration", function()
   local originalToolbox = nil -- 原始 Toolbox 全局
   local originalWorldMapFrame = nil -- 原始 WorldMapFrame 全局
   local originalCreateFrame = nil -- 原始 CreateFrame 全局
+  local originalCMap = nil -- 原始 C_Map 全局
   local shownRoute = nil -- RouteBar 显示的路线
 
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
     originalWorldMapFrame = rawget(_G, "WorldMapFrame")
     originalCreateFrame = rawget(_G, "CreateFrame")
+    originalCMap = rawget(_G, "C_Map")
     shownRoute = nil
 
     local worldMapFrame = FakeFrame.new({ frameType = "Frame", frameName = "WorldMapFrame" }) -- 大地图 Frame
     worldMapFrame.BorderFrame = FakeFrame.new({ frameType = "Frame", parentFrame = worldMapFrame })
-    worldMapFrame.ScrollContainer = {
-      GetNormalizedCursorPosition = function()
-        return 0.52, 0.43
-      end,
-    }
     function worldMapFrame:GetMapID()
-      return 1
+      return 947
     end
     rawset(_G, "WorldMapFrame", worldMapFrame)
     rawset(_G, "CreateFrame", function(frameType, frameName, parentFrame, templateName)
@@ -31,6 +28,17 @@ describe("Navigation WorldMap integration", function()
         templateName = templateName,
       })
     end)
+    rawset(_G, "C_Map", {
+      GetUserWaypoint = function()
+        return {
+          uiMapID = 114,
+          position = {
+            x = 0.52,
+            y = 0.43,
+          },
+        }
+      end,
+    })
     rawset(_G, "Toolbox", {
       Navigation = {
         GetRequiredSpellIDList = function()
@@ -47,7 +55,7 @@ describe("Navigation WorldMap integration", function()
           }
         end,
         PlanRouteToMapTarget = function(target, availabilityContext)
-          assert.equals(1, target.uiMapID)
+          assert.equals(114, target.uiMapID)
           assert.equals(0.52, target.x)
           assert.equals(0.43, target.y)
           assert.equals("MAGE", availabilityContext.classFile)
@@ -87,9 +95,10 @@ describe("Navigation WorldMap integration", function()
     rawset(_G, "Toolbox", originalToolbox)
     rawset(_G, "WorldMapFrame", originalWorldMapFrame)
     rawset(_G, "CreateFrame", originalCreateFrame)
+    rawset(_G, "C_Map", originalCMap)
   end)
 
-  it("creates_one_world_map_button_and_plans_route_from_mouse_target", function()
+  it("creates_one_world_map_button_and_plans_route_from_user_waypoint", function()
     Toolbox.NavigationModule.WorldMap.Install()
     Toolbox.NavigationModule.WorldMap.Install()
 
@@ -104,5 +113,21 @@ describe("Navigation WorldMap integration", function()
     targetButton:RunScript("OnClick")
     assert.is_table(shownRoute)
     assert.equals(35, shownRoute.totalCost)
+  end)
+
+  it("does_not_plan_route_when_user_waypoint_is_missing", function()
+    rawset(_G, "C_Map", {
+      GetUserWaypoint = function()
+        return nil
+      end,
+    })
+
+    Toolbox.NavigationModule.WorldMap.Install()
+    WorldMapFrame:Show()
+
+    local targetButton = Toolbox.NavigationModule.WorldMap.GetTargetButton() -- 规划按钮
+    targetButton:RunScript("OnClick")
+
+    assert.is_nil(shownRoute)
   end)
 end)

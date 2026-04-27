@@ -16,6 +16,7 @@
 - `encounter_journal` 已有副本入口 waypoint 能力，但它只服务副本列表条目，不负责通用旅行规划。
 - 新需求面向世界地图任意目标，需要综合当前角色职业能力、传送门、炉石、主城与地图距离生成路线。
 - 该能力有独立入口、独立 UI、独立存档和独立算法边界，适合作为新模块接入。
+- 首版实现当前仍有两个关键缺口：目标源取自按钮点击时的鼠标位置，而不是现有用户 waypoint；路径图也只按 `uiMapID` 规划，没有消费 `target.x / target.y`。
 
 ## 2. 设计目标
 
@@ -32,6 +33,8 @@
 - 不实现真实地形寻路、避障或逐米路线。
 - 不承诺一次覆盖所有职业、玩具、节日传送或低频交通。
 - 不通过固定正数秒 `C_Timer.After` 等待世界地图布局。
+- 本轮不修改 `Toolbox/Core/API/Tooltip.lua`。
+- `Toolbox/Core/API/EncounterJournal.lua` 的入口查询性能修复待主方案确认后单独落文档，不并入本轮导航修订执行。
 
 ## 4. 方案对比
 
@@ -70,8 +73,9 @@
 | `Toolbox/Modules/Navigation/WorldMap.lua` | 世界地图目标选择入口；查证并封装 `C_Map` / WorldMapFrame 相关调用。 |
 | `Toolbox/Modules/Navigation/RouteBar.lua` | 顶部中间路径 UI，负责显示步骤、清除路线、刷新布局。 |
 | `Toolbox/Data/NavigationMapNodes.lua` | DB2 / WoWDB 导出的地图基础节点或区域节点，需对应 `DataContracts` 契约。 |
-| `Toolbox/Data/NavigationManualEdges.lua` | 人工维护玩法路径边：职业传送、传送门房、炉石类能力、主城与资料片枢纽。 |
+| `Toolbox/Data/NavigationManualEdges.lua` | 人工维护玩法路径边与连接器锚点：职业传送、传送门房、炉石类能力、主城与资料片枢纽。 |
 | `DataContracts/navigation_map_nodes.json` | 地图基础节点导出契约。 |
+| `DataContracts/navigation_taxi_edges.json` | 公共交通 `Taxi*` draft 契约，输出当前实现可直接消费的 `NavigationTaxiEdges` 形状。 |
 
 说明：
 
@@ -82,14 +86,15 @@
 
 - 节点：
   - 当前角色当前位置。
-  - 世界地图目标坐标或地图区域中心点。
+  - 世界地图目标 waypoint 坐标。
   - 主城、资料片枢纽、传送门房、职业传送落点、炉石落点。
   - 地图内抽象连接点，例如目标地图入口或区域中心。
 - 边：
   - 地图内移动边：按地图距离估算耗时。
-  - 职业技能边：例如法师传送 / 传送门。
+  - 公共交通边：`TaxiNodes / TaxiPath / TaxiPathNode` 可直接导出飞艇 / 船 / 电车等公共交通边；当前先以模拟数据验证导航消费，后续再接正式导出。
+  - 职业技能边：例如法师传送 / 传送门；长期更适合先导出“职业旅行技能候选”，再补落点归一化。
   - 炉石类边：普通炉石、特殊炉石或同类能力。
-  - 传送门房 / 枢纽边：人工维护可达关系。
+  - 传送门房 / 枢纽边：当前仍以人工维护可达关系为主；后续可先导出“传送门候选”，再补目的地归一化。
 - 边权：
   - 读条时间。
   - 交互 / 换乘固定成本。
@@ -99,7 +104,56 @@
   - 第一版使用 Dijkstra。路径图规模可控，Dijkstra 更透明，也便于逻辑测试。
   - 后续若地图节点规模明显增大，再评估 A*。
 
-### 5.3 可用性过滤
+补充约束：
+
+- 基础交通图拆成“静态骨架 + 动态起点终点”两层。
+- 静态骨架只描述固定世界事实：节点、传送门入口、落点、固定交互成本。
+- 运行时只动态挂接 `current` 与 `target` 两个节点，不再为每次规划重建整张基础图。
+- `target.x / target.y` 必须进入成本模型，至少影响以下两段：
+  - 当前点到同图入口或同图目标的成本。
+  - 中转落点到目标点的终段成本。
+- 同图移动成本由独立函数估算，例如 `estimateInMapTravelCost(uiMapID, fromX, fromY, toX, toY)`；第一版允许使用归一化坐标距离乘地图系数的保守模型。
+
+### 5.3 静态连接器与运行时可用性
+
+- `NavigationMapNodes.lua` 继续只承担地图层级与名称，不承担“是否可通行”的业务语义。
+- `NavigationManualEdges.lua` 当前负责维护高价值连接器与目标规则；即使后续接入更多导出表，至少在当前求解器模型下仍需要承担一层归一化与 `targetRules` 维护职责。
+- 当前实现仍依赖 `targetRules[targetMapID].viaNodes` 把“中转枢纽 / 落点”连接到最终目标图；仅增加导出边，不能自动替代全部手工维护。
+- `NavigationManualEdges.lua` 建议扩展以下信息：
+  - 节点锚点坐标：城市中心、传送门房、职业落点等 `uiMapID/x/y`
+  - 目标规则落点：`arrivalUiMapID/arrivalX/arrivalY/baseCost/label`
+  - 边的固定世界事实：`from/to/mode/baseCost`
+  - 边的运行时可用性要求：职业、阵营、法术、玩具、手动确认解锁等
+- 公共交通边分两阶段：
+  - 本轮：用模拟数据验证飞艇 / 船样板可进入导航骨架与求解。
+  - 后续：再落 `TaxiNodes / TaxiPath / TaxiPathNode` 的正式导出契约与 Data 文件。
+- 当前已补 `navigation_taxi_edges` draft 契约，采用以下保守规则：
+  - 只保留 `TaxiPathNode.Delay > 0` 或 stop flag 命中的路径，作为飞艇 / 船 / 电车等公共交通候选。
+  - `TaxiNodes.ContinentID` 指向 `Map::ID`，而当前导航消费 `UiMapID`；draft 契约先通过 `UiMapAssignment.MapID -> MIN(UiMapID)` 做保守映射，待真实环境验证后再决定是否升级为区域包含判定。
+- 公共交通正式导出边界：
+  - `TaxiPath` 已明确提供起点、终点与成本，适合作为最终公共交通边主表。
+  - `TaxiNodes` 提供节点地图、名称与条件字段，适合作为公共交通节点主表。
+  - `TaxiPathNode` 提供路径特征与停靠特征，适合用于识别飞艇 / 船 / 电车并补充调试信息。
+- 传送门候选数据边界：
+  - 世界门 / 副本门类优先评估 `AreaTrigger`，必要时辅以 `GameObjects` 识别门对象或可交互入口。
+  - 该链路按当前已确认表定义，能导出“某地图有哪些传送门候选、位于何处、带哪些阶段限制”，但尚不能稳定还原最终目的地、落点坐标与单向/双向语义。
+  - 因此传送门更适合作为 `navigation_portal_candidates` 一类候选表，而不是直接替代最终导航边。
+- 职业旅行技能候选边界：
+  - `SkillLineAbility` 可提供职业 / 法术关联，`ChrClasses` 可解出职业身份，`SpellEffect` 可辅助识别传送类技能。
+  - 该链路能导出“哪些职业有哪些候选旅行技能”，但目的地地图、落点坐标、技能别名 / 替代 spell 归并仍需一层归一化。
+  - 因此职业传送更适合作为 `navigation_spell_travel_candidates` 一类候选表，再由手工规则或后续更强的数据链补齐最终边。
+- 数据源长期口径：
+  - 公共交通边追求“直接导出最终边”。
+  - 传送门与职业旅行技能追求“优先导出候选，薄手工归一化”，当前不承诺彻底零手工维护。
+- 解锁策略拆层：
+  - 固定世界事实静态维护，不进入运行时判断。
+  - 玩家是否可用运行时过滤，不写回静态导出。
+- 性能策略：
+  - 初始化时预建基础图索引，例如 `edgeListByFrom`、`targetRulesByMapID`、`nodesByUiMapID`
+  - 基于 `availabilityRevision` 缓存已过滤图
+  - 路线结果按 `currentUiMapID + targetUiMapID + targetBucket + availabilityRevision` 做结果缓存
+
+### 5.4 可用性过滤
 
 - 可用性来源只看当前角色：
   - 职业：例如 `UnitClass("player")`。
@@ -113,25 +167,27 @@
   - [`C_SpellBook.IsSpellKnown`](https://warcraft.wiki.gg/wiki/API_C_SpellBook.IsSpellKnown)：旧查询入口；仅作为 `IsSpellInSpellBook` 缺失时的兼容兜底。
   - [`C_Map.GetPlayerMapPosition(uiMapID, unitToken)`](https://warcraft.wiki.gg/wiki/API_C_Map.GetPlayerMapPosition)：Warcraft Wiki 标注该函数在部分区域不可用；后续当前位置获取必须允许失败并走保守兜底。
   - [`C_Map.GetBestMapForUnit(unitToken)`](https://warcraft.wiki.gg/wiki/API_C_Map.GetBestMapForUnit)：用于获得当前角色所在 `uiMapID`；第一版将其写入可用性快照，以便把“我现在就在银月城 / 奥格瑞玛 / 职业大厅”等场景作为零成本起点边。
-  - `WorldMapFrame:GetMapID()` 与 `WorldMapFrame.ScrollContainer:GetNormalizedCursorPosition()`：第一版只在 `WorldMapFrame` 存在且对应方法存在时调用；失败时不规划路线。该交互仍列入游戏内复测项。
+  - [`C_Map.GetUserWaypoint`](https://warcraft.wiki.gg/wiki/API_C_Map.GetUserWaypoint)：用于读取当前唯一的用户 waypoint，作为世界地图按钮规划目标的权威来源。
+  - [`C_Map.GetUserWaypointPositionForMap`](https://warcraft.wiki.gg/wiki/API_C_Map.GetUserWaypointPositionForMap)：用于按地图读取 waypoint 坐标；若实现中需要校验地图切换或同图位置，可作为辅助入口。
 - 保守策略：
   - 无法确认当前角色可用的边不进入路径图。
   - API 不存在、返回失败或数据缺失时，边视为不可用。
   - 可用性失败不弹 Lua 错；必要时通过调试开关输出 `Toolbox.Chat` 调试信息。
 
-### 5.4 世界地图入口
+### 5.5 世界地图入口
 
 - 主入口：
   - 绑定 `WorldMapFrame` 生命周期，优先使用 `HookScript("OnShow", ...)` 创建或刷新导航入口。
-  - 第一版不拦截世界地图原生点击，而是在 `WorldMapFrame` 显示后创建“规划路线”按钮；玩家把鼠标放在目标点上点击按钮，模块读取 `WorldMapFrame:GetMapID()` 与 `WorldMapFrame.ScrollContainer:GetNormalizedCursorPosition()` 作为目标。
+  - 第一版不拦截世界地图原生点击，而是在 `WorldMapFrame` 显示后创建“规划路线”按钮；按钮点击时读取当前用户 waypoint，作为 `uiMapID/x/y` 目标。
+  - 若没有用户 waypoint、waypoint 返回值无效或 API 不存在，则不规划路线；按钮可以保持可点击但静默失败，也可以在后续实现中补禁用态或提示文案。
 - 禁止：
   - 不用固定正数秒 `C_Timer.After` 作为等待世界地图控件或布局的主路径。
   - 不在 combat lockdown 中操作受保护框体。
 - 第一版 UI 行为建议：
   - 世界地图按钮点击后，模块生成当前路线并更新顶部路径 UI。
-  - 如需要在地图上放置系统 waypoint，必须作为辅助动作，且 API 查证后再接入。
+  - 系统 waypoint 由玩家预先放置，本模块读取现有 waypoint 进行规划，不额外改写玩家当前 waypoint。
 
-### 5.5 顶部路径 UI
+### 5.6 顶部路径 UI
 
 - 位置：
   - 屏幕顶部中间。
@@ -145,7 +201,7 @@
   - 模块禁用、路线清除或无路线时隐藏。
   - 若后续加入 `OnUpdate`，必须节流并在禁用时清理；第一版不需要每帧逻辑。
 
-### 5.6 设置与存档
+### 5.7 设置与存档
 
 `ToolboxDB.modules.navigation` 第一版建议字段：
 
@@ -162,7 +218,7 @@
 - 新字段必须写入 `Core/Foundation/Config.lua` 默认值，并补迁移。
 - 第一版路径条固定在顶部中间，不保留未消费的位置锁定存档字段；后续若开放拖动，再接入 Mover 或模块内位置存档。
 
-### 5.7 本地化与玩家输出
+### 5.8 本地化与玩家输出
 
 - 玩家可见字符串统一放入 `Toolbox/Core/Foundation/Locales.lua`。
 - 聊天输出必须通过 `Toolbox.Chat`。
@@ -205,14 +261,18 @@
   - 当前位置为手工枢纽节点时，可使用公共传送门网络继续规划。
   - 死亡骑士、德鲁伊、武僧等已确认职业位移边可作为独立入口参与求解。
   - 非对应职业或未确认技能时不使用对应职业边。
+  - 世界地图按钮读取用户 waypoint；无 waypoint 时不生成路线。
+  - 同一 `uiMapID` 下不同 `target.x / target.y` 至少产生不同终段成本。
 - 配置测试：
   - `ToolboxDB.modules.navigation` 默认值和迁移存在。
   - 设置子页面注册校验通过。
 - 数据测试：
   - `DataContracts/navigation_map_nodes.json` 与生成文件头校验通过。
+  - 模拟公共交通数据至少覆盖奥格瑞玛到北风苔原这类飞艇 / 船样板。
   - 人工维护边不包含无法解析的节点 ID。
+  - 人工维护的落点坐标满足 `0..1`，且 `arrivalUiMapID` 能映射到已知地图节点。
 - 游戏内验证：
-  - 世界地图目标选择后顶部路径 UI 出现。
+  - 世界地图已有用户 waypoint 时，点击“规划路线”后顶部路径 UI 出现。
   - 路径步骤顺序可读，清除路线后 UI 隐藏。
   - 战斗中不触发受保护 UI 错误。
 - 总验证：
@@ -223,3 +283,5 @@
 | 日期 | 内容 |
 |------|------|
 | 2026-04-27 | 初稿：确认新建 `navigation` 模块、混合数据源、Dijkstra 路径图与顶部路径 UI 设计 |
+| 2026-04-27 | 复审修订：目标源改为用户 waypoint，加入 `x/y` 成本模型、静态连接器/运行时过滤拆层与缓存策略，并明确排除 tooltip 与 EJ 性能修复 |
+| 2026-04-27 | 数据源补充：公共交通边长期主方案确认使用 `Taxi*` 自动导出；当前执行边界先用模拟飞艇 / 船数据验证导航消费，真实导出待后续单独立项 |

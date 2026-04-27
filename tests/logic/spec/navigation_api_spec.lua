@@ -384,4 +384,127 @@ describe("Navigation API", function()
     assert.equals(52, routeResult.totalCost)
     assert.same({ "测试传送", "从测试枢纽前往测试目标" }, routeResult.stepLabels)
   end)
+
+  it("adds_terminal_cost_from_via_arrival_position_to_target_coordinates", function()
+    Toolbox.Data.NavigationMapNodes = {
+      nodes = {
+        [777] = { ID = 777, Name_lang = "测试目标" },
+      },
+    }
+    Toolbox.Data.NavigationManualEdges = {
+      schemaVersion = 1,
+      nodes = {
+        hub = { UiMapID = 999, Name_lang = "测试枢纽" },
+      },
+      targetRules = {
+        [777] = {
+          directCost = 500,
+          viaNodes = {
+            {
+              node = "hub",
+              cost = 0,
+              arrivalUiMapID = 777,
+              arrivalX = 0.10,
+              arrivalY = 0.10,
+              label = "从测试枢纽前往测试目标",
+            },
+          },
+        },
+      },
+      edges = {
+        {
+          from = "current",
+          to = "hub",
+          cost = 10,
+          label = "测试传送",
+        },
+      },
+    }
+
+    local nearRoute = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 777,
+      x = 0.12,
+      y = 0.10,
+    }, {
+      classFile = "MAGE",
+      knownSpellByID = {},
+    })
+
+    local farRoute = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 777,
+      x = 0.90,
+      y = 0.90,
+    }, {
+      classFile = "MAGE",
+      knownSpellByID = {},
+    })
+
+    assert.is_true(nearRoute.totalCost < farRoute.totalCost)
+    assert.same({ "测试传送", "从测试枢纽前往测试目标" }, nearRoute.stepLabels)
+    assert.same({ "测试传送", "从测试枢纽前往测试目标" }, farRoute.stepLabels)
+  end)
+
+  it("consumes_simulated_public_transport_edges_for_borean_tundra_route", function()
+    Toolbox.Data.NavigationMapNodes = {
+      nodes = {
+        [85] = { ID = 85, Name_lang = "奥格瑞玛" },
+        [114] = { ID = 114, Name_lang = "北风苔原" },
+      },
+    }
+    Toolbox.Data.NavigationManualEdges = {
+      schemaVersion = 1,
+      nodes = {
+        orgrimmar = { UiMapID = 85, Name_lang = "奥格瑞玛" },
+      },
+      targetRules = {
+        [114] = {
+          directCost = 300,
+          viaNodes = {
+            {
+              node = "warsong_hold",
+              cost = 5,
+              arrivalUiMapID = 114,
+              arrivalX = 0.41,
+              arrivalY = 0.53,
+              label = "从战歌要塞前往北风苔原目标",
+            },
+          },
+        },
+      },
+      edges = {},
+    }
+    Toolbox.Data.NavigationTaxiEdges = {
+      schemaVersion = 1,
+      nodes = {
+        warsong_hold = { UiMapID = 114, Name_lang = "战歌要塞" },
+      },
+      edges = {
+        {
+          from = "orgrimmar",
+          to = "warsong_hold",
+          cost = 25,
+          label = "乘坐飞艇前往战歌要塞",
+        },
+      },
+    }
+
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 114,
+      x = 0.45,
+      y = 0.55,
+    }, {
+      classFile = "WARRIOR",
+      faction = "Horde",
+      currentUiMapID = 85,
+      knownSpellByID = {},
+    })
+
+    assert.is_nil(errorObject)
+    assert.same({
+      "当前位置：奥格瑞玛",
+      "乘坐飞艇前往战歌要塞",
+      "从战歌要塞前往北风苔原目标",
+    }, routeResult.stepLabels)
+    assert.is_true(routeResult.totalCost < 300)
+  end)
 end)

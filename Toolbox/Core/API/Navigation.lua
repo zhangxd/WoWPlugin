@@ -221,6 +221,52 @@ function Toolbox.Navigation.GetRequiredSpellIDList(routeData)
   return spellIDList
 end
 
+--- 从 Vector2DMixin 或普通表读取归一化坐标。
+---@param vectorValue table|nil 坐标对象
+---@return number|nil, number|nil
+local function readVectorXY(vectorValue)
+  if type(vectorValue) ~= "table" then
+    return nil, nil
+  end
+  if type(vectorValue.GetXY) == "function" then
+    local success, x, y = pcall(vectorValue.GetXY, vectorValue) -- GetXY 返回值
+    if success and type(x) == "number" and type(y) == "number" then
+      return x, y
+    end
+  end
+  local x = vectorValue.x -- 坐标 X
+  local y = vectorValue.y -- 坐标 Y
+  if type(x) ~= "number" or type(y) ~= "number" then
+    return nil, nil
+  end
+  return x, y
+end
+
+--- 判断归一化坐标是否合法。
+---@param x number|nil 坐标 X
+---@param y number|nil 坐标 Y
+---@return boolean
+local function isNormalizedPosition(x, y)
+  return type(x) == "number" and type(y) == "number" and x >= 0 and x <= 1 and y >= 0 and y <= 1
+end
+
+--- 估算同一地图内两点之间的移动成本。
+---@param uiMapID number|nil 地图 ID
+---@param fromX number|nil 起点 X
+---@param fromY number|nil 起点 Y
+---@param toX number|nil 终点 X
+---@param toY number|nil 终点 Y
+---@return number|nil
+local function estimateInMapTravelCost(uiMapID, fromX, fromY, toX, toY)
+  if not tonumber(uiMapID) or not isNormalizedPosition(fromX, fromY) or not isNormalizedPosition(toX, toY) then
+    return nil
+  end
+  local deltaX = toX - fromX -- X 轴归一化偏移
+  local deltaY = toY - fromY -- Y 轴归一化偏移
+  local distance = math.sqrt((deltaX * deltaX) + (deltaY * deltaY)) -- 归一化平面距离
+  return math.floor((distance * 120) + 0.5)
+end
+
 --- 从当前角色运行时状态构建路径边可用性快照。
 --- `C_SpellBook.IsSpellInSpellBook` 是当前 Retail 推荐的 spellbook 查询入口；
 --- 旧客户端或测试环境缺失时回退到 `C_SpellBook.IsSpellKnown`，调用失败按未知处理。
@@ -231,6 +277,8 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
     classFile = nil,
     faction = nil,
     currentUiMapID = nil,
+    currentX = nil,
+    currentY = nil,
     knownSpellByID = {},
   } -- 当前角色可用性快照
 
@@ -256,6 +304,17 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
       availabilityContext.currentUiMapID = currentMapID
     end
   end
+  local getPlayerMapPosition = mapApi and mapApi.GetPlayerMapPosition or nil -- 当前单位坐标查询
+  if availabilityContext.currentUiMapID and type(getPlayerMapPosition) == "function" then
+    local success, positionValue = pcall(getPlayerMapPosition, availabilityContext.currentUiMapID, "player") -- 当前角色坐标查询结果
+    if success then
+      local currentX, currentY = readVectorXY(positionValue) -- 当前角色归一化坐标
+      if isNormalizedPosition(currentX, currentY) then
+        availabilityContext.currentX = currentX
+        availabilityContext.currentY = currentY
+      end
+    end
+  end
 
   local spellBookApi = type(C_SpellBook) == "table" and C_SpellBook or nil -- spellbook API 表
   local spellCheckFn = spellBookApi and (spellBookApi.IsSpellInSpellBook or spellBookApi.IsSpellKnown) or nil -- 技能已学判定
@@ -276,36 +335,80 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
   return availabilityContext
 end
 
+--- 计算中转落点到目标点的终段成本。
+---@param viaNodeDef table 候选中转点定义
+---@param target table 地图目标
+---@return number
+local function buildTerminalTravelCost(viaNodeDef, target)
+  local arrivalMapID = tonumber(viaNodeDef and (viaNodeDef.arrivalUiMapID or target and target.uiMapID)) -- 中转落点地图 ID
+  local targetMapID = tonumber(target and target.uiMapID) -- 目标地图 ID
+  if not arrivalMapID or not targetMapID or arrivalMapID ~= targetMapID then
+    return 0
+  end
+  local arrivalX = tonumber(viaNodeDef and viaNodeDef.arrivalX) -- 中转落点 X
+  local arrivalY = tonumber(viaNodeDef and viaNodeDef.arrivalY) -- 中转落点 Y
+  local targetX = tonumber(target and target.x) -- 目标 X
+  local targetY = tonumber(target and target.y) -- 目标 Y
+  local travelCost = estimateInMapTravelCost(arrivalMapID, arrivalX, arrivalY, targetX, targetY) -- 终段移动成本
+  return tonumber(travelCost) or 0
+end
+
 --- 为目标规则添加一个候选中转点到目标的连接边。
 ---@param routeGraph table 正在构建的路径图
 ---@param viaNodeDef table 候选中转点定义
+---@param target table 地图目标
 ---@param targetNodeId string 目标节点 ID
 ---@param targetName string 目标显示名
-local function addTargetViaNodeEdge(routeGraph, viaNodeDef, targetNodeId, targetName)
+local function addTargetViaNodeEdge(routeGraph, viaNodeDef, target, targetNodeId, targetName)
   local viaNodeId = type(viaNodeDef) == "table" and viaNodeDef.node or nil -- 中转节点 ID
   if not viaNodeId or not routeGraph.nodes[viaNodeId] then
     return
   end
+  local baseCost = tonumber(viaNodeDef.cost) or 0 -- 中转规则固定成本
+  local terminalCost = buildTerminalTravelCost(viaNodeDef, target) -- 中转落点到目标点的终段成本
 
   routeGraph.edges[#routeGraph.edges + 1] = {
     from = viaNodeId,
     to = targetNodeId,
-    cost = tonumber(viaNodeDef.cost) or 0,
+    cost = baseCost + terminalCost,
     label = viaNodeDef.label or ("前往" .. targetName),
   }
 end
 
---- 若当前角色已在某个手工路径节点对应地图，添加零成本起点边。
+--- 向路径图写入一组节点定义。
 ---@param routeGraph table 正在构建的路径图
----@param manualData table 手工路径数据
+---@param nodeTable table|nil 节点定义表
+local function addRouteGraphNodes(routeGraph, nodeTable)
+  for nodeId, nodeDef in pairs(type(nodeTable) == "table" and nodeTable or {}) do
+    if type(nodeDef) == "table" then
+      routeGraph.nodes[nodeId] = {
+        id = nodeId,
+        name = nodeDef.Name_lang or tostring(nodeId),
+      }
+    end
+  end
+end
+
+--- 向路径图追加一组边定义。
+---@param routeGraph table 正在构建的路径图
+---@param edgeList table|nil 边定义列表
+local function addRouteGraphEdges(routeGraph, edgeList)
+  for _, edge in ipairs(type(edgeList) == "table" and edgeList or {}) do
+    routeGraph.edges[#routeGraph.edges + 1] = edge
+  end
+end
+
+--- 若当前角色已在某个路径节点对应地图，添加零成本起点边。
+---@param routeGraph table 正在构建的路径图
+---@param nodeTable table|nil 节点定义表
 ---@param availabilityContext table|nil 当前角色可用性快照
-local function addCurrentLocationEdges(routeGraph, manualData, availabilityContext)
+local function addCurrentLocationEdges(routeGraph, nodeTable, availabilityContext)
   local currentMapID = tonumber(availabilityContext and availabilityContext.currentUiMapID) -- 当前角色所在地图
   if not currentMapID then
     return
   end
 
-  for nodeId, nodeDef in pairs(type(manualData.nodes) == "table" and manualData.nodes or {}) do
+  for nodeId, nodeDef in pairs(type(nodeTable) == "table" and nodeTable or {}) do
     local nodeMapID = tonumber(nodeDef and nodeDef.UiMapID) -- 手工节点对应地图
     if nodeMapID == currentMapID then
       routeGraph.edges[#routeGraph.edges + 1] = {
@@ -318,6 +421,27 @@ local function addCurrentLocationEdges(routeGraph, manualData, availabilityConte
   end
 end
 
+--- 计算当前位置直接前往目标点的成本。
+---@param target table 地图目标
+---@param availabilityContext table|nil 当前角色可用性快照
+---@param targetRule table 目标规则
+---@return number
+local function buildDirectTargetCost(target, availabilityContext, targetRule)
+  local targetMapID = tonumber(target and target.uiMapID) -- 目标地图 ID
+  local currentMapID = tonumber(availabilityContext and availabilityContext.currentUiMapID) -- 当前地图 ID
+  local currentX = tonumber(availabilityContext and availabilityContext.currentX) -- 当前 X
+  local currentY = tonumber(availabilityContext and availabilityContext.currentY) -- 当前 Y
+  local targetX = tonumber(target and target.x) -- 目标 X
+  local targetY = tonumber(target and target.y) -- 目标 Y
+  if targetMapID and currentMapID and targetMapID == currentMapID then
+    local travelCost = estimateInMapTravelCost(targetMapID, currentX, currentY, targetX, targetY) -- 同图直接移动成本
+    if tonumber(travelCost) then
+      return travelCost
+    end
+  end
+  return tonumber(targetRule and targetRule.directCost) or 180
+end
+
 --- 构建第一版地图目标路径图。
 ---@param target table 目标，包含 `uiMapID` 与可选 `x` / `y`
 ---@param availabilityContext table|nil 当前角色可用性快照
@@ -326,39 +450,40 @@ local function buildMapTargetRouteGraph(target, availabilityContext)
   local targetMapID = tonumber(target and target.uiMapID) or 0 -- 目标地图 ID
   local mapNodes = Toolbox.Data and Toolbox.Data.NavigationMapNodes and Toolbox.Data.NavigationMapNodes.nodes or {} -- 地图基础节点
   local manualData = Toolbox.Data and Toolbox.Data.NavigationManualEdges or {} -- 手工玩法路径数据
+  local taxiData = Toolbox.Data and Toolbox.Data.NavigationTaxiEdges or {} -- 模拟公共交通路径数据
   local targetRules = type(manualData.targetRules) == "table" and manualData.targetRules or {} -- 目标规则表
   local targetRule = targetRules[targetMapID] or {} -- 当前目标规则
   local targetNodeId = "target" -- 目标节点 ID
   local targetNode = mapNodes[targetMapID] -- 目标地图节点
   local targetName = tostring((target and target.name) or (targetNode and targetNode.Name_lang) or ("Map #" .. tostring(targetMapID))) -- 目标显示名
   local directLabel = "前往" .. targetName -- 直接前往步骤文案
+  local mergedNodes = {} -- 手工节点与模拟公共交通节点的合并视图
   local routeGraph = {
     nodes = {
       current = { id = "current", name = "当前位置" },
       target = { id = targetNodeId, name = targetName },
     },
     edges = {
-      { from = "current", to = targetNodeId, cost = tonumber(targetRule.directCost) or 180, label = directLabel },
+      { from = "current", to = targetNodeId, cost = buildDirectTargetCost(target, availabilityContext, targetRule), label = directLabel },
     },
   } -- 第一版目标路径图
 
   for nodeId, nodeDef in pairs(type(manualData.nodes) == "table" and manualData.nodes or {}) do
-    if type(nodeDef) == "table" then
-      routeGraph.nodes[nodeId] = {
-        id = nodeId,
-        name = nodeDef.Name_lang or tostring(nodeId),
-      }
+    mergedNodes[nodeId] = nodeDef
+  end
+  for nodeId, nodeDef in pairs(type(taxiData.nodes) == "table" and taxiData.nodes or {}) do
+    if mergedNodes[nodeId] == nil then
+      mergedNodes[nodeId] = nodeDef
     end
   end
 
-  for _, edge in ipairs(type(manualData.edges) == "table" and manualData.edges or {}) do
-    routeGraph.edges[#routeGraph.edges + 1] = edge
-  end
-
-  addCurrentLocationEdges(routeGraph, manualData, availabilityContext)
+  addRouteGraphNodes(routeGraph, mergedNodes)
+  addRouteGraphEdges(routeGraph, manualData.edges)
+  addRouteGraphEdges(routeGraph, taxiData.edges)
+  addCurrentLocationEdges(routeGraph, mergedNodes, availabilityContext)
 
   for _, viaNodeDef in ipairs(type(targetRule.viaNodes) == "table" and targetRule.viaNodes or {}) do
-    addTargetViaNodeEdge(routeGraph, viaNodeDef, targetNodeId, targetName)
+    addTargetViaNodeEdge(routeGraph, viaNodeDef, target, targetNodeId, targetName)
   end
 
   return routeGraph
