@@ -28,27 +28,6 @@ local function printNavigationMessage(messageText)
   end
 end
 
---- 从 Vector2DMixin 或普通表读取归一化坐标。
----@param vectorValue table|nil 地图坐标对象
----@return number|nil, number|nil
-local function readVectorXY(vectorValue)
-  if type(vectorValue) ~= "table" then
-    return nil, nil
-  end
-  if type(vectorValue.GetXY) == "function" then
-    local success, x, y = pcall(vectorValue.GetXY, vectorValue) -- GetXY 返回值
-    if success and type(x) == "number" and type(y) == "number" then
-      return x, y
-    end
-  end
-  local x = vectorValue.x -- 坐标 X
-  local y = vectorValue.y -- 坐标 Y
-  if type(x) ~= "number" or type(y) ~= "number" then
-    return nil, nil
-  end
-  return x, y
-end
-
 --- 读取当前用户 waypoint。
 ---@return number|nil, number|nil, number|nil
 local function getUserWaypointTarget()
@@ -64,7 +43,7 @@ local function getUserWaypointTarget()
   end
 
   local mapID = tonumber(pointValue.uiMapID) -- waypoint 地图 ID
-  local targetX, targetY = readVectorXY(pointValue.position) -- waypoint 坐标
+  local targetX, targetY = Toolbox.Navigation.ReadVectorXY(pointValue.position) -- waypoint 坐标
   if not mapID or mapID <= 0 or type(targetX) ~= "number" or type(targetY) ~= "number" then
     return nil, nil, nil
   end

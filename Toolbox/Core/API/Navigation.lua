@@ -156,7 +156,7 @@ function Toolbox.Navigation.FindShortestPath(routeGraph, startNodeId, targetNode
 
   while true do
     local currentNodeId = popLowestCostNode(unvisited, costByNode) -- 当前展开节点
-    if currentNodeId == nil then
+    if currentNodeId == nil or costByNode[currentNodeId] == math.huge then
       break
     end
     if currentNodeId == targetNodeId then
@@ -241,6 +241,7 @@ local function readVectorXY(vectorValue)
   end
   return x, y
 end
+Toolbox.Navigation.ReadVectorXY = readVectorXY
 
 --- 判断归一化坐标是否合法。
 ---@param x number|nil 坐标 X
@@ -442,6 +443,7 @@ local function buildRouteMapCandidateSet(mapID, mapNodes)
     currentMapID = tonumber(nodeDef and nodeDef.ParentUiMapID) -- 父地图 ID
     guardCount = guardCount + 1
   end
+  -- guardCount >= 16: 父链异常过长，静默截断以避免死循环
 
   return candidateSet
 end
@@ -530,7 +532,7 @@ local function resolveRouteMapID(rawMapID, resolvedAtPositionMapID, mapNodes, ed
     elseif mapType < 3 then
       mapTypeRank = 3
     end
-    local score = string.format("%d:%d:%05d", mapTypeRank, degree > 0 and 0 or 1, candidateMapID) -- 候选排序分数
+    local score = mapTypeRank * 10000000 + (degree > 0 and 0 or 100000) + candidateMapID -- 候选排序分数
     if bestScore == nil or score < bestScore then
       bestScore = score
       bestMapID = candidateMapID

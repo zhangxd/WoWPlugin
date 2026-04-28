@@ -64,6 +64,7 @@ local function ensureRouteBarFrame()
   textFontString:SetPoint("LEFT", routeBarFrame, "LEFT", 12, 0)
   textFontString:SetPoint("RIGHT", routeBarFrame, "RIGHT", -12, 0)
   textFontString:SetJustifyH("CENTER")
+  textFontString:SetWordWrap(true)
   textFontString:SetText("")
   routeBarFrame._textFontString = textFontString
 
