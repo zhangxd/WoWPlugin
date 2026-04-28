@@ -328,71 +328,6 @@ function Toolbox.SettingsHost:BuildOverviewModuleList(child, startY)
   return y
 end
 
---- 构建总览页里的效果预览区。
----@param child Frame 页面根 child
----@param startY number 当前纵向游标
----@return number
-function Toolbox.SettingsHost:BuildPreviewSection(child, startY)
-  local L = Toolbox.L
-  local y = startY
-
-  local title = child:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  title:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  title:SetText(L.SETTINGS_PREVIEW_TITLE)
-  y = y - 22
-
-  local intro = child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  intro:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  intro:SetWidth(580)
-  intro:SetJustifyH("LEFT")
-  intro:SetText(L.SETTINGS_PREVIEW_INTRO)
-  y = y - 36
-
-  local box = CreateFrame("Frame", "ToolboxSettingsPreviewBox", child, "BackdropTemplate")
-  box:SetSize(620, 200)
-  box:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  box:SetBackdrop({
-    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-    tile = true,
-    tileSize = 32,
-    edgeSize = 16,
-    insets = { left = 4, right = 4, top = 4, bottom = 4 },
-  })
-  box:SetBackdropColor(0, 0, 0, 0.35)
-
-  local subTT = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  subTT:SetPoint("TOPLEFT", 12, -12)
-  subTT:SetText(L.SETTINGS_PREVIEW_TOOLTIP_SUB)
-
-  local ttBtn = CreateFrame("Button", nil, box, "UIPanelButtonTemplate")
-  ttBtn:SetSize(280, 26)
-  ttBtn:SetPoint("TOPLEFT", subTT, "BOTTOMLEFT", 0, -8)
-  ttBtn:SetText(L.SETTINGS_PREVIEW_TOOLTIP_BTN)
-  ttBtn:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_NONE")
-    if GameTooltip_SetDefaultAnchor then
-      GameTooltip_SetDefaultAnchor(GameTooltip, self)
-    end
-    GameTooltip:ClearLines()
-    GameTooltip:AddLine(L.SETTINGS_PREVIEW_TOOLTIP_LINE1, 1, 1, 1)
-    GameTooltip:AddLine(L.SETTINGS_PREVIEW_TOOLTIP_LINE2, 0.75, 0.85, 1)
-    GameTooltip:Show()
-  end)
-  ttBtn:SetScript("OnLeave", function()
-    GameTooltip:Hide()
-  end)
-
-  local moverHint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  moverHint:SetPoint("TOPLEFT", ttBtn, "BOTTOMLEFT", 0, -14)
-  moverHint:SetWidth(560)
-  moverHint:SetJustifyH("LEFT")
-  moverHint:SetText(L.SETTINGS_PREVIEW_MOVER)
-
-  y = y - 200 - 16
-  return y
-end
-
 --- 构建模块页公共区（启用、调试、清理并重建）。
 ---@param child Frame 页面根 child
 ---@param startY number 当前纵向游标
@@ -468,7 +403,6 @@ function Toolbox.SettingsHost:BuildOverviewPage(page)
   y = self:BuildLanguageSection(child, y)
   y = self:BuildReloadSection(child, y)
   y = self:BuildOverviewModuleList(child, y)
-  y = self:BuildPreviewSection(child, y)
   setChildHeight(child, y)
 end
 

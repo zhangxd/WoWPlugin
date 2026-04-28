@@ -486,32 +486,6 @@ Toolbox.RegisterModule({
     local moduleDb = getModuleDb() -- 模块存档
     local yOffset = 0 -- 当前纵向游标
 
-    local mountFilterCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 坐骑筛选开关
-    mountFilterCheck:SetPoint("TOPLEFT", 20, yOffset)
-    mountFilterCheck.Text:SetText(localeTable.DRD_MOUNT_FILTER_ENABLED or "在冒险指南中筛选坐骑")
-    mountFilterCheck:SetChecked(moduleDb.mountFilterEnabled ~= false)
-    mountFilterCheck:SetScript("OnClick", function(checkButton)
-      moduleDb.mountFilterEnabled = checkButton:GetChecked()
-      MountFilter:syncCheckbox()
-      if type(_G.EncounterJournal_ListInstances) == "function" then
-        pcall(_G.EncounterJournal_ListInstances)
-      end
-    end)
-    yOffset = yOffset - 36
-
-    local lockoutOverlayCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 锁定叠加开关
-    lockoutOverlayCheck:SetPoint("TOPLEFT", 20, yOffset)
-    lockoutOverlayCheck.Text:SetText(localeTable.EJ_LOCKOUT_OVERLAY_LABEL or "在冒险指南中显示副本 CD")
-    lockoutOverlayCheck:SetChecked(moduleDb.lockoutOverlayEnabled ~= false)
-    lockoutOverlayCheck:SetScript("OnClick", function(checkButton)
-      moduleDb.lockoutOverlayEnabled = checkButton:GetChecked() and true or false
-      if moduleDb.lockoutOverlayEnabled == false then
-        LockoutOverlay:clearAllFrames()
-      end
-      RefreshScheduler:schedule("settings_change")
-    end)
-    yOffset = yOffset - 36
-
     local pinAlwaysVisibleCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 图钉常驻显示开关
     pinAlwaysVisibleCheck:SetPoint("TOPLEFT", 20, yOffset)
     pinAlwaysVisibleCheck.Text:SetText(localeTable.EJ_LIST_PIN_ALWAYS_VISIBLE_LABEL or "定位图标常驻显示")
@@ -519,16 +493,6 @@ Toolbox.RegisterModule({
     pinAlwaysVisibleCheck:SetScript("OnClick", function(checkButton)
       moduleDb.listPinAlwaysVisible = checkButton:GetChecked() and true or false
       ListNavigationPin:updateFrames()
-    end)
-    yOffset = yOffset - 36
-
-    local detailMountOnlyCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 详情页仅坐骑开关
-    detailMountOnlyCheck:SetPoint("TOPLEFT", 20, yOffset)
-    detailMountOnlyCheck.Text:SetText(localeTable.EJ_DETAIL_MOUNT_ONLY_LABEL or "详情页仅显示坐骑")
-    detailMountOnlyCheck:SetChecked(moduleDb.detailMountOnlyEnabled == true)
-    detailMountOnlyCheck:SetScript("OnClick", function(checkButton)
-      moduleDb.detailMountOnlyEnabled = checkButton:GetChecked() and true or false
-      DetailEnhancer:refresh()
     end)
     yOffset = yOffset - 36
 

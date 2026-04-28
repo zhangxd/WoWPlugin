@@ -41,10 +41,10 @@ function Internal.IsMountFilterChecked()
   return Internal.GetModuleDb().mountFilterEnabled == true
 end
 
---- 检查列表锁定叠加是否启用。
+--- 检查列表锁定叠加当前是否可运行。
 ---@return boolean
 function Internal.IsOverlayEnabled()
-  return Internal.IsModuleEnabled() and Internal.GetModuleDb().lockoutOverlayEnabled ~= false
+  return Internal.IsModuleEnabled()
 end
 
 --- 检查副本列表图钉是否常驻显示。

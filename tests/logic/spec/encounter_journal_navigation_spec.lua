@@ -408,7 +408,6 @@ describe("EncounterJournal entrance navigation", function()
     })
 
     harness.moduleDb.listPinAlwaysVisible = false
-
     local encounterJournalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal", UIParent) -- 冒险指南根框体
     local instanceSelectFrame = harness.runtime.CreateFrame("Frame", nil, encounterJournalFrame) -- 副本列表面板
     local scrollBoxFrame = harness.runtime.CreateFrame("Frame", nil, instanceSelectFrame) -- 列表滚动框
@@ -528,7 +527,6 @@ describe("EncounterJournal entrance navigation", function()
     })
 
     harness.moduleDb.listPinAlwaysVisible = false
-
     local encounterJournalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal", UIParent) -- 冒险指南根框体
     local instanceSelectFrame = harness.runtime.CreateFrame("Frame", nil, encounterJournalFrame) -- 副本列表面板
     local scrollBoxFrame = harness.runtime.CreateFrame("Frame", nil, instanceSelectFrame) -- 列表滚动框

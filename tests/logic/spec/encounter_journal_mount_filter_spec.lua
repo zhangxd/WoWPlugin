@@ -28,6 +28,34 @@ local function buildDataProvider()
   return provider
 end
 
+local function buildLootDataProvider()
+  local provider = { -- 详情页战利品数据源替身
+    records = {
+      { itemID = 111 },
+      { itemID = 222 },
+    },
+    removeCount = 0,
+  }
+
+  function provider:ForEach(visitorFunc)
+    for _, elementData in ipairs(self.records) do
+      visitorFunc(elementData)
+    end
+  end
+
+  function provider:Remove(targetElementData)
+    for index = #self.records, 1, -1 do
+      if self.records[index] == targetElementData then
+        table.remove(self.records, index)
+        self.removeCount = self.removeCount + 1
+        break
+      end
+    end
+  end
+
+  return provider
+end
+
 describe("EncounterJournal mount filter", function()
   local harness = nil -- 测试 harness
   local dataProvider = nil -- 列表数据源
@@ -90,6 +118,47 @@ describe("EncounterJournal mount filter", function()
     scheduler:execute()
 
     assert.is_nil(_G.ToolboxEJDetailMountOnlyCheck)
+  end)
+
+  it("detail_panel_no_longer_filters_loot_to_mount_only", function()
+    local lootDataProvider = buildLootDataProvider() -- 详情页战利品数据源
+    harness.moduleDb.detailMountOnlyEnabled = true
+
+    local encounterJournalFrame = _G.EncounterJournal -- 冒险手册根框体
+    local encounterFrame = harness.runtime.CreateFrame("Frame", nil, encounterJournalFrame) -- 首领详情面板
+    local infoFrame = harness.runtime.CreateFrame("Frame", nil, encounterFrame) -- 首领详情信息面板
+    local lootContainer = harness.runtime.CreateFrame("Frame", nil, infoFrame) -- 战利品容器
+    lootContainer:Show()
+    lootContainer.ScrollBox = {
+      GetDataProvider = function()
+        return lootDataProvider
+      end,
+    }
+    infoFrame.LootContainer = lootContainer
+    encounterFrame.info = infoFrame
+    encounterJournalFrame.encounter = encounterFrame
+    encounterJournalFrame.instanceID = 101
+
+    infoFrame:Show()
+    encounterFrame:Show()
+
+    local originalGetCurrentInstance = _G.EJ_GetCurrentInstance -- 旧 EJ 当前副本查询
+    _G.EJ_GetCurrentInstance = function()
+      return 101
+    end
+    Toolbox.EJ.GetMountItemSetForInstance = function()
+      return {
+        [111] = true,
+      }
+    end
+
+    local scheduler = Toolbox.TestHooks.EncounterJournal:getRefreshScheduler() -- 刷新调度器
+    scheduler:execute()
+
+    assert.equals(0, lootDataProvider.removeCount)
+    assert.equals(2, #lootDataProvider.records)
+
+    _G.EJ_GetCurrentInstance = originalGetCurrentInstance
   end)
 
   it("lockout_label_shows_only_on_instance_title_when_lockout_exists", function()

@@ -11,7 +11,7 @@
   - `docs/designs/encounter-journal-design.md`
   - `docs/tests/encounter-journal-test.md`
   - `docs/plans/quest-plan.md`
-- 最后更新：2026-04-27
+- 最后更新：2026-04-29
 
 ## 1. 目标
 
@@ -19,6 +19,7 @@
 - 新增副本列表条目右下角图钉按钮：点击后打开目标地图，创建系统用户 waypoint，并启用系统导航追踪。
 - 在现有图钉导航基础上补齐副本列表焦点态、双击进入、图钉高亮版与“定位图标常驻显示”设置。
 - 新增 DB 导出的静态副本入口表，补足运行时入口 API 对旧副本分翼的精确入口缺口。
+- 收口 `encounter_journal` 设置页与相关持久化：删除 3 个已确认废弃的设置项，保留并记忆列表“仅坐骑”，固定开启列表 CD 叠加，并删除详情页“仅坐骑”功能。
 
 ## 2. 输入文档
 
@@ -27,7 +28,7 @@
 - 设计：
   `docs/designs/encounter-journal-design.md`
 - 其他约束：
-  当前代码实现是唯一事实来源；任务能力已拆到 `quest` 模块；导航入口已由用户在 2026-04-27 回复“开动”确认，并在后续反馈中修正为副本列表条目右下角图钉；同日又确认未勾选常驻显示时按“焦点或悬停显示”规则，双击进入副本。2026-04-27 用户再次确认 DB 静态入口方案：从 `wow.db` 导出精确入口，选中 / 点击冒险指南条目时按 `journalInstanceID` 直接读取静态表；2026-04-27 修正为精确 `areapoi` 优先，缺失时再使用 `journalinstanceentrance`。
+  当前代码实现是唯一事实来源；任务能力已拆到 `quest` 模块；导航入口已由用户在 2026-04-27 回复“开动”确认，并在后续反馈中修正为副本列表条目右下角图钉；同日又确认未勾选常驻显示时按“焦点或悬停显示”规则，双击进入副本。2026-04-27 用户再次确认 DB 静态入口方案：从 `wow.db` 导出精确入口，选中 / 点击冒险指南条目时按 `journalInstanceID` 直接读取静态表；2026-04-27 修正为精确 `areapoi` 优先，缺失时再使用 `journalinstanceentrance`。2026-04-29 用户确认设置精简口径：删除 3 个设置项；保留并记忆列表“仅坐骑”；列表 CD 叠加固定开启；详情页“仅坐骑”删除。
 
 ## 3. 影响文件
 
@@ -50,6 +51,7 @@
   - `docs/FEATURES.md`
   - `docs/Toolbox-addon-design.md`
   - `tests/validate_settings_subcategories.py`
+  - `tests/logic/spec/encounter_journal_mount_filter_spec.lua`
   - `tests/validate_data_contracts.py`（如校验需要识别新结构）
   - `tests/logic/spec/encounter_journal_navigation_spec.lua`
   - `scripts/export/tests/test_contract_export.py`（如新增契约路径测试需要覆盖）
@@ -79,11 +81,16 @@
 - [x] 步骤 18：为 `Toolbox.EJ` 写失败中的逻辑测试：运行时入口 API 无 `1277` 精确记录时，静态入口表可命中 `1277` 并调用 `C_Map.GetMapPosFromWorldPos` / waypoint API。
 - [x] 步骤 19：实现 `Toolbox.EJ` 静态入口读取：静态 `Toolbox.Data.InstanceEntrances[journalInstanceID]` 优先，运行时入口 API 仅作静态缺失兜底；不使用同 mapID / 同名 / 同组猜测。
 - [x] 步骤 20：更新功能、测试与总设计文档，记录静态入口数据来源、覆盖口径、已知限制和验证结果。
-
+- [x] 步骤 21：先修改自动化测试，锁定“设置页删除 3 项、列表仅坐骑保留并记忆、列表 CD 叠加固定开启、详情页仅坐骑删除”的新口径。
+- [x] 步骤 22：运行最小相关测试，确认旧代码按预期失败。
+- [x] 步骤 23：删除 `lockoutOverlayEnabled`、`detailMountOnlyEnabled` 的默认值、迁移、文案和业务分支；设置页删除对应 3 个选项。
+- [x] 步骤 24：保留 `mountFilterEnabled` 作为副本列表“仅坐骑”按钮记忆状态，并清理不再需要的设置页文案 / 判断逻辑。
+- [x] 步骤 25：删除详情页“仅坐骑”按钮与过滤逻辑，同时保留详情页重置标签。
+- [x] 步骤 26：更新功能 / 设计 / 测试 / 总设计文档并跑全量验证。
 ## 5. 验证
 
 - 命令 / 检查点 1：
-  `python tests/run_all.py --ci`：已通过，逻辑测试 115 successes / 0 failures / 0 errors。
+  `python tests/run_all.py --ci`：已通过，逻辑测试 125 successes / 0 failures / 0 errors。
 - 命令 / 检查点 2：
   搜索 `docs/**` 中 `encounter_journal` 与“任务页签 / Quest Inspector / rootTab”组合的残留错位表述。
 - 游戏内验证点：
@@ -92,6 +99,8 @@
   `Toolbox/Data/InstanceEntrances.lua` 文件头符合数据库生成文件规范；`Toolbox.Data.InstanceEntrances.entrances[230]` 使用 `areapoi` / `AreaPoiID=6501`，不再混入分翼门候选；`Toolbox.Data.InstanceEntrances.entrances[1277]` 包含来源为 `journalinstanceentrance` 的精确入口记录。
 - 游戏内新增验证点：
   `厄运之槌 - 戈多克议会` 在运行时入口 API 未返回 `1277` 精确入口时，仍能通过静态入口数据设置导航；若坐标转换失败，插件给出不可用提示且不报错。
+- 行为新增验证点：
+  设置页不再出现“在冒险指南中筛选坐骑”“在冒险指南中显示副本CD”“仅坐骑”；副本列表“仅坐骑”按钮仍可切换并在重开后记忆；详情页不再出现“仅坐骑”按钮。
 
 ## 6. 风险与回滚
 
@@ -112,6 +121,9 @@
 - 2026-04-27 已修正 `厄运之槌 - 中心花园` 静态数据来源：`instance_entrances` 升级到 schema v2，精确 `areapoi` 优先，`230` 命中 `AreaPoiID=6501`。
 - 2026-04-28 已修正 `Toolbox.EJ` 入口读取优先级：静态 `InstanceEntrances` 为主，运行时入口 API 不再抢占静态数据。
 - 2026-04-28 已修正静态入口目标区域地图：`instance_entrances` 升级到 schema v3，从实例地图父 UiMap 推导 `HintUiMapID`；`230 厄运之槌 - 中心花园` 现在导出 `HintUiMapID=69`。
+- 2026-04-29 已将新确认规则写回需求 / 设计 / 计划：删除 3 个设置项；保留并记忆列表“仅坐骑”；固定开启列表 CD 叠加；删除详情页“仅坐骑”按钮与功能。
+- 2026-04-29 已按 TDD 落地本轮业务代码，并通过 `python tests/validate_settings_subcategories.py` 与 `busted tests/logic/spec/encounter_journal_mount_filter_spec.lua` 定向验证。
+- 2026-04-29 已完成文档回写与全量自动化验证：`python tests/run_all.py --ci` 通过，计划收口为已完成。
 
 ## 8. 修订记录
 
@@ -123,3 +135,5 @@
 | 2026-04-27 | 用户反馈修正：导航入口落点改为副本列表条目右下角图钉 |
 | 2026-04-27 | 用户确认列表交互增强：追加焦点 / 双击 / 常驻显示设置的实现步骤 |
 | 2026-04-27 | 用户确认 DB 静态入口方案：追加 `instance_entrances` 契约导出、TOC 加载与 `Toolbox.EJ` 静态入口兜底步骤 |
+| 2026-04-29 | 用户确认设置精简方案：计划重开，追加删除 3 个设置项与对应存档/详情页功能收口步骤 |
+| 2026-04-29 | 本轮执行完成：设置收口、详情页过滤移除与全量自动化验证已落地 |

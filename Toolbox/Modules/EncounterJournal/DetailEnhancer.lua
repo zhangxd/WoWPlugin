@@ -522,81 +522,6 @@ local function isEncounterDetailVisible()
   return false
 end
 
-local function isEncounterLootTabVisible()
-  local info = getEncounterInfoFrame()
-  if not info then
-    return false
-  end
-
-  local lootContainer = info.LootContainer or info.lootContainer
-  if lootContainer and lootContainer.IsShown then
-    local ok, shown = pcall(function() return lootContainer:IsShown() end)
-    if ok and shown == true then
-      return true
-    end
-  end
-
-  local lootTab = _G.EncounterJournalEncounterFrameInfoLootTab
-  if lootTab and lootTab.IsShown then
-    local ok, shown = pcall(function() return lootTab:IsShown() end)
-    if ok and shown == true then
-      return true
-    end
-  end
-
-  return false
-end
-
-local function parseItemIDFromLink(linkText)
-  if type(linkText) ~= "string" then
-    return nil
-  end
-  local itemID = tonumber(linkText:match("item:(%d+)"))
-  return itemID
-end
-
-local function extractItemIDFromAny(value, seen)
-  if type(value) == "number" then
-    return value
-  end
-  if type(value) == "string" then
-    return parseItemIDFromLink(value)
-  end
-  if type(value) ~= "table" then
-    return nil
-  end
-  seen = seen or {}
-  if seen[value] then
-    return nil
-  end
-  seen[value] = true
-
-  local direct = value.itemID or value.itemId or value.id
-  if type(direct) == "number" then
-    return direct
-  end
-
-  local fromLink = parseItemIDFromLink(value.link or value.itemLink or value.hyperlink)
-  if type(fromLink) == "number" then
-    return fromLink
-  end
-
-  local nestedCandidates = {
-    value.item,
-    value.data,
-    value.info,
-    value.elementData,
-    value.itemData,
-  }
-  for _, nested in ipairs(nestedCandidates) do
-    local nestedItemID = extractItemIDFromAny(nested, seen)
-    if type(nestedItemID) == "number" then
-      return nestedItemID
-    end
-  end
-  return nil
-end
-
 local function getDetailDifficultyControl()
   local info = getEncounterInfoFrame()
   if not info then
@@ -681,10 +606,6 @@ local DetailEnhancer = {
   lockoutLabel = nil,
 }
 
-function DetailEnhancer:isMountOnlyEnabled()
-  return getModuleDb().detailMountOnlyEnabled == true
-end
-
 function DetailEnhancer:ensureLockoutLabel()
   if self.lockoutLabel then
     return
@@ -763,64 +684,10 @@ function DetailEnhancer:updateLockoutLabel()
   end
 end
 
-function DetailEnhancer:applyMountOnlyFilter()
-  if not isModuleEnabled() or not self:isMountOnlyEnabled() or not isEncounterLootTabVisible() then
-    return
-  end
-
-  local journalInstanceID = getCurrentDetailJournalInstanceID()
-  if type(journalInstanceID) ~= "number" then
-    return
-  end
-  local mountSet = Toolbox.EJ and Toolbox.EJ.GetMountItemSetForInstance and Toolbox.EJ.GetMountItemSetForInstance(journalInstanceID) or nil
-  if type(mountSet) ~= "table" then
-    return
-  end
-
-  local info = getEncounterInfoFrame()
-  local lootContainer = info and (info.LootContainer or info.lootContainer)
-  local scrollBox = lootContainer and (lootContainer.ScrollBox or lootContainer.scrollBox) or nil
-  if scrollBox and type(scrollBox.GetDataProvider) == "function" then
-    local ok, dataProvider = pcall(function() return scrollBox:GetDataProvider() end)
-    if ok and type(dataProvider) == "table" and type(dataProvider.ForEach) == "function" and type(dataProvider.Remove) == "function" then
-      local toRemove = {}
-      pcall(function()
-        dataProvider:ForEach(function(elementData)
-          local itemID = extractItemIDFromAny(elementData)
-          if type(itemID) == "number" and not mountSet[itemID] then
-            toRemove[#toRemove + 1] = elementData
-          end
-        end)
-      end)
-      for _, elementData in ipairs(toRemove) do
-        pcall(function() dataProvider:Remove(elementData) end)
-      end
-      return
-    end
-  end
-
-  -- 旧版兜底：尝试隐藏已创建的条目按钮（无 DataProvider 时）。
-  local fallbackButtons = {}
-  for index = 1, 60 do
-    local button = _G["EncounterJournalLoot" .. index]
-    if button then
-      fallbackButtons[#fallbackButtons + 1] = button
-    end
-  end
-  for _, button in ipairs(fallbackButtons) do
-    local itemID = extractItemIDFromAny(button)
-    if type(itemID) == "number" then
-      button:SetShown(mountSet[itemID] == true)
-    end
-  end
-end
-
 function DetailEnhancer:refresh()
   self:ensureLockoutLabel()
-  -- 详情页右侧“仅坐骑”按钮已移除，避免与列表筛选入口重复。
   self:updateVisibility()
   self:updateLockoutLabel()
-  self:applyMountOnlyFilter()
 end
 
 Internal.MountFilter = MountFilter

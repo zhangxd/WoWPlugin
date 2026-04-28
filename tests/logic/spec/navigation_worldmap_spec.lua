@@ -46,6 +46,12 @@ describe("Navigation WorldMap integration", function()
         GetRequiredSpellIDList = function()
           return { 3567, 32272, 3566, 3563, 35715, 50977, 193753, 18960, 126892 }
         end,
+        ReadVectorXY = function(vectorValue)
+          if type(vectorValue) ~= "table" then
+            return nil, nil
+          end
+          return vectorValue.x, vectorValue.y
+        end,
         BuildCurrentCharacterAvailability = function(spellIDList)
           assert.same({ 3567, 32272, 3566, 3563, 35715, 50977, 193753, 18960, 126892 }, spellIDList)
           return {

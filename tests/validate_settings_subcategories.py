@@ -70,6 +70,10 @@ def validate_settings_host() -> None:
 
     if "BuildDungeonRaidDirectorySection" in text:
         raise AssertionError("legacy directory section builder should be removed from SettingsHost")
+    if "BuildPreviewSection" in text:
+        raise AssertionError("settings overview preview section builder should be removed from SettingsHost")
+    if "SETTINGS_PREVIEW_" in text:
+        raise AssertionError("settings overview preview locale references should be removed from SettingsHost")
 
 
 def validate_config() -> None:
@@ -83,7 +87,6 @@ def validate_config() -> None:
         ("tooltip_anchor = {", "tooltip defaults"),
         ("encounter_journal = {", "encounter journal module defaults"),
         ("mountFilterEnabled = true", "encounter journal mount filter default"),
-        ("lockoutOverlayEnabled = true", "encounter journal lockout overlay default"),
         ("navigation = {", "navigation module defaults"),
         ("lastTargetUiMapID = 0", "navigation last target map default"),
         ("quest = {", "quest module defaults"),
@@ -96,6 +99,16 @@ def validate_config() -> None:
         ("debug = false", "module debug defaults"),
     ]:
         require_contains(text, needle, label)
+    if "lockoutOverlayEnabled = true" in text:
+        raise AssertionError("encounter journal lockout overlay default should be removed from config defaults")
+    if "detailMountOnlyEnabled = false" in text:
+        raise AssertionError("encounter journal detail mount-only default should be removed from config defaults")
+    if "drd.ejLockoutOverlayEnabled" in text:
+        raise AssertionError("encounter journal legacy overlay migration should be removed from config")
+    if "encJournalDb.lockoutOverlayEnabled = drd.ejLockoutOverlayEnabled" in text:
+        raise AssertionError("encounter journal overlay migration assignment should be removed from config")
+    if "encJournalDb.ejLockoutOverlayEnabled" in text:
+        raise AssertionError("encounter journal legacy overlay alias cleanup should be removed from config")
 
 
 def validate_module_registry() -> None:
@@ -144,6 +157,16 @@ def validate_locales() -> None:
         ("MODULE_MINIMAP_BUTTON", "minimap button module locale"),
     ]:
         require_contains(text, needle, label)
+    if "SETTINGS_PREVIEW_" in text:
+        raise AssertionError("preview-only settings locale keys should be removed from Locales")
+    for removed_key in [
+        "DRD_MOUNT_FILTER_ENABLED",
+        "EJ_LOCKOUT_OVERLAY_LABEL",
+        "EJ_DETAIL_MOUNT_ONLY_LABEL",
+        "EJ_DETAIL_MOUNT_ONLY_HINT",
+    ]:
+        if removed_key in text:
+            raise AssertionError(f"encounter journal removed locale key should not remain: {removed_key}")
 
 
 def validate_modules() -> None:
@@ -233,6 +256,15 @@ def validate_encounter_journal_regressions() -> None:
     require_contains(text, "return Toolbox.EJ.IsRaidOrDungeonInstanceListTab() == true", "encounter journal mount filter visibility delegates to ej domain api")
     require_contains(text, "local anchorTarget = instSel.ExpansionDropdown or instSel", "encounter journal mount filter anchor falls back when expansion dropdown missing")
     require_contains(text, "if Toolbox.EJ.IsRaidOrDungeonInstanceListTab() ~= true then", "encounter journal lockout overlay is gated by raid or dungeon tab")
+    require_contains(text, "moduleDb.mountFilterEnabled = btn:GetChecked() and true or false", "encounter journal mount filter button persists state")
+    if "DRD_MOUNT_FILTER_ENABLED" in text:
+        raise AssertionError("encounter journal settings page should not keep mount filter setting label")
+    if "lockoutOverlayEnabled" in text:
+        raise AssertionError("encounter journal runtime should not keep overlay toggle setting references")
+    if "detailMountOnlyEnabled" in text:
+        raise AssertionError("encounter journal runtime should not keep detail mount-only setting references")
+    if "applyMountOnlyFilter" in text:
+        raise AssertionError("encounter journal detail mount-only filter implementation should be removed")
     require_contains(text, "local instId = elementData.instanceID or elementData.journalInstanceID", "encounter journal instance id extraction uses dedicated fields")
     if "elementData.id" in text:
         raise AssertionError("encounter journal instance id extraction should not fallback to generic elementData.id")
@@ -365,25 +397,24 @@ def validate_encounter_journal_detail_page_feature() -> None:
     api_text = read_text("Toolbox", "Core", "API", "EncounterJournal.lua")
     module_text = read_encounter_journal_bundle_text()
 
-    # 模块存档：详情页“仅坐骑”开关状态。
-    require_contains(config_text, "detailMountOnlyEnabled", "encounter journal detail mount-only setting default")
-
-    # 领域 API：详情页筛选与难度匹配锁定查询所需接口。
-    require_contains(api_text, "function Toolbox.EJ.GetMountItemSetForInstance(", "ej api mount item set helper")
+    # 领域 API：详情页锁定标签所需接口。
     require_contains(api_text, "function Toolbox.EJ.GetSelectedDifficultyID(", "ej api selected difficulty helper")
     require_contains(api_text, "function Toolbox.EJ.GetLockoutForInstanceAndDifficulty(", "ej api difficulty lockout helper")
 
-    # 详情页增强：仅坐骑筛选 + 标题后锁定文本。
-    require_contains(module_text, "detailMountOnlyEnabled", "encounter journal module uses detail mount-only setting")
+    # 详情页增强：仅保留标题后锁定文本。
     require_contains(module_text, "EncounterJournal_LootUpdate", "encounter journal hooks detail loot update")
     require_contains(module_text, "EJ_SetDifficulty", "encounter journal hooks difficulty switch")
-    require_contains(module_text, "EJ_DETAIL_MOUNT_ONLY_LABEL", "encounter journal detail mount-only locale key")
     require_contains(module_text, "EJ_DETAIL_LOCKOUT_FMT", "encounter journal detail lockout locale key")
 
-    # 本地化：详情页筛选与“重置：xxxx”文案键。
-    require_contains(locale_text, "EJ_DETAIL_MOUNT_ONLY_LABEL", "locale detail mount-only label")
+    # 本地化：仅保留“重置：xxxx”文案键。
     require_contains(locale_text, "EJ_DETAIL_LOCKOUT_FMT", "locale detail lockout format")
     require_contains(locale_text, "EJ_DETAIL_LOCKOUT_NONE", "locale detail lockout empty")
+    if "detailMountOnlyEnabled" in config_text:
+        raise AssertionError("encounter journal detail mount-only setting should be removed from config")
+    if "EJ_DETAIL_MOUNT_ONLY_LABEL" in locale_text or "EJ_DETAIL_MOUNT_ONLY_HINT" in locale_text:
+        raise AssertionError("encounter journal detail mount-only locale keys should be removed")
+    if "detailMountOnlyEnabled" in module_text or "applyMountOnlyFilter" in module_text:
+        raise AssertionError("encounter journal detail mount-only behavior should be removed from module code")
 
 
 def validate_encounter_journal_micro_button_tooltip_lockouts_feature() -> None:

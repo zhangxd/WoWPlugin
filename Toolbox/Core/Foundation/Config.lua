@@ -67,8 +67,6 @@ local defaults = {
       enabled = true,
       debug = false,
       mountFilterEnabled = true,
-      lockoutOverlayEnabled = true,
-      detailMountOnlyEnabled = false,
       -- 副本列表入口图钉是否常驻显示；false 时仅焦点行或悬停行显示
       listPinAlwaysVisible = false,
     },
@@ -217,23 +215,11 @@ function Toolbox.Config.Init()
       if encJournalDb.mountFilterEnabled == nil and drd.mountFilterEnabled ~= nil then
         encJournalDb.mountFilterEnabled = drd.mountFilterEnabled
       end
-      if encJournalDb.lockoutOverlayEnabled == nil and drd.ejLockoutOverlayEnabled ~= nil then
-        encJournalDb.lockoutOverlayEnabled = drd.ejLockoutOverlayEnabled
-      end
       if encJournalDb.enabled == nil and drd.enabled ~= nil then
         encJournalDb.enabled = drd.enabled
       end
       ToolboxDB.modules.encounter_journal = encJournalDb
       ToolboxDB.modules.dungeon_raid_directory = nil
-    end
-
-    -- 清理 encounter_journal 中遗留的旧字段名
-    local encJournalDb = ToolboxDB.modules and ToolboxDB.modules.encounter_journal
-    if type(encJournalDb) == "table" and encJournalDb.ejLockoutOverlayEnabled ~= nil then
-      if encJournalDb.lockoutOverlayEnabled == nil then
-        encJournalDb.lockoutOverlayEnabled = encJournalDb.ejLockoutOverlayEnabled
-      end
-      encJournalDb.ejLockoutOverlayEnabled = nil
     end
 
     -- 清理旧 global.dungeonRaidDirectory 缓存

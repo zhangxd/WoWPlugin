@@ -53,8 +53,6 @@ function Harness.new(options)
       enabled = opts.moduleEnabled ~= false,
       debug = opts.moduleDebug == true,
       mountFilterEnabled = true,
-      lockoutOverlayEnabled = true,
-      detailMountOnlyEnabled = false,
       questlineTreeEnabled = true,
       questNavExpansionID = 0,
       questNavModeKey = "map_questline",

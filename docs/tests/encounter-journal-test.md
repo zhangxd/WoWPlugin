@@ -9,7 +9,7 @@
   - `docs/specs/encounter-journal-spec.md`
   - `docs/designs/encounter-journal-design.md`
   - `docs/plans/encounter-journal-plan.md`
-- 最后更新：2026-04-27
+- 最后更新：2026-04-29
 
 ## 1. 测试背景
 
@@ -42,34 +42,39 @@
 |------|----------|------|----------|
 | TC-AUTO-01 | 测试环境可运行 Python / busted | 执行 `python tests/run_all.py` | 静态校验与逻辑测试通过 |
 | TC-AUTO-02 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | `Toolbox.EJ` 能按 `journalInstanceID` 查找入口、设置 waypoint，并由副本列表行图钉调用 |
-| TC-AUTO-03 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | 副本列表单击建立焦点、悬停临时显示图钉、常驻显示设置生效，双击触发进入行为 |
+| TC-AUTO-03 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | 覆盖列表单击焦点 / 双击进入详情页行为，以及悬停显钉与常驻显示设置 |
 | TC-AUTO-04 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | 当运行时入口 API 只返回聚合副本 ID 时，`Toolbox.EJ` 使用 `Toolbox.Data.InstanceEntrances` 的精确 `journalInstanceID` 记录转换地图坐标 |
 | TC-AUTO-05 | 测试环境可运行 Python | 执行 `python tests/validate_data_contracts.py` | `instance_entrances` 契约、生成文件头和 Lua 根结构通过静态校验；`230 厄运之槌 - 中心花园` 使用 `areapoi` / `AreaPoiID=6501` / `HintUiMapID=69`，`1277` 保留 `journalinstanceentrance` |
 | TC-AUTO-06 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | 当 DB 静态入口存在时，`Toolbox.EJ` 不调用 `C_EncounterJournal.GetDungeonEntrancesForMap` 抢占静态数据 |
-| TC-MANUAL-01 | 打开冒险指南地下城/团队副本列表 | 切换“仅坐骑” | 当前列表被筛选为可掉落坐骑的副本 |
+| TC-AUTO-07 | 测试环境可运行 Python | 执行 `python tests/validate_settings_subcategories.py` | 设置页已删除 3 个旧选项，对应默认值 / 迁移 / 本地化 / 运行时残留均被静态校验拦截 |
+| TC-AUTO-08 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_mount_filter_spec.lua` | 副本列表“仅坐骑”状态继续记忆；详情页不再执行“仅坐骑”过滤 |
+| TC-MANUAL-01 | 打开冒险指南地下城/团队副本列表 | 切换“仅坐骑”，关闭并重新打开冒险指南 | 当前列表被筛选为可掉落坐骑的副本，重开后沿用上次开关状态 |
 | TC-MANUAL-02 | 角色存在副本锁定 | 浏览副本列表 | 列表行内显示重置时间；团队副本显示进度 |
 | TC-MANUAL-03 | 角色存在副本锁定 | 悬停副本列表项 | tooltip 显示锁定详情 |
-| TC-MANUAL-04 | 打开某个副本详情页掉落标签 | 切换“仅坐骑” | 仅显示当前副本掉落中的坐骑物品 |
+| TC-MANUAL-04 | 打开某个副本详情页掉落标签 | 观察标题区与掉落列表工具区 | 不出现“仅坐骑”按钮；标题区仍显示当前难度重置时间或“重置：无” |
 | TC-MANUAL-05 | 打开某个副本详情页 | 查看标题区域 | 显示当前难度重置时间或“重置：无” |
 | TC-MANUAL-06 | 显示小地图“冒险手册”入口或 `EJMicroButton` | 悬停相关入口 | tooltip 显示当前副本锁定摘要 |
-| TC-MANUAL-07 | 打开未开启“定位图标常驻显示”的副本 / 地下城列表 | 单击某个可导航条目，再移开鼠标 | 该条目保持焦点态并显示图钉，其他未焦点条目不显示图钉 |
-| TC-MANUAL-08 | 打开未开启“定位图标常驻显示”的副本 / 地下城列表 | 将鼠标移到非焦点但可导航的条目上 | 该条目在悬停期间显示图钉，移开后恢复隐藏 |
-| TC-MANUAL-09 | 打开副本 / 地下城列表 | 双击某个条目 | 进入该副本，与 Blizzard 默认双击进入行为一致 |
+| TC-MANUAL-07 | 未开启“定位图标常驻显示” | 在副本 / 地下城列表单击某个可导航条目，再移开鼠标 | 该条目保持焦点态并显示图钉，其他未焦点条目不显示图钉 |
+| TC-MANUAL-08 | 未开启“定位图标常驻显示” | 将鼠标移到非焦点但可导航的条目上 | 该条目在悬停期间显示图钉，移开后恢复隐藏 |
+| TC-MANUAL-09 | 未开启“定位图标常驻显示” | 在副本 / 地下城列表双击某个条目 | 进入该副本详情页，沿用 Blizzard 默认进入详情页行为 |
 | TC-MANUAL-10 | 在设置页开启“定位图标常驻显示” | 返回副本 / 地下城列表 | 所有可导航条目常驻显示图钉 |
-| TC-MANUAL-11 | 打开有入口数据的副本 / 地下城列表 | 点击对应列表条目右下角图钉 | 世界地图打开到入口地图，创建系统用户导航点并开始追踪 |
-| TC-MANUAL-12 | 打开无入口数据或不允许设置 waypoint 的副本列表 | 点击对应列表条目右下角图钉 | 插件给出不可用提示，不抛 Lua 错误 |
-| TC-MANUAL-13 | 打开地下城列表并定位到“厄运之槌 - 戈多克议会” | 点击该条目右下角图钉 | 插件命中 DB 静态入口 `1277`，打开菲拉斯 / 厄运之槌入口所在地图并创建系统导航点；不得提示找不到副本入口 |
+| TC-MANUAL-11 | 打开 `/toolbox` 设置页中的“冒险指南”模块 | 检查列表设置项 | 不出现“在冒险指南中筛选坐骑”“在冒险指南中显示副本CD”“仅坐骑”3 个选项 |
+| TC-MANUAL-12 | 打开有入口数据的副本 / 地下城列表 | 点击对应列表条目右下角图钉 | 世界地图打开到入口地图，创建系统用户导航点并开始追踪 |
+| TC-MANUAL-13 | 打开无入口数据或不允许设置 waypoint 的副本列表 | 点击对应列表条目右下角图钉 | 插件给出不可用提示，不抛 Lua 错误 |
+| TC-MANUAL-14 | 打开地下城列表并定位到“厄运之槌 - 戈多克议会” | 点击该条目右下角图钉 | 插件命中 DB 静态入口 `1277`，打开菲拉斯 / 厄运之槌入口所在地图并创建系统导航点；不得提示找不到副本入口 |
 
 ## 5. 执行结果
 
 | 编号 | 实际结果 | 结论 | 备注 |
 |------|----------|------|------|
-| TC-AUTO-01 | `python tests/run_all.py --ci`：数据契约、设置结构与逻辑测试通过；逻辑测试 116 successes / 0 failures / 0 errors | 通过 | 2026-04-28 执行 |
-| TC-AUTO-02 | `busted tests/logic/spec/encounter_journal_navigation_spec.lua`：10 successes / 0 failures / 0 errors | 通过 | 2026-04-28 执行 |
-| TC-AUTO-03 | `busted tests/logic/spec/encounter_journal_navigation_spec.lua`：覆盖单击焦点、悬停图钉、常驻显示与双击进入 | 通过 | 2026-04-27 执行 |
+| TC-AUTO-01 | `python tests/run_all.py --ci`：数据契约、设置结构与逻辑测试通过；逻辑测试 125 successes / 0 failures / 0 errors | 通过 | 2026-04-29 执行 |
+| TC-AUTO-02 | `busted tests/logic/spec/encounter_journal_navigation_spec.lua`：10 successes / 0 failures / 0 errors | 通过 | 2026-04-29 执行 |
+| TC-AUTO-03 | `busted tests/logic/spec/encounter_journal_navigation_spec.lua`：覆盖列表单击焦点 / 双击进入详情页行为、悬停图钉与常驻显示 | 通过 | 2026-04-29 执行 |
 | TC-AUTO-04 | `busted tests/logic/spec/encounter_journal_navigation_spec.lua`：覆盖运行时只返回聚合 `230` 时，`1277` 从 `InstanceEntrances` 转换坐标并成功设置 waypoint | 通过 | 2026-04-27 执行 |
 | TC-AUTO-05 | `python tests/validate_data_contracts.py`：OK: data contracts validated；覆盖 `230` 不再使用分翼门候选坐标，且导出 `HintUiMapID=69` | 通过 | 2026-04-28 执行 |
 | TC-AUTO-06 | `busted tests/logic/spec/encounter_journal_navigation_spec.lua`：覆盖静态入口存在时运行时入口 API 调用次数为 0 | 通过 | 2026-04-28 执行 |
+| TC-AUTO-07 | `python tests/validate_settings_subcategories.py`：OK: settings subcategories structure validated | 通过 | 2026-04-29 执行 |
+| TC-AUTO-08 | `busted tests/logic/spec/encounter_journal_mount_filter_spec.lua`：9 successes / 0 failures / 0 errors | 通过 | 2026-04-29 执行 |
 | TC-MANUAL-01 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-02 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-03 | 待执行 | 待执行 | 需游戏内验证 |
@@ -82,6 +87,10 @@
 | TC-MANUAL-10 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-11 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-12 | 待执行 | 待执行 | 需游戏内验证 |
+| TC-MANUAL-13 | 待执行 | 待执行 | 需游戏内验证 |
+| TC-MANUAL-14 | 待执行 | 待执行 | 需游戏内验证 |
+| TC-MANUAL-15 | 待执行 | 待执行 | 需游戏内验证 |
+| TC-MANUAL-16 | 待执行 | 待执行 | 需游戏内验证 |
 
 ## 6. 问题与阻塞
 
@@ -90,7 +99,7 @@
 
 ## 7. 结论
 
-- 当前结论：自动化已通过，游戏内手工验证待执行。
+- 当前结论：自动化已覆盖本轮设置收口、详情页过滤移除与列表交互，游戏内手工验证待执行。
 - 后续动作：
   - 在游戏内补齐本清单中的手工验证项，重点验证列表交互、条目图钉和 `厄运之槌 - 戈多克议会` 静态入口导航
 
@@ -106,3 +115,4 @@
 | 2026-04-27 | 新增 `厄运之槌 - 中心花园` 数据回归：`230` 必须使用 `areapoi` 精确 POI，不能混入分翼门坐标 |
 | 2026-04-28 | 新增入口读取优先级回归：静态入口存在时不调用运行时入口 API |
 | 2026-04-28 | 新增目标区域地图回归：`230` 必须导出 `HintUiMapID=69`，确保打开菲拉斯区域地图 |
+| 2026-04-29 | 新增设置收口与详情页过滤移除验证：覆盖 3 个旧设置项移除、列表“仅坐骑”记忆状态与详情页不再过滤掉落 |
