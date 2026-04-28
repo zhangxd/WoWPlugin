@@ -10,24 +10,41 @@ Toolbox.NavigationModule.RouteBar = RouteBar
 
 local routeBarFrame = nil -- 顶部路径条 Frame
 
+--- 生成单段路线文本。
+---@param segment table|nil 路线段
+---@return string
+local function buildSegmentText(segment)
+  if type(segment) ~= "table" then
+    return ""
+  end
+  local modeText = tostring(segment.mode or "unknown") -- 路线方式
+  local fromName = tostring(segment.fromName or segment.from or "?") -- 起点显示名
+  local toName = tostring(segment.toName or segment.to or "?") -- 终点显示名
+  local traversedNameText = table.concat(type(segment.traversedUiMapNames) == "table" and segment.traversedUiMapNames or {}, ", ") -- 经过地图名串
+  if traversedNameText ~= "" then
+    return string.format("%s: %s -> %s (%s)", modeText, fromName, toName, traversedNameText)
+  end
+  return string.format("%s: %s -> %s", modeText, fromName, toName)
+end
+
 --- 拼接路线步骤文本。
 ---@param routeResult table|nil 路线结果
 ---@return string
 local function buildRouteText(routeResult)
-  local stepLabels = type(routeResult) == "table" and routeResult.stepLabels or nil -- 路线步骤列表
-  if type(stepLabels) ~= "table" or #stepLabels == 0 then
+  local segmentList = type(routeResult) == "table" and routeResult.segments or nil -- 路线分段列表
+  if type(segmentList) ~= "table" or #segmentList == 0 then
     return (Toolbox.L or {}).NAVIGATION_ROUTE_EMPTY or ""
   end
-  local textParts = {} -- 可显示步骤文本
-  for _, stepLabel in ipairs(stepLabels) do
-    if stepLabel and stepLabel ~= "" then
-      textParts[#textParts + 1] = tostring(stepLabel)
+  local textParts = {
+    string.format("%s步", tostring(tonumber(routeResult.totalSteps) or #segmentList)),
+  } -- 可显示步骤文本
+  for _, segment in ipairs(segmentList) do
+    local segmentText = buildSegmentText(segment) -- 路线段文本
+    if segmentText ~= "" then
+      textParts[#textParts + 1] = segmentText
     end
   end
-  if #textParts == 0 then
-    return (Toolbox.L or {}).NAVIGATION_ROUTE_EMPTY or ""
-  end
-  return table.concat(textParts, "  >  ")
+  return table.concat(textParts, "  |  ")
 end
 
 --- 确保顶部路径条已创建并锚定。

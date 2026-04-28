@@ -5,14 +5,16 @@
 
 Toolbox.Navigation = Toolbox.Navigation or {}
 
---- 按 from 节点为边建立索引，便于 Dijkstra 查询相邻边。
+local WALK_LOCAL_MODE = "walk_local" -- 本地步行模式
+
+--- 按 from 节点为边建立索引，便于路径查询相邻边。
 ---@param edgeList table|nil 路径边列表
 ---@return table edgeListByFrom 按起点分组的边表
 local function buildEdgeListByFrom(edgeList)
   local edgeListByFrom = {} -- 起点到边列表的索引
   for _, edge in ipairs(edgeList or {}) do
-    local fromNodeId = edge and edge.from -- 边起点
-    local toNodeId = edge and edge.to -- 边终点
+    local fromNodeId = edge and (edge.from or edge.FromNodeID or edge.From) -- 边起点
+    local toNodeId = edge and (edge.to or edge.ToNodeID or edge.To) -- 边终点
     if fromNodeId and toNodeId then
       edgeListByFrom[fromNodeId] = edgeListByFrom[fromNodeId] or {}
       edgeListByFrom[fromNodeId][#edgeListByFrom[fromNodeId] + 1] = edge
@@ -21,61 +23,261 @@ local function buildEdgeListByFrom(edgeList)
   return edgeListByFrom
 end
 
---- 从未访问节点中找出当前代价最低的节点。
----@param unvisited table 未访问节点集合
----@param costByNode table 节点总代价表
----@return any nodeId 代价最低的节点 ID
-local function popLowestCostNode(unvisited, costByNode)
-  local bestNodeId = nil -- 当前最低代价节点
-  local bestCost = math.huge -- 当前最低代价
-  for nodeId in pairs(unvisited) do
-    local currentCost = costByNode[nodeId] or math.huge -- 节点总代价
-    if currentCost < bestCost then
-      bestCost = currentCost
-      bestNodeId = nodeId
-    end
+--- 复制一个 Lua 数组。
+---@param rawList table|nil 原始数组
+---@return table
+local function copyArray(rawList)
+  local copiedList = {} -- 复制后的数组
+  for _, value in ipairs(type(rawList) == "table" and rawList or {}) do
+    copiedList[#copiedList + 1] = value
   end
-  if bestNodeId ~= nil then
-    unvisited[bestNodeId] = nil
-  end
-  return bestNodeId
+  return copiedList
 end
 
---- 回溯 Dijkstra 结果，生成节点路径与步骤文案。
----@param startNodeId any 起点节点 ID
----@param targetNodeId any 终点节点 ID
----@param previousNodeById table 前驱节点表
----@param previousEdgeById table 前驱边表
----@return table nodePath 节点路径
----@return table stepLabels 步骤文案列表
-local function buildRouteResult(startNodeId, targetNodeId, previousNodeById, previousEdgeById)
+--- 归一化导航名称，便于静态名字匹配。
+---@param rawValue any
+---@return string
+local function normalizeNavigationName(rawValue)
+  local normalizedValue = string.lower(tostring(rawValue or "")) -- 小写化名称
+  normalizedValue = string.gsub(normalizedValue, "%s+", "")
+  return normalizedValue
+end
+
+--- 将来源数组里的值追加到目标数组，保持去重。
+---@param targetList table 目标数组
+---@param sourceList table|nil 来源数组
+local function appendUniqueArray(targetList, sourceList)
+  local seenValue = {} -- 已写入值集合
+  for _, value in ipairs(targetList or {}) do
+    seenValue[tostring(value)] = true
+  end
+  for _, value in ipairs(type(sourceList) == "table" and sourceList or {}) do
+    local marker = tostring(value) -- 去重标记
+    if not seenValue[marker] then
+      seenValue[marker] = true
+      targetList[#targetList + 1] = value
+    end
+  end
+end
+
+--- 读取路线边模式。
+---@param edge table|nil 路线边
+---@return string
+local function readEdgeMode(edge)
+  return tostring((type(edge) == "table" and (edge.mode or edge.Mode)) or "unknown")
+end
+
+--- 读取路线边显示标签。
+---@param edge table|nil 路线边
+---@return string
+local function readEdgeLabel(edge)
+  return tostring((type(edge) == "table" and (edge.label or edge.Label or edge.name or edge.Name_lang)) or "")
+end
+
+--- 为路线边生成稳定排序标记。
+---@param edge table|nil 路线边
+---@return string
+local function buildEdgeStableMarker(edge)
+  local edgeValue = type(edge) == "table" and edge or {} -- 路线边定义
+  local edgeID = edgeValue.id or edgeValue.ID or edgeValue.SourceRowID or readEdgeLabel(edgeValue) -- 稳定边 ID
+  local fromNodeId = edgeValue.from or edgeValue.FromNodeID or edgeValue.From or "" -- 边起点
+  local toNodeId = edgeValue.to or edgeValue.ToNodeID or edgeValue.To or "" -- 边终点
+  return table.concat({
+    tostring(readEdgeMode(edgeValue)),
+    tostring(edgeID),
+    tostring(fromNodeId),
+    tostring(toNodeId),
+  }, "::")
+end
+
+--- 比较两个路径分数；返回 -1 表示左侧更优，1 表示右侧更优，0 表示相同。
+---@param leftScore table 左侧分数
+---@param rightScore table 右侧分数
+---@return integer
+local function compareRouteScore(leftScore, rightScore)
+  local leftSteps = tonumber(leftScore and leftScore.steps) or math.huge -- 左侧总步数
+  local rightSteps = tonumber(rightScore and rightScore.steps) or math.huge -- 右侧总步数
+  if leftSteps ~= rightSteps then
+    return leftSteps < rightSteps and -1 or 1
+  end
+
+  local leftWalkSegments = tonumber(leftScore and leftScore.walkSegments) or math.huge -- 左侧步行段数
+  local rightWalkSegments = tonumber(rightScore and rightScore.walkSegments) or math.huge -- 右侧步行段数
+  if leftWalkSegments ~= rightWalkSegments then
+    return leftWalkSegments < rightWalkSegments and -1 or 1
+  end
+
+  local leftWalkDistance = tonumber(leftScore and leftScore.walkDistance) or math.huge -- 左侧步行距离
+  local rightWalkDistance = tonumber(rightScore and rightScore.walkDistance) or math.huge -- 右侧步行距离
+  if leftWalkDistance ~= rightWalkDistance then
+    return leftWalkDistance < rightWalkDistance and -1 or 1
+  end
+
+  local leftDisplayChanges = tonumber(leftScore and leftScore.displayChanges) or math.huge -- 左侧步骤切换数
+  local rightDisplayChanges = tonumber(rightScore and rightScore.displayChanges) or math.huge -- 右侧步骤切换数
+  if leftDisplayChanges ~= rightDisplayChanges then
+    return leftDisplayChanges < rightDisplayChanges and -1 or 1
+  end
+
+  local leftStableKey = tostring(leftScore and leftScore.stableKey or "") -- 左侧稳定键
+  local rightStableKey = tostring(rightScore and rightScore.stableKey or "") -- 右侧稳定键
+  if leftStableKey ~= rightStableKey then
+    return leftStableKey < rightStableKey and -1 or 1
+  end
+  return 0
+end
+
+--- 计算进入一条路线边后新增的路线步数。
+---@param edge table 路线边
+---@param lastMode string|nil 上一条边模式
+---@return number
+local function buildEdgeStepIncrement(edge, lastMode)
+  local edgeMode = readEdgeMode(edge) -- 当前边模式
+  if edgeMode == WALK_LOCAL_MODE and lastMode == WALK_LOCAL_MODE then
+    return 0
+  end
+  local stepCost = tonumber(edge and (edge.stepCost or edge.StepCost)) -- 边步数成本
+  return (stepCost and stepCost > 0) and stepCost or 1
+end
+
+--- 计算进入一条路线边后新增的步行段数。
+---@param edge table 路线边
+---@param lastMode string|nil 上一条边模式
+---@return number
+local function buildWalkSegmentIncrement(edge, lastMode)
+  local edgeMode = readEdgeMode(edge) -- 当前边模式
+  if edgeMode == WALK_LOCAL_MODE and lastMode ~= WALK_LOCAL_MODE then
+    return 1
+  end
+  return 0
+end
+
+--- 计算进入一条路线边后新增的本地步行距离。
+---@param edge table 路线边
+---@return number
+local function buildWalkDistanceIncrement(edge)
+  if readEdgeMode(edge) ~= WALK_LOCAL_MODE then
+    return 0
+  end
+  return tonumber(edge and (edge.walkDistance or edge.WalkDistance or edge.cost or edge.Cost)) or 0
+end
+
+--- 生成状态键，允许同一节点按“上一动作模式”分离状态。
+---@param nodeId any 节点 ID
+---@param lastMode string|nil 上一动作模式
+---@return string
+local function buildRouteStateKey(nodeId, lastMode)
+  return tostring(nodeId) .. "::" .. tostring(lastMode or "")
+end
+
+--- 从开放列表中取出当前最优状态。
+---@param openStateList table 开放状态列表
+---@param bestStateByKey table 当前最佳状态表
+---@return table|nil
+local function popBestOpenState(openStateList, bestStateByKey)
+  while #openStateList > 0 do
+    local bestIndex = 1 -- 最优状态索引
+    local bestState = openStateList[1] -- 当前最优状态
+    for stateIndex = 2, #openStateList do
+      local candidateState = openStateList[stateIndex] -- 候选状态
+      if compareRouteScore(candidateState.score, bestState.score) < 0 then
+        bestIndex = stateIndex
+        bestState = candidateState
+      end
+    end
+    table.remove(openStateList, bestIndex)
+    if bestStateByKey[bestState.stateKey] == bestState then
+      return bestState
+    end
+  end
+  return nil
+end
+
+--- 将路径边数组压缩为最终展示段。
+---@param routeGraph table 路径图
+---@param edgePath table 原始边路径
+---@return table segments 展示段
+---@return table stepLabels 兼容步骤文案
+local function buildRouteSegments(routeGraph, edgePath)
+  local segments = {} -- 展示段列表
+  for _, edge in ipairs(edgePath or {}) do
+    local edgeMode = readEdgeMode(edge) -- 当前边模式
+    local fromNodeId = edge.from or edge.FromNodeID or edge.From -- 边起点
+    local toNodeId = edge.to or edge.ToNodeID or edge.To -- 边终点
+    local fromNode = routeGraph.nodes[fromNodeId] or {} -- 起点节点
+    local toNode = routeGraph.nodes[toNodeId] or {} -- 终点节点
+    local edgeLabel = readEdgeLabel(edge) -- 当前边显示标签
+
+    if edgeMode == WALK_LOCAL_MODE and #segments > 0 and segments[#segments].mode == WALK_LOCAL_MODE then
+      local lastSegment = segments[#segments] -- 最近一个步行段
+      lastSegment.to = toNodeId
+      lastSegment.toName = tostring(toNode.name or toNodeId)
+      lastSegment.walkDistance = tonumber(lastSegment.walkDistance or 0) + buildWalkDistanceIncrement(edge)
+      appendUniqueArray(lastSegment.traversedUiMapIDs, edge.traversedUiMapIDs or edge.TraversedUiMapIDs)
+      appendUniqueArray(lastSegment.traversedUiMapNames, edge.traversedUiMapNames or edge.TraversedUiMapNames)
+    else
+      segments[#segments + 1] = {
+        mode = edgeMode,
+        from = fromNodeId,
+        to = toNodeId,
+        fromName = tostring(fromNode.name or fromNodeId),
+        toName = tostring(toNode.name or toNodeId),
+        label = edgeLabel,
+        traversedUiMapIDs = copyArray(edge.traversedUiMapIDs or edge.TraversedUiMapIDs),
+        traversedUiMapNames = copyArray(edge.traversedUiMapNames or edge.TraversedUiMapNames),
+        walkDistance = buildWalkDistanceIncrement(edge),
+      }
+    end
+  end
+
+  local stepLabels = {} -- 兼容旧界面的步骤文案
+  for _, segment in ipairs(segments) do
+    local segmentLabel = segment.label -- 当前段显示标签
+    if segmentLabel == nil or segmentLabel == "" then
+      segmentLabel = string.format("%s: %s -> %s", tostring(segment.mode), tostring(segment.fromName), tostring(segment.toName))
+    end
+    stepLabels[#stepLabels + 1] = segmentLabel
+  end
+  return segments, stepLabels
+end
+
+--- 回溯路径状态，生成路线结果。
+---@param routeGraph table 路径图
+---@param finalState table 最终状态
+---@return table
+local function buildRouteResult(routeGraph, finalState)
   local reversedNodePath = {} -- 反向节点路径
-  local reversedStepLabels = {} -- 反向步骤文案
-  local currentNodeId = targetNodeId -- 当前回溯节点
+  local reversedEdgePath = {} -- 反向边路径
+  local currentState = finalState -- 当前回溯状态
 
-  while currentNodeId ~= nil do
-    reversedNodePath[#reversedNodePath + 1] = currentNodeId
-    local previousEdge = previousEdgeById[currentNodeId] -- 抵达当前节点的边
-    if previousEdge then
-      reversedStepLabels[#reversedStepLabels + 1] = previousEdge.label or previousEdge.name or tostring(previousEdge.to or "")
+  while currentState do
+    reversedNodePath[#reversedNodePath + 1] = currentState.nodeId
+    if currentState.previousEdge then
+      reversedEdgePath[#reversedEdgePath + 1] = currentState.previousEdge
     end
-    if currentNodeId == startNodeId then
-      break
-    end
-    currentNodeId = previousNodeById[currentNodeId]
+    currentState = currentState.previousState
   end
 
-  local nodePath = {} -- 正向节点路径
-  for i = #reversedNodePath, 1, -1 do
-    nodePath[#nodePath + 1] = reversedNodePath[i]
+  local rawNodePath = {} -- 正向节点路径
+  for pathIndex = #reversedNodePath, 1, -1 do
+    rawNodePath[#rawNodePath + 1] = reversedNodePath[pathIndex]
   end
 
-  local stepLabels = {} -- 正向步骤文案
-  for i = #reversedStepLabels, 1, -1 do
-    stepLabels[#stepLabels + 1] = reversedStepLabels[i]
+  local rawEdgePath = {} -- 正向边路径
+  for pathIndex = #reversedEdgePath, 1, -1 do
+    rawEdgePath[#rawEdgePath + 1] = reversedEdgePath[pathIndex]
   end
 
-  return nodePath, stepLabels
+  local segments, stepLabels = buildRouteSegments(routeGraph, rawEdgePath) -- 展示段与兼容文案
+  return {
+    totalSteps = tonumber(finalState and finalState.score and finalState.score.steps) or #segments,
+    segments = segments,
+    rawNodePath = rawNodePath,
+    rawEdgePath = rawEdgePath,
+    totalCost = tonumber(finalState and finalState.score and finalState.score.steps) or #segments,
+    nodePath = rawNodePath,
+    stepLabels = stepLabels,
+  }
 end
 
 --- 判断单条边是否满足当前角色可用性要求。
@@ -84,20 +286,32 @@ end
 ---@return boolean
 local function isEdgeAvailable(edge, availabilityContext)
   local requirements = edge and edge.requirements or nil -- 边可用性要求
+  local context = availabilityContext or {} -- 当前角色上下文
   if type(requirements) ~= "table" then
-    return true
+    requirements = nil
+  else
+    if requirements.classFile and requirements.classFile ~= context.classFile then
+      return false
+    end
+    if requirements.faction and requirements.faction ~= context.faction then
+      return false
+    end
+    if requirements.spellID then
+      local knownSpellByID = context.knownSpellByID -- 已确认技能集合
+      if type(knownSpellByID) ~= "table" or knownSpellByID[requirements.spellID] ~= true then
+        return false
+      end
+    end
   end
 
-  local context = availabilityContext or {} -- 当前角色上下文
-  if requirements.classFile and requirements.classFile ~= context.classFile then
-    return false
-  end
-  if requirements.faction and requirements.faction ~= context.faction then
-    return false
-  end
-  if requirements.spellID then
-    local knownSpellByID = context.knownSpellByID -- 已确认技能集合
-    if type(knownSpellByID) ~= "table" or knownSpellByID[requirements.spellID] ~= true then
+  if readEdgeMode(edge) == "taxi" then
+    local knownTaxiNodeByID = context.knownTaxiNodeByID -- 已开航点集合
+    local fromTaxiNodeID = tonumber(edge and (edge.fromTaxiNodeID or edge.FromTaxiNodeID)) -- 起点飞行点 ID
+    local toTaxiNodeID = tonumber(edge and (edge.toTaxiNodeID or edge.ToTaxiNodeID)) -- 终点飞行点 ID
+    if type(knownTaxiNodeByID) ~= "table" or not fromTaxiNodeID or not toTaxiNodeID then
+      return false
+    end
+    if knownTaxiNodeByID[fromTaxiNodeID] ~= true or knownTaxiNodeByID[toTaxiNodeID] ~= true then
       return false
     end
   end
@@ -128,11 +342,11 @@ function Toolbox.Navigation.FilterRouteGraph(routeGraph, availabilityContext)
   return filteredGraph
 end
 
---- 在路径图中查找起点到终点的最低耗时路线。
+--- 在路径图中查找起点到终点的最少步数路线。
 ---@param routeGraph table 路径图，包含 `nodes` 与 `edges`
 ---@param startNodeId any 起点节点 ID
 ---@param targetNodeId any 终点节点 ID
----@return table|nil routeResult 成功时包含 `totalCost`、`nodePath`、`stepLabels`
+---@return table|nil routeResult 成功时包含 `totalSteps`、`segments`、`rawNodePath`、`rawEdgePath`
 ---@return table|nil errorObject 失败时包含 `code`
 function Toolbox.Navigation.FindShortestPath(routeGraph, startNodeId, targetNodeId)
   if type(routeGraph) ~= "table" or type(routeGraph.nodes) ~= "table" then
@@ -143,58 +357,72 @@ function Toolbox.Navigation.FindShortestPath(routeGraph, startNodeId, targetNode
   end
 
   local edgeListByFrom = buildEdgeListByFrom(routeGraph.edges) -- 起点到边列表索引
-  local unvisited = {} -- 未访问节点集合
-  local costByNode = {} -- 起点到各节点的最低代价
-  local previousNodeById = {} -- 最短路径前驱节点
-  local previousEdgeById = {} -- 最短路径前驱边
+  local bestStateByKey = {} -- 每个状态键的当前最优状态
+  local openStateList = {} -- 待展开状态列表
 
-  for nodeId in pairs(routeGraph.nodes) do
-    unvisited[nodeId] = true
-    costByNode[nodeId] = math.huge
-  end
-  costByNode[startNodeId] = 0
+  local startState = {
+    nodeId = startNodeId,
+    lastMode = nil,
+    previousState = nil,
+    previousEdge = nil,
+    score = {
+      steps = 0,
+      walkSegments = 0,
+      walkDistance = 0,
+      displayChanges = 0,
+      stableKey = "",
+    },
+  } -- 起点状态
+  startState.stateKey = buildRouteStateKey(startNodeId, nil)
+  bestStateByKey[startState.stateKey] = startState
+  openStateList[#openStateList + 1] = startState
 
   while true do
-    local currentNodeId = popLowestCostNode(unvisited, costByNode) -- 当前展开节点
-    if currentNodeId == nil or costByNode[currentNodeId] == math.huge then
+    local currentState = popBestOpenState(openStateList, bestStateByKey) -- 当前最优状态
+    if currentState == nil then
       break
     end
-    if currentNodeId == targetNodeId then
-      break
+    if currentState.nodeId == targetNodeId then
+      return buildRouteResult(routeGraph, currentState), nil
     end
 
-    for _, edge in ipairs(edgeListByFrom[currentNodeId] or {}) do
-      local toNodeId = edge.to -- 边终点
-      local edgeCost = tonumber(edge.cost) -- 边耗时
-      if toNodeId ~= nil and edgeCost ~= nil and edgeCost >= 0 then
-        local nextCost = (costByNode[currentNodeId] or math.huge) + edgeCost -- 经过当前边后的总代价
-        if nextCost < (costByNode[toNodeId] or math.huge) then
-          costByNode[toNodeId] = nextCost
-          previousNodeById[toNodeId] = currentNodeId
-          previousEdgeById[toNodeId] = edge
+    for _, edge in ipairs(edgeListByFrom[currentState.nodeId] or {}) do
+      local toNodeId = edge.to or edge.ToNodeID or edge.To -- 边终点
+      local edgeMode = readEdgeMode(edge) -- 当前边模式
+      if toNodeId ~= nil and routeGraph.nodes[toNodeId] ~= nil then
+        local candidateState = {
+          nodeId = toNodeId,
+          lastMode = edgeMode,
+          previousState = currentState,
+          previousEdge = edge,
+          score = {
+            steps = tonumber(currentState.score.steps) + buildEdgeStepIncrement(edge, currentState.lastMode),
+            walkSegments = tonumber(currentState.score.walkSegments) + buildWalkSegmentIncrement(edge, currentState.lastMode),
+            walkDistance = tonumber(currentState.score.walkDistance) + buildWalkDistanceIncrement(edge),
+            displayChanges = tonumber(currentState.score.displayChanges) + ((currentState.lastMode and currentState.lastMode ~= edgeMode) and 1 or 0),
+            stableKey = tostring(currentState.score.stableKey or "") .. "|" .. buildEdgeStableMarker(edge),
+          },
+        } -- 候选状态
+        candidateState.stateKey = buildRouteStateKey(candidateState.nodeId, candidateState.lastMode)
+
+        local bestState = bestStateByKey[candidateState.stateKey] -- 该状态键的已知最优状态
+        if bestState == nil or compareRouteScore(candidateState.score, bestState.score) < 0 then
+          bestStateByKey[candidateState.stateKey] = candidateState
+          openStateList[#openStateList + 1] = candidateState
         end
       end
     end
   end
 
-  if costByNode[targetNodeId] == math.huge then
-    return nil, { code = "NAVIGATION_ERR_NO_ROUTE" }
-  end
-
-  local nodePath, stepLabels = buildRouteResult(startNodeId, targetNodeId, previousNodeById, previousEdgeById) -- 路线结果
-  return {
-    totalCost = costByNode[targetNodeId],
-    nodePath = nodePath,
-    stepLabels = stepLabels,
-  }, nil
+  return nil, { code = "NAVIGATION_ERR_NO_ROUTE" }
 end
 
---- 按当前角色可用性过滤路径图后规划最低耗时路线。
+--- 按当前角色可用性过滤路径图后规划最少步数路线。
 ---@param routeGraph table 路径图，包含 `nodes` 与 `edges`
 ---@param startNodeId any 起点节点 ID
 ---@param targetNodeId any 终点节点 ID
 ---@param availabilityContext table|nil 当前角色可用性快照
----@return table|nil routeResult 成功时包含 `totalCost`、`nodePath`、`stepLabels`
+---@return table|nil routeResult 成功时包含 `totalSteps`、`segments`、`rawNodePath`、`rawEdgePath`
 ---@return table|nil errorObject 失败时包含 `code`
 function Toolbox.Navigation.PlanRoute(routeGraph, startNodeId, targetNodeId, availabilityContext)
   local filteredGraph = Toolbox.Navigation.FilterRouteGraph(routeGraph, availabilityContext) -- 可用边过滤后的路径图
@@ -212,6 +440,22 @@ function Toolbox.Navigation.GetRequiredSpellIDList(routeData)
   for _, edge in ipairs(type(exportedData.edges) == "table" and exportedData.edges or {}) do
     local requirements = type(edge) == "table" and edge.requirements or nil -- 边可用性要求
     local spellID = type(requirements) == "table" and tonumber(requirements.spellID) or nil -- 技能 ID
+    if spellID and not seenSpellID[spellID] then
+      seenSpellID[spellID] = true
+      spellIDList[#spellIDList + 1] = spellID
+    end
+  end
+
+  local abilityTemplateData = Toolbox.Data and Toolbox.Data.NavigationAbilityTemplates or {} -- 契约导出的能力模板
+  local templateTable = type(abilityTemplateData.templates) == "table" and abilityTemplateData.templates or {} -- 模板表
+  local templateIDList = {} -- 稳定模板键列表
+  for templateID in pairs(templateTable) do
+    templateIDList[#templateIDList + 1] = tostring(templateID)
+  end
+  table.sort(templateIDList)
+  for _, templateID in ipairs(templateIDList) do
+    local templateDef = templateTable[templateID] -- 模板定义
+    local spellID = type(templateDef) == "table" and tonumber(templateDef.SpellID or templateDef.spellID) or nil -- 模板技能 ID
     if spellID and not seenSpellID[spellID] then
       seenSpellID[spellID] = true
       spellIDList[#spellIDList + 1] = spellID
@@ -251,6 +495,68 @@ local function isNormalizedPosition(x, y)
   return type(x) == "number" and type(y) == "number" and x >= 0 and x <= 1 and y >= 0 and y <= 1
 end
 
+--- 解析绑定地点名称对应的导航节点 ID。
+---@param bindLocationName string|nil 绑定地点名称
+---@return string|nil
+local function resolveHearthBindNodeID(bindLocationName)
+  local normalizedTargetName = normalizeNavigationName(bindLocationName) -- 归一化绑定地点名
+  if normalizedTargetName == "" then
+    return nil
+  end
+
+  local routeNodeTable = Toolbox.Data and Toolbox.Data.NavigationRouteEdges and Toolbox.Data.NavigationRouteEdges.nodes or {} -- 导出的导航节点表
+  local bestNodeId = nil -- 当前最佳节点 ID
+  local bestRank = nil -- 当前最佳节点排序
+  for nodeId, nodeDef in pairs(type(routeNodeTable) == "table" and routeNodeTable or {}) do
+    local nodeName = type(nodeDef) == "table" and (nodeDef.Name_lang or nodeDef.name or nodeId) or nodeId -- 节点显示名
+    if normalizeNavigationName(nodeName) == normalizedTargetName then
+      local nodeKind = tostring(type(nodeDef) == "table" and (nodeDef.Kind or nodeDef.kind) or "") -- 节点类型
+      local uiMapID = tonumber(type(nodeDef) == "table" and (nodeDef.UiMapID or nodeDef.uiMapID) or 0) or 0 -- 节点地图 ID
+      local taxiNodeID = tonumber(type(nodeDef) == "table" and (nodeDef.TaxiNodeID or nodeDef.taxiNodeID) or 0) or 0 -- 节点飞行点 ID
+      local kindRank = (nodeKind == "map_anchor" or nodeKind == "uimap") and 0 or 1 -- 优先选地图锚点
+      local candidateRank = kindRank * 1000000000 + uiMapID * 1000 + taxiNodeID -- 稳定候选排序
+      if bestRank == nil or candidateRank < bestRank or (candidateRank == bestRank and tostring(nodeId) < tostring(bestNodeId or "")) then
+        bestRank = candidateRank
+        bestNodeId = nodeId
+      end
+    end
+  end
+  return bestNodeId
+end
+
+--- 从导出的导航节点表中收集当前角色已开航点集合。
+---@return table
+local function buildKnownTaxiNodeByID()
+  local knownTaxiNodeByID = {} -- 已开航点集合
+  local taxiMapApi = type(C_TaxiMap) == "table" and C_TaxiMap or nil -- 飞行点 API 表
+  local getTaxiNodesForMap = taxiMapApi and taxiMapApi.GetTaxiNodesForMap or nil -- 指定地图飞行点查询
+  if type(getTaxiNodesForMap) ~= "function" then
+    return knownTaxiNodeByID
+  end
+
+  local routeNodeTable = Toolbox.Data and Toolbox.Data.NavigationRouteEdges and Toolbox.Data.NavigationRouteEdges.nodes or {} -- 导出的导航节点表
+  local checkedUiMapID = {} -- 已查询过的飞行点地图 ID
+  for _, nodeDef in pairs(type(routeNodeTable) == "table" and routeNodeTable or {}) do
+    local nodeKind = tostring(type(nodeDef) == "table" and (nodeDef.Kind or nodeDef.kind) or "") -- 节点类型
+    local nodeUiMapID = tonumber(type(nodeDef) == "table" and (nodeDef.UiMapID or nodeDef.uiMapID) or 0) -- 节点地图 ID
+    if nodeKind == "taxi" and nodeUiMapID and nodeUiMapID > 0 and not checkedUiMapID[nodeUiMapID] then
+      checkedUiMapID[nodeUiMapID] = true
+      local success, taxiNodeList = pcall(getTaxiNodesForMap, nodeUiMapID) -- 当前地图飞行点列表
+      if success and type(taxiNodeList) == "table" then
+        for _, taxiNodeInfo in ipairs(taxiNodeList) do
+          local taxiNodeID = tonumber(type(taxiNodeInfo) == "table" and taxiNodeInfo.nodeID) -- 飞行点 ID
+          local isUndiscovered = type(taxiNodeInfo) == "table" and taxiNodeInfo.isUndiscovered == true -- 是否未开启
+          if taxiNodeID and taxiNodeID > 0 and not isUndiscovered then
+            knownTaxiNodeByID[taxiNodeID] = true
+          end
+        end
+      end
+    end
+  end
+
+  return knownTaxiNodeByID
+end
+
 --- 估算同一地图内两点之间的移动成本。
 ---@param uiMapID number|nil 地图 ID
 ---@param fromX number|nil 起点 X
@@ -281,6 +587,8 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
     currentX = nil,
     currentY = nil,
     knownSpellByID = {},
+    knownTaxiNodeByID = {},
+    hearthBindNodeID = nil,
   } -- 当前角色可用性快照
 
   if type(UnitClass) == "function" then
@@ -317,18 +625,24 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
     end
   end
 
-  local spellBookApi = type(C_SpellBook) == "table" and C_SpellBook or nil -- spellbook API 表
-  local spellCheckFn = spellBookApi and (spellBookApi.IsSpellInSpellBook or spellBookApi.IsSpellKnown) or nil -- 技能已学判定
-  if type(spellCheckFn) ~= "function" then
-    return availabilityContext
+  availabilityContext.knownTaxiNodeByID = buildKnownTaxiNodeByID()
+  if type(GetBindLocation) == "function" then
+    local success, bindLocationName = pcall(GetBindLocation) -- 炉石绑定地点名称
+    if success then
+      availabilityContext.hearthBindNodeID = resolveHearthBindNodeID(bindLocationName)
+    end
   end
 
-  for _, spellID in ipairs(spellIDList or {}) do
-    local numericSpellID = tonumber(spellID) -- 技能 ID
-    if numericSpellID then
-      local success, isKnown = pcall(spellCheckFn, numericSpellID) -- 技能已学查询结果
-      if success and isKnown == true then
-        availabilityContext.knownSpellByID[numericSpellID] = true
+  local spellBookApi = type(C_SpellBook) == "table" and C_SpellBook or nil -- spellbook API 表
+  local spellCheckFn = spellBookApi and (spellBookApi.IsSpellInSpellBook or spellBookApi.IsSpellKnown) or nil -- 技能已学判定
+  if type(spellCheckFn) == "function" then
+    for _, spellID in ipairs(spellIDList or {}) do
+      local numericSpellID = tonumber(spellID) -- 技能 ID
+      if numericSpellID then
+        local success, isKnown = pcall(spellCheckFn, numericSpellID) -- 技能已学查询结果
+        if success and isKnown == true then
+          availabilityContext.knownSpellByID[numericSpellID] = true
+        end
       end
     end
   end
@@ -372,7 +686,11 @@ local function addTargetViaNodeEdge(routeGraph, viaNodeDef, target, targetNodeId
     from = viaNodeId,
     to = targetNodeId,
     cost = baseCost + terminalCost,
+    stepCost = 1,
     label = viaNodeDef.label or ("前往" .. targetName),
+    mode = viaNodeDef.mode or WALK_LOCAL_MODE,
+    traversedUiMapIDs = copyArray(viaNodeDef.traversedUiMapIDs or viaNodeDef.TraversedUiMapIDs or { target.uiMapID }),
+    traversedUiMapNames = copyArray(viaNodeDef.traversedUiMapNames or viaNodeDef.TraversedUiMapNames or { targetName }),
   }
 end
 
@@ -623,6 +941,11 @@ local function addRouteGraphNodes(routeGraph, nodeTable)
       routeGraph.nodes[nodeId] = {
         id = nodeId,
         name = nodeDef.Name_lang or tostring(nodeId),
+        uiMapID = tonumber(nodeDef.UiMapID),
+        source = nodeDef.Source,
+        kind = nodeDef.Kind,
+        walkClusterKey = tostring(nodeDef.WalkClusterKey or nodeDef.walkClusterKey or nodeId),
+        taxiNodeID = tonumber(nodeDef.TaxiNodeID or nodeDef.taxiNodeID),
       }
     end
   end
@@ -638,6 +961,10 @@ local function addRouteGraphEdges(routeGraph, edgeList)
       edgeCopy[key] = value
     end
     edgeCopy.label = buildRouteEdgeLabel(edgeCopy) or edgeCopy.label
+    edgeCopy.stepCost = tonumber(edgeCopy.stepCost or edgeCopy.StepCost) or 1
+    edgeCopy.mode = edgeCopy.mode or edgeCopy.Mode or "unknown"
+    edgeCopy.traversedUiMapIDs = copyArray(edgeCopy.traversedUiMapIDs or edgeCopy.TraversedUiMapIDs)
+    edgeCopy.traversedUiMapNames = copyArray(edgeCopy.traversedUiMapNames or edgeCopy.TraversedUiMapNames)
     routeGraph.edges[#routeGraph.edges + 1] = edgeCopy
   end
 end
@@ -675,8 +1002,134 @@ local function addCurrentLocationEdges(routeGraph, nodeTable, availabilityContex
         from = "current",
         to = nodeId,
         cost = 0,
+        stepCost = 1,
         label = "当前位置：" .. tostring(nodeDef.Name_lang or nodeId),
+        mode = WALK_LOCAL_MODE,
+        traversedUiMapIDs = { resolvedCurrentMapID },
+        traversedUiMapNames = { tostring(nodeDef.Name_lang or nodeId) },
       }
+    end
+  end
+end
+
+--- 向路径图追加一条本地步行边。
+---@param routeGraph table 正在构建的路径图
+---@param fromNodeId any 起点节点 ID
+---@param toNodeId any 终点节点 ID
+---@param traversedUiMapIDs table|nil 经过地图 ID 列表
+---@param traversedUiMapNames table|nil 经过地图名称列表
+local function addWalkLocalEdge(routeGraph, fromNodeId, toNodeId, traversedUiMapIDs, traversedUiMapNames)
+  if fromNodeId == nil or toNodeId == nil or fromNodeId == toNodeId then
+    return
+  end
+  if routeGraph.nodes[fromNodeId] == nil or routeGraph.nodes[toNodeId] == nil then
+    return
+  end
+  local fromNode = routeGraph.nodes[fromNodeId] or {} -- 起点节点
+  local toNode = routeGraph.nodes[toNodeId] or {} -- 终点节点
+  routeGraph.edges[#routeGraph.edges + 1] = {
+    from = fromNodeId,
+    to = toNodeId,
+    cost = 0,
+    stepCost = 1,
+    label = string.format("步行：%s -> %s", tostring(fromNode.name or fromNodeId), tostring(toNode.name or toNodeId)),
+    mode = WALK_LOCAL_MODE,
+    walkDistance = 0,
+    traversedUiMapIDs = copyArray(traversedUiMapIDs),
+    traversedUiMapNames = copyArray(traversedUiMapNames),
+  }
+end
+
+--- 基于 WalkClusterKey 为本地可步行节点补动态接线。
+---@param routeGraph table 正在构建的路径图
+local function addDynamicWalkLocalEdges(routeGraph)
+  for nodeId, nodeDef in pairs(routeGraph.nodes or {}) do
+    local walkClusterKey = tostring(nodeDef and nodeDef.walkClusterKey or "") -- 节点所属本地步行连通域
+    local clusterNode = routeGraph.nodes[walkClusterKey] -- 连通域锚点节点
+    if walkClusterKey ~= "" and clusterNode ~= nil and walkClusterKey ~= nodeId then
+      local traversedUiMapIDs = {} -- 本地步行段经过地图 ID
+      local traversedUiMapNames = {} -- 本地步行段经过地图名
+      appendUniqueArray(traversedUiMapIDs, { tonumber(nodeDef.uiMapID) })
+      appendUniqueArray(traversedUiMapIDs, { tonumber(clusterNode.uiMapID) })
+      appendUniqueArray(traversedUiMapNames, { tostring(nodeDef.name or nodeId) })
+      appendUniqueArray(traversedUiMapNames, { tostring(clusterNode.name or walkClusterKey) })
+      addWalkLocalEdge(routeGraph, nodeId, walkClusterKey, traversedUiMapIDs, traversedUiMapNames)
+      addWalkLocalEdge(routeGraph, walkClusterKey, nodeId, traversedUiMapIDs, traversedUiMapNames)
+    end
+  end
+end
+
+--- 判断能力模板是否满足当前角色可用性。
+---@param templateDef table|nil 能力模板
+---@param availabilityContext table|nil 当前角色可用性快照
+---@return boolean
+local function isAbilityTemplateAvailable(templateDef, availabilityContext)
+  if type(templateDef) ~= "table" then
+    return false
+  end
+  local context = availabilityContext or {} -- 当前角色上下文
+  local classFile = templateDef.ClassFile or templateDef.classFile -- 模板职业限制
+  local factionGroup = templateDef.FactionGroup or templateDef.factionGroup -- 模板阵营限制
+  local spellID = tonumber(templateDef.SpellID or templateDef.spellID) -- 模板技能 ID
+  if classFile and classFile ~= context.classFile then
+    return false
+  end
+  if factionGroup and factionGroup ~= context.faction then
+    return false
+  end
+  if spellID then
+    local knownSpellByID = context.knownSpellByID -- 已确认技能集合
+    if type(knownSpellByID) ~= "table" or knownSpellByID[spellID] ~= true then
+      return false
+    end
+  end
+  return true
+end
+
+--- 解析能力模板本次查询的目标节点。
+---@param templateDef table|nil 能力模板
+---@param availabilityContext table|nil 当前角色可用性快照
+---@return string|nil
+local function resolveAbilityTemplateTargetNodeID(templateDef, availabilityContext)
+  local targetRuleKind = tostring(type(templateDef) == "table" and (templateDef.TargetRuleKind or templateDef.targetRuleKind) or "") -- 目标规则
+  if targetRuleKind == "fixed_node" then
+    return type(templateDef) == "table" and (templateDef.ToNodeID or templateDef.toNodeID) or nil
+  end
+  if targetRuleKind == "hearth_bind" then
+    return availabilityContext and availabilityContext.hearthBindNodeID or nil
+  end
+  return nil
+end
+
+--- 按当前角色配置从能力模板展开边。
+---@param routeGraph table 正在构建的路径图
+---@param availabilityContext table|nil 当前角色可用性快照
+local function addAbilityTemplateEdges(routeGraph, availabilityContext)
+  local abilityTemplateData = Toolbox.Data and Toolbox.Data.NavigationAbilityTemplates or {} -- 契约导出的能力模板
+  local templateTable = type(abilityTemplateData.templates) == "table" and abilityTemplateData.templates or {} -- 模板表
+  local templateIDList = {} -- 稳定模板键列表
+  for templateID in pairs(templateTable) do
+    templateIDList[#templateIDList + 1] = tostring(templateID)
+  end
+  table.sort(templateIDList)
+
+  for _, templateID in ipairs(templateIDList) do
+    local templateDef = templateTable[templateID] -- 模板定义
+    if isAbilityTemplateAvailable(templateDef, availabilityContext) then
+      local toNodeId = resolveAbilityTemplateTargetNodeID(templateDef, availabilityContext) -- 模板展开后的目标节点
+      local targetNode = toNodeId and routeGraph.nodes[toNodeId] or nil -- 目标节点定义
+      if toNodeId and targetNode then
+        routeGraph.edges[#routeGraph.edges + 1] = {
+          from = "current",
+          to = toNodeId,
+          cost = 0,
+          stepCost = 1,
+          label = tostring(templateDef.Label or templateDef.label or templateID),
+          mode = tostring(templateDef.Mode or templateDef.mode or "unknown"),
+          traversedUiMapIDs = targetNode.uiMapID and { targetNode.uiMapID } or {},
+          traversedUiMapNames = { tostring(targetNode.name or toNodeId) },
+        }
+      end
     end
   end
 end
@@ -734,15 +1187,20 @@ local function buildMapTargetRouteGraph(target, availabilityContext)
 
   addRouteGraphNodes(routeGraph, mergedNodes)
   addRouteGraphEdges(routeGraph, routeEdgeData.edges)
+  addDynamicWalkLocalEdges(routeGraph)
   addCurrentLocationEdges(routeGraph, mergedNodes, availabilityContext)
+  addAbilityTemplateEdges(routeGraph, availabilityContext)
 
   if routeGraph.nodes[targetMapNodeId] ~= nil then
     routeGraph.edges[#routeGraph.edges + 1] = {
       from = targetMapNodeId,
       to = targetNodeId,
       cost = buildDirectTargetCost(target, { currentUiMapID = targetMapID }, targetRule),
+      stepCost = 1,
       label = targetPointLabel,
-      mode = "TARGET_POINT",
+      mode = WALK_LOCAL_MODE,
+      traversedUiMapIDs = { targetMapID },
+      traversedUiMapNames = { targetName },
     }
   end
 

@@ -57,6 +57,11 @@ EXPECTED_GENERATED_CONTRACTS = {
         "lua_table": "Toolbox.Data.NavigationRouteEdges",
         "root_type": "document",
     },
+    "navigation_ability_templates": {
+        "lua_file": "Toolbox/Data/NavigationAbilityTemplates.lua",
+        "lua_table": "Toolbox.Data.NavigationAbilityTemplates",
+        "root_type": "document",
+    },
     "instance_entrances": {
         "lua_file": "Toolbox/Data/InstanceEntrances.lua",
         "lua_table": "Toolbox.Data.InstanceEntrances",

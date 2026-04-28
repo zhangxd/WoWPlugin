@@ -1,0 +1,146 @@
+{
+  "contract": {
+    "contract_id": "navigation_ability_templates",
+    "schema_version": 1,
+    "summary": "navigation V1 能力模板（炉石 + 可静态解析目标的职业旅行法术）",
+    "source_of_truth": "WoWPlugin",
+    "status": "active"
+  },
+  "output": {
+    "lua_file": "Toolbox/Data/NavigationAbilityTemplates.lua",
+    "lua_table": "Toolbox.Data.NavigationAbilityTemplates",
+    "write_header": true
+  },
+  "source": {
+    "database": "wow.db",
+    "tables": [
+      "spellname",
+      "spelleffect",
+      "skilllineability",
+      "skillline",
+      "chrclasses",
+      "chrraces",
+      "uimap",
+      "uimapassignment"
+    ],
+    "sql": "SELECT 1 AS placeholder",
+    "query": {
+      "from": "spellname / spelleffect / skilllineability / uimap",
+      "joins": [
+        "spellname 负责收集炉石、传送与传送门候选法术名",
+        "spelleffect 负责区分 teleport / portal / hearth 候选",
+        "skilllineability / skillline / chrclasses 恢复职业与阵营线索",
+        "uimap / uimapassignment 通过静态名字与父链把目标法术落到 map_anchor 节点"
+      ],
+      "select": [
+        "templates_raw：能力候选法术的原始 spell / skillline / effect 字段",
+        "supplemental：过滤掉无法稳定解析目标的法术，只输出 V1 可消费模板"
+      ],
+      "where": [
+        "只收炉石、传送与传送门候选，不手工维护 spell -> node 关系",
+        "无法仅靠静态数据稳定解析目标的法术先不进入 V1"
+      ],
+      "group_by": [],
+      "order_by": [
+        "templates_raw.spell_id ASC"
+      ],
+      "row_granularity": "templates_raw 一行代表一个导航能力候选法术"
+    },
+    "supplemental_sources": [
+      {
+        "type": "navigation_ability_enrichment"
+      }
+    ],
+    "datasets": {
+      "templates_raw": {
+        "sql": "SELECT\n  CAST(sn.ID AS INTEGER) AS spell_id,\n  COALESCE(NULLIF(TRIM(sn.Name_lang), ''), 'Spell #' || CAST(sn.ID AS TEXT)) AS spell_name,\n  CAST(COALESCE((SELECT MIN(CAST(sla.SkillLine AS INTEGER)) FROM skilllineability sla WHERE CAST(sla.Spell AS INTEGER) = CAST(sn.ID AS INTEGER) AND CAST(COALESCE(sla.SkillLine, 0) AS INTEGER) > 0), 0) AS INTEGER) AS skillline_id,\n  CAST(COALESCE((SELECT MAX(CAST(sla.ClassMask AS INTEGER)) FROM skilllineability sla WHERE CAST(sla.Spell AS INTEGER) = CAST(sn.ID AS INTEGER)), 0) AS INTEGER) AS class_mask,\n  CAST(COALESCE((SELECT MAX(CAST(sla.RaceMask AS INTEGER)) FROM skilllineability sla WHERE CAST(sla.Spell AS INTEGER) = CAST(sn.ID AS INTEGER)), 0) AS INTEGER) AS race_mask,\n  CAST(COALESCE((SELECT MAX(CASE WHEN CAST(se.Effect AS INTEGER) = 50 THEN 1 ELSE 0 END) FROM spelleffect se WHERE CAST(se.SpellID AS INTEGER) = CAST(sn.ID AS INTEGER)), 0) AS INTEGER) AS has_portal_effect,\n  CAST(COALESCE((SELECT MAX(CASE WHEN CAST(se.Effect AS INTEGER) IN (15, 252) THEN 1 ELSE 0 END) FROM spelleffect se WHERE CAST(se.SpellID AS INTEGER) = CAST(sn.ID AS INTEGER)), 0) AS INTEGER) AS has_teleport_effect\nFROM spellname sn\nWHERE sn.Name_lang = '炉石'\n   OR sn.Name_lang LIKE '传送：%'\n   OR sn.Name_lang LIKE '传送门：%'\n   OR sn.Name_lang LIKE '远古传送门：%'\nORDER BY CAST(sn.ID AS INTEGER)",
+        "query": {
+          "from": "spellname sn",
+          "joins": [
+            "spelleffect se（通过相关子查询恢复 portal / teleport effect 线索）",
+            "skilllineability sla（通过相关子查询恢复 SkillLine / ClassMask / RaceMask）"
+          ],
+          "select": [
+            "spell_id",
+            "spell_name",
+            "skillline_id",
+            "class_mask",
+            "race_mask",
+            "has_portal_effect",
+            "has_teleport_effect"
+          ],
+          "where": [
+            "法术名为 炉石，或以 传送： / 传送门： / 远古传送门： 开头"
+          ],
+          "group_by": [],
+          "order_by": [
+            "spell_id ASC"
+          ],
+          "row_granularity": "一行代表一个导航能力候选法术"
+        }
+      }
+    }
+  },
+  "structure": {
+    "root_type": "document",
+    "lua_shape": "Toolbox.Data.NavigationAbilityTemplates = { schemaVersion, sourceMode, generatedAt, templates }",
+    "fields": [],
+    "document_blocks": [
+      {
+        "name": "metadata",
+        "metadata": {
+          "schemaVersion": 1,
+          "sourceMode": "live",
+          "generatedAt": "@generated_at"
+        }
+      },
+      {
+        "name": "templates",
+        "dataset": "templates",
+        "block_type": "map_object",
+        "key_field": "template_id",
+        "dedupe_by": [
+          "template_id"
+        ],
+        "required_fields": [
+          "template_id",
+          "mode",
+          "spell_id",
+          "target_rule_kind",
+          "label",
+          "self_use_only"
+        ],
+        "sort_by": [
+          "spell_id",
+          "template_id"
+        ],
+        "value_template": {
+          "TemplateID": "template_id",
+          "Mode": "mode",
+          "SpellID": "spell_id",
+          "ClassFile": "class_file",
+          "FactionGroup": "faction_group",
+          "TargetRuleKind": "target_rule_kind",
+          "ToNodeID": "to_node_id",
+          "Label": "label",
+          "SelfUseOnly": "self_use_only"
+        }
+      }
+    ]
+  },
+  "validation": {
+    "required_fields": [],
+    "unique_keys": [],
+    "non_null_fields": [],
+    "sort_rules": []
+  },
+  "versioning": {
+    "current_schema_version": 1,
+    "change_log": [
+      {
+        "schema_version": 1,
+        "summary": "初始契约：导出 navigation V1 能力模板（炉石 + 可静态解析目标的职业旅行法术）"
+      }
+    ]
+  }
+}

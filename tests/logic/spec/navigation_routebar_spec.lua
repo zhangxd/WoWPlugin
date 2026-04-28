@@ -44,17 +44,33 @@ describe("Navigation RouteBar", function()
     rawset(_G, "ToolboxNavigationRouteBar", nil)
   end)
 
-  it("shows_route_steps_at_the_top_center_and_hides_when_cleared", function()
+  it("renders_total_steps_and_segments_at_the_top_center_and_hides_when_cleared", function()
     Toolbox.NavigationModule.RouteBar.ShowRoute({
-      stepLabels = { "传送：奥格瑞玛", "从奥格瑞玛前往杜隆塔尔目标" },
-      totalCost = 35,
+      totalSteps = 2,
+      segments = {
+        {
+          mode = "class_teleport",
+          fromName = "当前位置",
+          toName = "奥格瑞玛",
+          traversedUiMapNames = { "奥格瑞玛" },
+        },
+        {
+          mode = "walk_local",
+          fromName = "奥格瑞玛",
+          toName = "杜隆塔尔目标点",
+          traversedUiMapNames = { "杜隆塔尔" },
+        },
+      },
     })
 
     local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路径条 Frame
     assert.is_table(routeBarFrame)
     assert.is_true(routeBarFrame:IsShown())
     assert.equals("TOP", routeBarFrame._points[1].point)
-    assert.equals("传送：奥格瑞玛  >  从奥格瑞玛前往杜隆塔尔目标", routeBarFrame._textFontString:GetText())
+    assert.is_true(string.find(routeBarFrame._textFontString:GetText(), "2", 1, true) ~= nil)
+    assert.is_true(string.find(routeBarFrame._textFontString:GetText(), "class_teleport", 1, true) ~= nil)
+    assert.is_true(string.find(routeBarFrame._textFontString:GetText(), "当前位置", 1, true) ~= nil)
+    assert.is_true(string.find(routeBarFrame._textFontString:GetText(), "杜隆塔尔", 1, true) ~= nil)
 
     Toolbox.NavigationModule.RouteBar.ClearRoute()
     assert.is_false(routeBarFrame:IsShown())

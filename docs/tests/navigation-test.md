@@ -10,19 +10,20 @@
   - `docs/specs/navigation-spec.md`
   - `docs/designs/navigation-design.md`
   - `docs/plans/navigation-plan.md`
-- 最后更新：2026-04-27
+- 最后更新：2026-04-29
 
 ## 1. 测试背景
 
-- `navigation` 新模块第一版已接入路径核心、世界地图“规划路线”按钮、顶部路径条、地图基础节点导出数据与 Taxi 公共交通导出边。
+- `navigation` 当前测试基线已重定义为“当前角色配置 + 最少路径步数”的多模态路线图。
+- V1 已接入路径核心、世界地图“规划路线”按钮、顶部路径条、Taxi 静态骨架、能力模板导出，以及当前角色的已学法术 / 已开航点 / 炉石绑定点运行时快照。
 - 本测试记录覆盖自动化验证结果与需要游戏内复测的关键点。
 
 ## 2. 测试范围
 
-- `Toolbox.Navigation` Dijkstra 最短路径求解。
-- 当前角色可用性过滤：职业、阵营、已确认技能。
-- 多枢纽路径验收：仅保留契约导出数据样例；手工维护 ID 的传送门与职业位移样例已废弃。
-- `NavigationMapNodes` / `NavigationTaxiEdges` / `NavigationRouteEdges` 数据契约与文件头。
+- `Toolbox.Navigation` 最少步数求解、平局规则与连续 `walk_local` 压缩。
+- 当前角色可用性过滤：职业、阵营、已确认技能、已开航点、炉石绑定点。
+- 多枢纽路径验收：统一消费契约导出的静态骨架与能力模板；手工维护 ID 的传送门与职业位移样例已废弃。
+- `NavigationMapNodes` / `NavigationTaxiEdges` / `NavigationRouteEdges` / `NavigationAbilityTemplates` 数据契约与文件头。
 - `NavigationManualEdges` 不得被 TOC 加载，`Toolbox.Navigation` 不得消费该文件。
 - `navigation` 模块注册、设置页契约、TOC 与本地化键。
 - `RouteBar` 顶部路径条显示 / 清除。
@@ -40,26 +41,26 @@
 
 | 编号 | 前置条件 | 操作 | 预期结果 |
 |------|----------|------|----------|
-| NAV-001 | 构造三个节点与多条边 | 调用 `FindShortestPath()` | 返回最低总耗时路线与步骤 |
-| NAV-002 | 构造含职业 / 阵营 / 技能要求的边 | 调用 `FilterRouteGraph()` | 只保留当前角色已确认可用的边 |
-| NAV-003 | 构造导出形状的路径数据并带技能要求 | 调用 `GetRequiredSpellIDList()` / `FilterRouteGraph()` | 只收集并保留已确认可用的导出边 |
+| NAV-001 | 构造三节点与多条候选边 | 调用 `FindShortestPath()` | 返回最少步数路线，而不是旧 `totalCost` 路线 |
+| NAV-002 | 构造含职业 / 阵营 / 技能 / 飞行点要求的边 | 调用 `FilterRouteGraph()` | 只保留当前角色已确认可用的边 |
+| NAV-003 | 构造导出形状的路线骨架与能力模板 | 调用 `GetRequiredSpellIDList()` | 收集运行时需要确认的技能列表 |
 | NAV-004 | TOC 包含 navigation Data 列表 | 运行设置 / TOC 校验 | `NavigationManualEdges.lua` 不得出现 |
-| NAV-005 | 注入自定义导出形状的 `NavigationRouteEdges` | 规划目标地图 | 结果使用统一导出数据中的 label 和 cost |
-| NAV-006 | 加载 `NavigationMapNodes` 与 `NavigationRouteEdges` | 校验导出边引用 | 所有导出节点、边、目标规则可解析 |
+| NAV-005 | 注入自定义导出形状的 `NavigationRouteEdges` 与 `NavigationAbilityTemplates` | 规划目标地图 | 结果按 `segments / totalSteps` 输出，并可展开 `hearthstone / class travel` |
+| NAV-006 | 加载 `NavigationMapNodes`、`NavigationRouteEdges` 与 `NavigationAbilityTemplates` | 校验导出引用 | 所有导出节点、边与能力模板都可解析 |
 | NAV-007 | 加载 `RouteBar.lua` | 调用 `ShowRoute()` / `ClearRoute()` | 顶部路径条显示步骤并可隐藏 |
 | NAV-008 | 模拟 `WorldMapFrame` | 调用 `WorldMap.Install()` 并触发 OnShow / OnClick | 只创建一次按钮，并调用规划链路 |
 | NAV-009 | 加载 `Navigation.lua` 模块 | 调用模块 enable / disable 回调 | 启用安装世界地图入口，禁用隐藏入口并清除路线 |
-| NAV-010 | 当前角色位于导出的 UiMapLink 起点地图 | 规划 DB 明确关系可达目标 | 使用 `UiMapLink` 导出的统一路线边 |
+| NAV-010 | 当前角色位于起点地图，具备已开航点与炉石绑定点 | 规划可达目标 | 可用 `taxi`、`hearthstone` 与职业旅行模板组成 V1 路线 |
 | NAV-011 | 新增 `navigation_instance_entrances` 契约后 | 导出剃刀高地入口 | `journalInstanceID=233` 输出外部入口目标，不指向副本内部 `MapID=129` |
 | NAV-012 | 新增 `navigation_map_assignments` 契约后 | 校验入口坐标转换 | 入口目标 `uiMapID/x/y` 来自 `uimapassignment` 覆盖规则 |
 | NAV-013 | 从真实 `wow.db` 导出 `navigation_taxi_edges` | 运行 `export_toolbox_one.py navigation_taxi_edges` | 生成 `NavigationTaxiEdges.lua`，文件头、节点与边结构符合契约 |
-| NAV-014 | 当前角色位于银月城，目标为剃刀高地副本入口 | 规划副本入口目标 | 若相关连接边未由数据库导出，允许保守返回直接目标或无中转路线，不允许使用手工传送门 ID |
-| NAV-015 | 从真实 `wow.db` 导出 `navigation_route_edges` | 运行 `export_toolbox_one.py navigation_route_edges` | 生成 `NavigationRouteEdges.lua`，运行时规划测试只覆盖统一路线边入口，且不包含 `MAP_REGION` / `MAP_TRACE` |
+| NAV-014 | 从真实 `wow.db` 导出 `navigation_ability_templates` | 运行 `export_toolbox_one.py navigation_ability_templates` | 生成 `NavigationAbilityTemplates.lua`，只保留 V1 可静态解析目标的职业旅行模板 |
+| NAV-015 | 从真实 `wow.db` 导出 `navigation_route_edges` | 运行 `export_toolbox_one.py navigation_route_edges` | 生成 `NavigationRouteEdges.lua`，运行时规划测试只覆盖统一静态路线骨架入口 |
 
 ## 5. 执行结果
 
 - `python tests/validate_data_contracts.py`
-  - 结果：通过，包含 `navigation_map_nodes`、`navigation_taxi_edges` 与 `navigation_route_edges`，并校验生成型 Data 文件已加入 TOC。
+  - 结果：通过，包含 `navigation_map_nodes`、`navigation_taxi_edges`、`navigation_route_edges` 与 `navigation_ability_templates`，并校验生成型 Data 文件已加入 TOC。
 - `python -m unittest scripts.export.tests.test_lua_contract_writer`
   - 结果：通过，覆盖 document `map_object` 字符串键渲染为 Lua 字面量。
 - `python -m unittest scripts.export.tests.test_contract_export`
@@ -67,26 +68,27 @@
 - `python scripts/export/export_toolbox_one.py navigation_taxi_edges --contract-dir DataContracts --data-dir Toolbox/Data`
   - 结果：通过，生成 91 个 Taxi 节点与 129 条公共交通边。
 - `python scripts/export/export_toolbox_one.py navigation_route_edges --contract-dir DataContracts --data-dir Toolbox/Data`
-  - 结果：通过，生成统一运行时路线边文件；只保留 `UiMapLink` 明确链接边，不包含 `MAP_REGION` / `MAP_TRACE` / `WAYPOINT` / `WAYPOINT_ACCESS`。
+  - 结果：通过，生成统一运行时静态路线骨架文件；只保留 `map_anchor + taxi` 节点与 `taxi` 静态边。
+- `python scripts/export/export_toolbox_one.py navigation_ability_templates --contract-dir DataContracts --data-dir Toolbox/Data`
+  - 结果：通过，生成 `NavigationAbilityTemplates.lua`；当前保留 `炉石 + 可静态解析目标的职业旅行法术`。
 - `python tests/validate_settings_subcategories.py`
   - 结果：通过，包含 `navigation` 模块、TOC、Locales 与 Data 入口。
 - `busted tests/logic/spec/navigation_*_spec.lua`
-  - 结果：通过，包含银月城到剃刀高地入口回归用例。
+  - 结果：通过，覆盖最少步数、`walk_local` 压缩、`taxi` 可用性、`hearthstone / class travel` 模板展开、世界地图入口与顶部路径条。
 - `python tests/run_all.py --ci`
-  - 结果：通过，`115 successes / 0 failures / 0 errors / 0 pending`。
+  - 结果：通过，`123 successes / 0 failures / 0 errors / 0 pending`。
 
 ## 6. 问题与阻塞
 
 - 尚未进行真实客户端内的鼠标坐标与按钮位置复测。
-- 当前路线边只覆盖已导出的地图节点与 `UiMapLink` 明确链接边；其它交通需要后续契约导出，禁止用坐标区域或 SafeLoc 关系补洞。
+- 当前 V1 仍未纳入 `transport / public_portal / areatrigger / 道标石 / 全世界 walk component`；其它交通需要后续契约导出，禁止用手工 ID 或坐标补洞。
 
 ## 7. 结论
 
-- 本轮 Taxi、地图覆盖与副本入口数据契约、导出脚本、TOC 接线与 writer 单测已通过；项目总验证已全绿。
-- 本轮 `navigation_map_assignments` 与 `navigation_instance_entrances` 数据契约、导出脚本、TOC 接线与剃刀高地入口回归校验已通过。
-- 本轮 `navigation_route_edges` 数据契约、导出脚本、TOC 接线与运行时统一消费入口已接通；`Toolbox.Navigation` 不再直接消费 `NavigationTaxiEdges`，也不消费坐标区域、轨迹或 SafeLoc 派生联接边。
-- 第一版代码链路满足“世界地图目标 / 副本入口目标 -> 导出数据消费 -> 路径求解 / waypoint -> 顶部路径 UI”的基础验收。
-- 后续重点是导出 `navigation_map_assignments` 与 `navigation_instance_entrances`，优先修复副本入口目标，再评估传送门与职业旅行技能候选契约。
+- 本轮 Taxi、地图覆盖、副本入口、能力模板与统一静态路线骨架的契约、导出脚本、TOC 接线与逻辑测试已通过；项目总验证全绿。
+- 本轮 `navigation_route_edges` 与 `navigation_ability_templates` 已成为运行时 V1 的两条正式数据入口；`Toolbox.Navigation` 不再直接消费来源侧候选边，也不消费手工路径数据。
+- 当前代码链路满足“世界地图目标 / 副本入口目标 -> 导出数据消费 -> 最少步数求解 -> 顶部路径 UI”的 V1 验收。
+- 后续重点转向 `transport / public_portal / areatrigger / walk component` 等未闭合模态。
 
 ## 8. 修订记录
 
@@ -99,3 +101,4 @@
 | 2026-04-27 | 路线边统一导出落地：新增 `navigation_route_edges` 验收，运行时测试改为注入 `NavigationRouteEdges` |
 | 2026-04-27 | 修正路线边验收：禁止 `MAP_REGION` / `MAP_TRACE` 坐标派生联接进入运行时数据 |
 | 2026-04-27 | 再次收紧路线边验收：禁止 `WAYPOINT` / `WAYPOINT_ACCESS` 与 SafeLoc 坐标接入进入运行时数据 |
+| 2026-04-29 | V1 口径切换为“当前角色配置 + 最少路径步数”，新增 `navigation_ability_templates` 与 `KnownTaxiNodeIDs / HearthBindNodeID` 回归验证 |

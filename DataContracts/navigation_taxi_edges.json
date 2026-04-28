@@ -1,8 +1,8 @@
 {
   "contract": {
     "contract_id": "navigation_taxi_edges",
-    "schema_version": 1,
-    "summary": "navigation 公共交通 Taxi* 静态边",
+    "schema_version": 2,
+    "summary": "navigation V1 Taxi 静态骨架（TaxiNode / TaxiPath + TraversedUiMap 序列）",
     "source_of_truth": "WoWPlugin",
     "status": "active"
   },
@@ -17,91 +17,86 @@
       "taxinodes",
       "taxipath",
       "taxipathnode",
+      "uimap",
       "uimapassignment"
     ],
     "sql": "SELECT 1 AS placeholder",
     "query": {
-      "from": "taxipath",
+      "from": "taxinodes / taxipath / taxipathnode / uimapassignment",
       "joins": [
-        "taxinodes（起点 / 终点节点名称与地图信息）",
-        "taxipathnode（用于过滤公共交通候选路径）",
-        "uimapassignment（把 MapID 保守映射到 UiMapID）"
+        "taxinodes 提供 Taxi 节点名称与世界坐标",
+        "taxipath 提供静态 Taxi 路线",
+        "taxipathnode 提供路径轨迹点",
+        "uimapassignment + uimap 提供静态 UiMap 覆盖关系，用于恢复节点落点和经过地图序列"
       ],
       "select": [
-        "nodes dataset：taxi_node_id, ui_map_id, map_id, node_name, node_flags, condition_id, visibility_condition_id",
-        "edges dataset：edge_index, path_id, from_node_id, to_node_id, edge_cost, edge_label, mode, has_delay_node, has_stop_node, has_map_change_node"
+        "nodes_raw：TaxiNode 基础字段（ID / Name / MapID / Pos / Flags）",
+        "edges_raw：TaxiPath 基础字段（PathID / FromTaxiNode / ToTaxiNode）",
+        "supplemental：按静态覆盖关系补齐 UiMapID / WalkClusterKey / TraversedUiMapIDs / TraversedUiMapNames"
       ],
       "where": [
-        "只保留至少存在一个 Delay > 0 或 stop flag 节点的 TaxiPath，作为飞艇 / 船 / 电车等公共交通候选",
-        "不把普通飞行点路径直接并入当前推荐逻辑"
+        "Taxi 路线不再只保留旧 public transport 候选；V1 统一纳入可静态恢复的 TaxiPath",
+        "经过地图序列必须导出为 Lua 数组，不允许退化成逗号字符串"
       ],
-      "group_by": [
-        "nodes dataset：taxi_node_id",
-        "edges dataset：path_id"
-      ],
+      "group_by": [],
       "order_by": [
-        "nodes dataset：taxi_node_id ASC",
-        "edges dataset：path_id ASC"
+        "nodes_raw.taxi_node_id ASC",
+        "edges_raw.path_id ASC"
       ],
-      "row_granularity": "nodes 一行代表一个 Taxi 节点；edges 一行代表一条公共交通候选路径"
+      "row_granularity": "nodes_raw 一行代表一个 TaxiNode；edges_raw 一行代表一条 TaxiPath"
     },
+    "supplemental_sources": [
+      {
+        "type": "navigation_taxi_enrichment"
+      }
+    ],
     "datasets": {
-      "nodes": {
-        "sql": "WITH public_path_ids AS (\n  SELECT CAST(PathID AS INTEGER) AS path_id\n  FROM taxipathnode\n  WHERE TRIM(COALESCE(PathID, '')) <> ''\n    AND CAST(PathID AS INTEGER) > 0\n    AND (\n      CAST(COALESCE(Delay, 0) AS INTEGER) > 0\n      OR (CAST(COALESCE(Flags, 0) AS INTEGER) & 2) <> 0\n    )\n  GROUP BY CAST(PathID AS INTEGER)\n), public_paths AS (\n  SELECT\n    CAST(tp.ID AS INTEGER) AS path_id,\n    CAST(tp.FromTaxiNode AS INTEGER) AS from_taxi_node_id,\n    CAST(tp.ToTaxiNode AS INTEGER) AS to_taxi_node_id,\n    CAST(COALESCE(tp.Cost, 0) AS INTEGER) AS path_cost\n  FROM taxipath tp\n  JOIN public_path_ids ppi ON ppi.path_id = CAST(tp.ID AS INTEGER)\n  WHERE TRIM(COALESCE(tp.ID, '')) <> ''\n    AND TRIM(COALESCE(tp.FromTaxiNode, '')) <> ''\n    AND TRIM(COALESCE(tp.ToTaxiNode, '')) <> ''\n    AND CAST(tp.ID AS INTEGER) > 0\n    AND CAST(tp.FromTaxiNode AS INTEGER) > 0\n    AND CAST(tp.ToTaxiNode AS INTEGER) > 0\n), used_nodes AS (\n  SELECT from_taxi_node_id AS taxi_node_id FROM public_paths\n  UNION\n  SELECT to_taxi_node_id AS taxi_node_id FROM public_paths\n)\nSELECT\n  'taxi_' || CAST(tn.ID AS TEXT) AS taxi_node_key,\n  CAST(tn.ID AS INTEGER) AS taxi_node_id,\n  CAST(COALESCE((\n    SELECT MIN(CAST(uma.UiMapID AS INTEGER))\n    FROM uimapassignment uma\n    WHERE CAST(uma.MapID AS INTEGER) = CAST(tn.ContinentID AS INTEGER)\n      AND CAST(COALESCE(uma.UiMapID, 0) AS INTEGER) > 0\n  ), 0) AS INTEGER) AS ui_map_id,\n  CAST(COALESCE(tn.ContinentID, 0) AS INTEGER) AS map_id,\n  Name_lang AS node_name,\n  CAST(COALESCE(tn.Flags, 0) AS INTEGER) AS node_flags,\n  CAST(COALESCE(tn.ConditionID, 0) AS INTEGER) AS condition_id,\n  CAST(COALESCE(tn.VisibilityConditionID, 0) AS INTEGER) AS visibility_condition_id\nFROM taxinodes tn\nJOIN used_nodes un ON un.taxi_node_id = CAST(tn.ID AS INTEGER)\nWHERE TRIM(COALESCE(tn.ID, '')) <> ''\n  AND CAST(tn.ID AS INTEGER) > 0\n  AND TRIM(COALESCE(Name_lang, '')) <> ''\nORDER BY CAST(tn.ID AS INTEGER), tn.ID",
+      "nodes_raw": {
+        "sql": "SELECT CAST(tn.ID AS INTEGER) AS taxi_node_id, COALESCE(NULLIF(TRIM(tn.Name_lang), ''), 'Taxi Node #' || CAST(tn.ID AS TEXT)) AS node_name, CAST(COALESCE(tn.ContinentID, 0) AS INTEGER) AS map_id, CAST(COALESCE(tn.Pos_0, 0) AS REAL) AS pos_x, CAST(COALESCE(tn.Pos_1, 0) AS REAL) AS pos_y, CAST(COALESCE(tn.Pos_2, 0) AS REAL) AS pos_z, CAST(COALESCE(tn.Flags, 0) AS INTEGER) AS node_flags, CAST(COALESCE(tn.ConditionID, 0) AS INTEGER) AS condition_id, CAST(COALESCE(tn.VisibilityConditionID, 0) AS INTEGER) AS visibility_condition_id FROM taxinodes tn WHERE CAST(tn.ID AS INTEGER) > 0 ORDER BY CAST(tn.ID AS INTEGER)",
         "query": {
           "from": "taxinodes tn",
-          "joins": [
-            "used_nodes（由 TaxiPath 公共交通候选集合反查所需节点）",
-            "uimapassignment uma（按 MapID 保守映射到最小 UiMapID）"
-          ],
+          "joins": [],
           "select": [
             "taxi_node_id",
-            "ui_map_id",
-            "map_id",
             "node_name",
+            "map_id",
+            "pos_x",
+            "pos_y",
+            "pos_z",
             "node_flags",
             "condition_id",
             "visibility_condition_id"
           ],
           "where": [
-            "只导出被公共交通候选路径引用的 TaxiNode",
-            "节点名称非空"
+            "taxinodes.ID > 0"
           ],
           "group_by": [],
           "order_by": [
             "taxi_node_id ASC"
           ],
-          "row_granularity": "一行代表一个可被 navigation 消费的 Taxi 节点"
+          "row_granularity": "一行代表一个 TaxiNode 原始记录"
         }
       },
-      "edges": {
-        "sql": "WITH public_path_ids AS (\n  SELECT CAST(PathID AS INTEGER) AS path_id\n  FROM taxipathnode\n  WHERE TRIM(COALESCE(PathID, '')) <> ''\n    AND CAST(PathID AS INTEGER) > 0\n    AND (\n      CAST(COALESCE(Delay, 0) AS INTEGER) > 0\n      OR (CAST(COALESCE(Flags, 0) AS INTEGER) & 2) <> 0\n    )\n  GROUP BY CAST(PathID AS INTEGER)\n), public_paths AS (\n  SELECT\n    CAST(tp.ID AS INTEGER) AS path_id,\n    CAST(tp.FromTaxiNode AS INTEGER) AS from_taxi_node_id,\n    CAST(tp.ToTaxiNode AS INTEGER) AS to_taxi_node_id,\n    CAST(COALESCE(tp.Cost, 0) AS INTEGER) AS path_cost\n  FROM taxipath tp\n  JOIN public_path_ids ppi ON ppi.path_id = CAST(tp.ID AS INTEGER)\n  WHERE TRIM(COALESCE(tp.ID, '')) <> ''\n    AND TRIM(COALESCE(tp.FromTaxiNode, '')) <> ''\n    AND TRIM(COALESCE(tp.ToTaxiNode, '')) <> ''\n    AND CAST(tp.ID AS INTEGER) > 0\n    AND CAST(tp.FromTaxiNode AS INTEGER) > 0\n    AND CAST(tp.ToTaxiNode AS INTEGER) > 0\n), path_stats AS (\n  SELECT\n    CAST(tpn.PathID AS INTEGER) AS path_id,\n    MAX(CASE WHEN CAST(COALESCE(tpn.Delay, 0) AS INTEGER) > 0 THEN 1 ELSE 0 END) AS has_delay_node,\n    MAX(CASE WHEN (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 2) <> 0 THEN 1 ELSE 0 END) AS has_stop_node,\n    MAX(CASE WHEN (CAST(COALESCE(tpn.Flags, 0) AS INTEGER) & 1) <> 0 THEN 1 ELSE 0 END) AS has_map_change_node\n  FROM taxipathnode tpn\n  JOIN public_path_ids ppi ON ppi.path_id = CAST(tpn.PathID AS INTEGER)\n  WHERE TRIM(COALESCE(tpn.PathID, '')) <> ''\n    AND CAST(tpn.PathID AS INTEGER) > 0\n  GROUP BY CAST(tpn.PathID AS INTEGER)\n)\nSELECT\n  ROW_NUMBER() OVER (ORDER BY pp.path_id ASC) AS edge_index,\n  CAST(pp.path_id AS INTEGER) AS path_id,\n  'taxi_' || CAST(pp.from_taxi_node_id AS TEXT) AS from_node_key,\n  'taxi_' || CAST(pp.to_taxi_node_id AS TEXT) AS to_node_key,\n  CAST(pp.from_taxi_node_id AS INTEGER) AS from_node_id,\n  CAST(pp.to_taxi_node_id AS INTEGER) AS to_node_id,\n  CAST(COALESCE(pp.path_cost, 0) AS INTEGER) AS edge_cost,\n  'PUBLIC_TRANSPORT' AS mode,\n  '乘坐公共交通前往' || COALESCE(tn_to.Name_lang, ('Taxi Node #' || CAST(pp.to_taxi_node_id AS TEXT))) AS edge_label,\n  CAST(COALESCE(ps.has_delay_node, 0) AS INTEGER) AS has_delay_node,\n  CAST(COALESCE(ps.has_stop_node, 0) AS INTEGER) AS has_stop_node,\n  CAST(COALESCE(ps.has_map_change_node, 0) AS INTEGER) AS has_map_change_node\nFROM public_paths pp\nLEFT JOIN path_stats ps ON ps.path_id = pp.path_id\nLEFT JOIN taxinodes tn_to ON CAST(tn_to.ID AS INTEGER) = pp.to_taxi_node_id\nORDER BY pp.path_id ASC",
+      "edges_raw": {
+        "sql": "SELECT ROW_NUMBER() OVER (ORDER BY CAST(tp.ID AS INTEGER)) AS edge_index, CAST(tp.ID AS INTEGER) AS path_id, CAST(tp.FromTaxiNode AS INTEGER) AS from_taxi_node_id, CAST(tp.ToTaxiNode AS INTEGER) AS to_taxi_node_id FROM taxipath tp WHERE CAST(tp.ID AS INTEGER) > 0 AND CAST(tp.FromTaxiNode AS INTEGER) > 0 AND CAST(tp.ToTaxiNode AS INTEGER) > 0 ORDER BY CAST(tp.ID AS INTEGER)",
         "query": {
           "from": "taxipath tp",
-          "joins": [
-            "taxipathnode tpn（聚合 Delay / Flags 特征）",
-            "taxinodes tn_to（生成目标名称文案）"
-          ],
+          "joins": [],
           "select": [
             "edge_index",
             "path_id",
-            "from_node_id",
-            "to_node_id",
-            "edge_cost",
-            "mode",
-            "edge_label",
-            "has_delay_node",
-            "has_stop_node",
-            "has_map_change_node"
+            "from_taxi_node_id",
+            "to_taxi_node_id"
           ],
           "where": [
-            "只保留至少存在一个 Delay > 0 或 stop flag 节点的 TaxiPath"
+            "taxipath.ID > 0",
+            "起点 / 终点 TaxiNode 有效"
           ],
           "group_by": [],
           "order_by": [
             "path_id ASC"
           ],
-          "row_granularity": "一行代表一条可直接写入 NavigationTaxiEdges.edges 的公共交通边"
+          "row_granularity": "一行代表一条 TaxiPath 原始记录"
         }
       }
     }
@@ -114,7 +109,7 @@
       {
         "name": "metadata",
         "metadata": {
-          "schemaVersion": 1,
+          "schemaVersion": 2,
           "sourceMode": "live",
           "generatedAt": "@generated_at"
         }
@@ -131,17 +126,21 @@
           "taxi_node_key",
           "taxi_node_id",
           "ui_map_id",
-          "map_id",
-          "node_name"
+          "node_name",
+          "walk_cluster_key"
         ],
         "sort_by": [
           "taxi_node_id"
         ],
         "value_template": {
-          "ID": "taxi_node_id",
+          "TaxiNodeID": "taxi_node_id",
           "UiMapID": "ui_map_id",
           "MapID": "map_id",
           "Name_lang": "node_name",
+          "WalkClusterKey": "walk_cluster_key",
+          "PosX": "pos_x",
+          "PosY": "pos_y",
+          "PosZ": "pos_z",
           "Flags": "node_flags",
           "ConditionID": "condition_id",
           "VisibilityConditionID": "visibility_condition_id"
@@ -153,29 +152,33 @@
         "block_type": "map_object",
         "key_field": "edge_index",
         "dedupe_by": [
-          "edge_index"
+          "path_id"
         ],
         "required_fields": [
           "edge_index",
           "path_id",
           "from_node_key",
           "to_node_key",
-          "edge_cost",
-          "edge_label"
+          "mode",
+          "traversed_ui_map_ids",
+          "traversed_ui_map_names"
         ],
         "sort_by": [
           "edge_index"
         ],
         "value_template": {
-          "id": "path_id",
-          "from": "from_node_key",
-          "to": "to_node_key",
-          "cost": "edge_cost",
-          "label": "edge_label",
-          "mode": "mode",
-          "hasDelayNode": "has_delay_node",
-          "hasStopNode": "has_stop_node",
-          "hasMapChangeNode": "has_map_change_node"
+          "ID": "path_id",
+          "FromNodeID": "from_node_key",
+          "ToNodeID": "to_node_key",
+          "FromTaxiNodeID": "from_taxi_node_id",
+          "ToTaxiNodeID": "to_taxi_node_id",
+          "FromUiMapID": "from_ui_map_id",
+          "ToUiMapID": "to_ui_map_id",
+          "StepCost": "step_cost",
+          "Mode": "mode",
+          "Label": "edge_label",
+          "TraversedUiMapIDs": "traversed_ui_map_ids",
+          "TraversedUiMapNames": "traversed_ui_map_names"
         }
       }
     ]
@@ -187,15 +190,15 @@
     "sort_rules": []
   },
   "versioning": {
-    "current_schema_version": 1,
+    "current_schema_version": 2,
     "change_log": [
       {
         "schema_version": 1,
-        "summary": "初始契约：基于 TaxiNodes / TaxiPath / TaxiPathNode 定义 navigation 公共交通导出形状，按当前实现输出 nodes + edges"
+        "summary": "初始契约：Taxi 来源侧只导旧 public transport 候选"
       },
       {
-        "schema_version": 1,
-        "summary": "按用户确认从 draft 推进为 active，从真实 wow.db 导出 NavigationTaxiEdges.lua 供 navigation 消费"
+        "schema_version": 2,
+        "summary": "V1 改为导出统一 Taxi 静态骨架：补齐 UiMap 落点、WalkClusterKey 与 TraversedUiMap 数组"
       }
     ]
   }

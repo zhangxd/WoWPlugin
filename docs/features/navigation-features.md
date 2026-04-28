@@ -11,12 +11,12 @@
   - `docs/plans/navigation-plan.md`
   - `docs/tests/navigation-test.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-27
+- 最后更新：2026-04-29
 
 ## 1. 定位
 
 - `navigation` 是独立地图导航模块，用于从世界地图目标生成当前角色可用的旅行路线。
-- 第一版已把当前地点、地图基础节点和统一导出的路线边纳入同一张旅行图，并把路线显示在屏幕顶部中间；其它传送类能力必须等数据库契约导出后再进入运行时图。
+- 当前基线已重定义为“当前角色配置 + 最少路径步数”的多模态路线图；运行时统一消费静态路线骨架，并按当前角色的已学法术、已开航点与炉石绑定点裁剪可用路径。
 
 ## 2. 适用场景
 
@@ -27,14 +27,21 @@
 
 - 在 `navigation` 模块启用后，世界地图显示时会创建“规划路线”按钮。
 - 点击“规划路线”会读取当前用户 waypoint 的 `uiMapID` 与归一化坐标。
-- 路径规划只消费 DataContracts 契约导出的导航数据；若导出边包含职业、阵营或技能要求，再按当前角色运行时状态过滤。
-- 顶部路径条 `ToolboxNavigationRouteBar` 会在屏幕顶部中间显示路线步骤。
+- 路径规划只消费 DataContracts 契约导出的导航数据；当前角色快照至少包含 `Class / Faction / KnownSpellIDs / KnownTaxiNodeIDs / HearthBindNodeID`。
+- 顶部路径条 `ToolboxNavigationRouteBar` 会在屏幕顶部中间显示总步数与逐段路线。
 - 当前静态数据分两层：
   - `Toolbox.Data.NavigationMapNodes`：由 `DataContracts/navigation_map_nodes.json` 通过正式导出脚本生成的 UiMap 基础节点。
   - `Toolbox.Data.NavigationMapAssignments`：由 `DataContracts/navigation_map_assignments.json` 从 `uimapassignment` 导出的世界坐标覆盖范围。
   - `Toolbox.Data.NavigationInstanceEntrances`：由 `DataContracts/navigation_instance_entrances.json` 从 `journalinstanceentrance` 等表导出的副本入口外部目标。
   - `Toolbox.Data.NavigationTaxiEdges`：由 `DataContracts/navigation_taxi_edges.json` 从 `wow.db` 的 `TaxiNodes / TaxiPath / TaxiPathNode` 导出的 Taxi 来源侧数据。
-  - `Toolbox.Data.NavigationRouteEdges`：由 `DataContracts/navigation_route_edges.json` 统一导出的运行时路线边；`Toolbox.Navigation` 构图只消费该表，不直接消费各来源侧边表。
+  - `Toolbox.Data.NavigationRouteEdges`：由 `DataContracts/navigation_route_edges.json` 统一导出的运行时静态路线骨架；当前只保留 `map_anchor + taxi` 节点与 `taxi` 静态边。
+  - `Toolbox.Data.NavigationAbilityTemplates`：由 `DataContracts/navigation_ability_templates.json` 导出的能力模板；当前覆盖 `hearthstone` 与可静态解析目标的职业旅行法术。
+- 当前 V1 运行时主闭环为：
+  - `walk_local`
+  - `taxi`
+  - `hearthstone`
+  - `class_teleport`
+  - `class_portal`
 
 ## 4. 入口与使用方式
 
@@ -51,10 +58,10 @@
 
 ## 6. 已知限制
 
-- 第一版不纳入飞行点 / 飞行管理员。
 - 第一版不做账号其他角色能力推断，只看当前角色。
 - 第一版不实现真实地形寻路、避障或逐米移动路线。
-- 玩具、炉石、节日传送、战役阶段限定传送门、联盟侧完整传送门网络和更多职业特殊交通尚未形成数据库导出闭环，当前不进入运行时导航图。
+- `transport / public_portal / areatrigger / 道标石 / 全世界 walk component` 仍未闭合，不进入当前 V1 运行时图。
+- 无法仅靠静态导出稳定解析目标的职业/剧情传送法术，当前不会进入 `NavigationAbilityTemplates`。
 - 当前不拦截世界地图原生点击；目标坐标由“鼠标指向 + 点击规划按钮”确定。
 
 ## 7. 关联文档
@@ -75,3 +82,4 @@
 | 2026-04-27 | 数据源规则收紧：移除手工路径边运行时消费，导航数据只允许通过 DataContracts 导出 |
 | 2026-04-27 | 路线边消费入口统一：新增 `NavigationRouteEdges.lua`，运行时构图不再直接读取 `NavigationTaxiEdges.lua` |
 | 2026-04-27 | 接入副本入口导出数据：新增 `NavigationMapAssignments.lua` 与 `NavigationInstanceEntrances.lua`，副本入口导航使用导出的外部目标坐标 |
+| 2026-04-29 | V1 基线重定义：路线按当前角色配置和最少路径步数计算，接入 `NavigationAbilityTemplates.lua`、已开航点过滤与炉石绑定点解析 |

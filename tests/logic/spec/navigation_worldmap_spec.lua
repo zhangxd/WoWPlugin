@@ -68,8 +68,21 @@ describe("Navigation WorldMap integration", function()
           assert.equals(0.43, target.y)
           assert.equals("MAGE", availabilityContext.classFile)
           return {
-            totalCost = 35,
-            stepLabels = { "传送：奥格瑞玛", "从奥格瑞玛前往杜隆塔尔目标" },
+            totalSteps = 2,
+            segments = {
+              {
+                mode = "class_teleport",
+                fromName = "当前位置",
+                toName = "奥格瑞玛",
+                traversedUiMapNames = { "奥格瑞玛" },
+              },
+              {
+                mode = "walk_local",
+                fromName = "奥格瑞玛",
+                toName = "北风苔原目标点",
+                traversedUiMapNames = { "北风苔原" },
+              },
+            },
           }, nil
         end,
       },
@@ -131,7 +144,8 @@ describe("Navigation WorldMap integration", function()
 
     targetButton:RunScript("OnClick")
     assert.is_table(shownRoute)
-    assert.equals(35, shownRoute.totalCost)
+    assert.equals(2, shownRoute.totalSteps)
+    assert.equals("class_teleport", shownRoute.segments[1].mode)
   end)
 
   it("shows_disabled_button_and_chat_hint_when_user_waypoint_is_missing", function()

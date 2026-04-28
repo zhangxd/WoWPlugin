@@ -53,6 +53,7 @@ Data\NavigationTaxiEdges.lua
 Data\NavigationUiMapRelations.lua
 Data\NavigationWaypointEdges.lua
 Data\NavigationRouteEdges.lua
+Data\NavigationAbilityTemplates.lua
 
 # ============================================================================
 # Modules（功能模块 - 依赖 Data）

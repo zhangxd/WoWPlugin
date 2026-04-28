@@ -4,7 +4,21 @@ describe("Navigation API", function()
   local originalUnitFactionGroup = nil -- 原始 UnitFactionGroup 全局
   local originalCSpellBook = nil -- 原始 C_SpellBook 全局
   local originalCMap = nil -- 原始 C_Map 全局
-  local originalCreateVector2D = nil -- 原始 CreateVector2D 全局
+  local originalCTaxiMap = nil -- 原始 C_TaxiMap 全局
+  local originalGetBindLocation = nil -- 原始 GetBindLocation 全局
+
+  local function setNavigationData(routeNodes, routeEdges, mapNodes, abilityTemplates)
+    Toolbox.Data.NavigationRouteEdges = {
+      nodes = routeNodes or {},
+      edges = routeEdges or {},
+    }
+    Toolbox.Data.NavigationMapNodes = {
+      nodes = mapNodes or {},
+    }
+    Toolbox.Data.NavigationAbilityTemplates = {
+      templates = abilityTemplates or {},
+    }
+  end
 
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
@@ -12,7 +26,8 @@ describe("Navigation API", function()
     originalUnitFactionGroup = rawget(_G, "UnitFactionGroup")
     originalCSpellBook = rawget(_G, "C_SpellBook")
     originalCMap = rawget(_G, "C_Map")
-    originalCreateVector2D = rawget(_G, "CreateVector2D")
+    originalCTaxiMap = rawget(_G, "C_TaxiMap")
+    originalGetBindLocation = rawget(_G, "GetBindLocation")
     rawset(_G, "Toolbox", {
       Navigation = {},
       Data = {},
@@ -31,29 +46,170 @@ describe("Navigation API", function()
     rawset(_G, "UnitFactionGroup", originalUnitFactionGroup)
     rawset(_G, "C_SpellBook", originalCSpellBook)
     rawset(_G, "C_Map", originalCMap)
-    rawset(_G, "CreateVector2D", originalCreateVector2D)
+    rawset(_G, "C_TaxiMap", originalCTaxiMap)
+    rawset(_G, "GetBindLocation", originalGetBindLocation)
   end)
 
-  it("finds_the_lowest_cost_route_between_nodes", function()
+  it("prefers_the_fewest_completed_route_steps_even_when_the_old_cost_is_higher", function()
     local routeGraph = { -- 测试路径图
       nodes = {
         start = { id = "start", name = "起点" },
-        portal = { id = "portal", name = "传送点" },
+        relay = { id = "relay", name = "中转点" },
         target = { id = "target", name = "目标" },
       },
       edges = {
-        { from = "start", to = "target", cost = 120, label = "直接前往" },
-        { from = "start", to = "portal", cost = 10, label = "使用传送" },
-        { from = "portal", to = "target", cost = 30, label = "前往目标" },
+        {
+          from = "start",
+          to = "target",
+          cost = 99,
+          stepCost = 1,
+          mode = "class_teleport",
+          label = "直接传送",
+          traversedUiMapIDs = { 777 },
+          traversedUiMapNames = { "目标地图" },
+        },
+        {
+          from = "start",
+          to = "relay",
+          cost = 1,
+          stepCost = 1,
+          mode = "walk_local",
+          label = "先走到中转点",
+          traversedUiMapIDs = { 888 },
+          traversedUiMapNames = { "起点地图" },
+        },
+        {
+          from = "relay",
+          to = "target",
+          cost = 1,
+          stepCost = 1,
+          mode = "taxi",
+          label = "再坐飞行点",
+          traversedUiMapIDs = { 888, 777 },
+          traversedUiMapNames = { "起点地图", "目标地图" },
+        },
       },
     }
 
     local routeResult, errorObject = Toolbox.Navigation.FindShortestPath(routeGraph, "start", "target")
 
     assert.is_nil(errorObject)
-    assert.equals(40, routeResult.totalCost)
-    assert.same({ "start", "portal", "target" }, routeResult.nodePath)
-    assert.same({ "使用传送", "前往目标" }, routeResult.stepLabels)
+    assert.equals(1, routeResult.totalSteps)
+    assert.equals(1, #routeResult.segments)
+    assert.equals("class_teleport", routeResult.segments[1].mode)
+    assert.equals("直接传送", routeResult.segments[1].label)
+  end)
+
+  it("breaks_step_count_ties_by_preferring_fewer_walk_segments", function()
+    local routeGraph = { -- 平局路径图
+      nodes = {
+        start = { id = "start", name = "起点" },
+        walkRelay = { id = "walkRelay", name = "步行中转" },
+        taxiRelay = { id = "taxiRelay", name = "飞行中转" },
+        target = { id = "target", name = "目标" },
+      },
+      edges = {
+        {
+          from = "start",
+          to = "walkRelay",
+          cost = 1,
+          stepCost = 1,
+          mode = "walk_local",
+          label = "先步行",
+          traversedUiMapIDs = { 85 },
+          traversedUiMapNames = { "奥格瑞玛" },
+        },
+        {
+          from = "walkRelay",
+          to = "target",
+          cost = 1,
+          stepCost = 1,
+          mode = "taxi",
+          label = "再飞行",
+          traversedUiMapIDs = { 85, 114 },
+          traversedUiMapNames = { "奥格瑞玛", "北风苔原" },
+        },
+        {
+          from = "start",
+          to = "taxiRelay",
+          cost = 20,
+          stepCost = 1,
+          mode = "taxi",
+          label = "直接飞往中转站",
+          traversedUiMapIDs = { 85, 12 },
+          traversedUiMapNames = { "奥格瑞玛", "卡利姆多" },
+        },
+        {
+          from = "taxiRelay",
+          to = "target",
+          cost = 20,
+          stepCost = 1,
+          mode = "taxi",
+          label = "继续飞往目标",
+          traversedUiMapIDs = { 12, 114 },
+          traversedUiMapNames = { "卡利姆多", "北风苔原" },
+        },
+      },
+    }
+
+    local routeResult, errorObject = Toolbox.Navigation.FindShortestPath(routeGraph, "start", "target")
+
+    assert.is_nil(errorObject)
+    assert.equals(2, routeResult.totalSteps)
+    assert.equals(2, #routeResult.segments)
+    assert.equals("taxi", routeResult.segments[1].mode)
+    assert.equals("taxi", routeResult.segments[2].mode)
+  end)
+
+  it("compresses_consecutive_walk_segments_in_the_output", function()
+    local routeGraph = { -- 连续步行路径图
+      nodes = {
+        start = { id = "start", name = "起点" },
+        walkA = { id = "walkA", name = "步行点 A" },
+        walkB = { id = "walkB", name = "步行点 B" },
+        target = { id = "target", name = "目标" },
+      },
+      edges = {
+        {
+          from = "start",
+          to = "walkA",
+          cost = 1,
+          stepCost = 1,
+          mode = "walk_local",
+          label = "步行到 A",
+          traversedUiMapIDs = { 85 },
+          traversedUiMapNames = { "奥格瑞玛" },
+        },
+        {
+          from = "walkA",
+          to = "walkB",
+          cost = 1,
+          stepCost = 1,
+          mode = "walk_local",
+          label = "步行到 B",
+          traversedUiMapIDs = { 85 },
+          traversedUiMapNames = { "奥格瑞玛" },
+        },
+        {
+          from = "walkB",
+          to = "target",
+          cost = 1,
+          stepCost = 1,
+          mode = "class_portal",
+          label = "开启传送门抵达目标",
+          traversedUiMapIDs = { 85, 110 },
+          traversedUiMapNames = { "奥格瑞玛", "银月城" },
+        },
+      },
+    }
+
+    local routeResult, errorObject = Toolbox.Navigation.FindShortestPath(routeGraph, "start", "target")
+
+    assert.is_nil(errorObject)
+    assert.equals(2, routeResult.totalSteps)
+    assert.equals(2, #routeResult.segments)
+    assert.equals("walk_local", routeResult.segments[1].mode)
+    assert.equals("class_portal", routeResult.segments[2].mode)
   end)
 
   it("filters_edges_that_are_not_confirmed_available_for_the_current_character", function()
@@ -65,9 +221,9 @@ describe("Navigation API", function()
         unknownPortal = { id = "unknownPortal", name = "未知传送门" },
       },
       edges = {
-        { from = "start", to = "orgrimmar", cost = 10, requirements = { classFile = "MAGE", spellID = 3567 } },
-        { from = "start", to = "stormwind", cost = 10, requirements = { faction = "Alliance" } },
-        { from = "start", to = "unknownPortal", cost = 10, requirements = { spellID = 999999 } },
+        { from = "start", to = "orgrimmar", stepCost = 1, mode = "class_teleport", requirements = { classFile = "MAGE", spellID = 3567 } },
+        { from = "start", to = "stormwind", stepCost = 1, mode = "class_portal", requirements = { faction = "Alliance" } },
+        { from = "start", to = "unknownPortal", stepCost = 1, mode = "class_portal", requirements = { spellID = 999999 } },
       },
     }
     local availabilityContext = { -- 当前角色可用性快照
@@ -84,43 +240,18 @@ describe("Navigation API", function()
     assert.equals("orgrimmar", filteredGraph.edges[1].to)
   end)
 
-  it("plans_orgrimmar_route_with_mage_teleport_only_when_spell_is_confirmed", function()
-    local routeGraph = { -- 奥格瑞玛验收样例路径图
-      nodes = {
-        current = { id = "current", name = "当前位置" },
-        orgrimmar = { id = "orgrimmar", name = "奥格瑞玛" },
-        durotar = { id = "durotar", name = "杜隆塔尔目标" },
-      },
-      edges = {
-        { from = "current", to = "durotar", cost = 180, label = "直接跨地图移动" },
-        { from = "current", to = "orgrimmar", cost = 10, label = "传送：奥格瑞玛", requirements = { classFile = "MAGE", spellID = 3567 } },
-        { from = "orgrimmar", to = "durotar", cost = 25, label = "从奥格瑞玛前往杜隆塔尔" },
-      },
-    }
-
-    local mageRoute = Toolbox.Navigation.PlanRoute(routeGraph, "current", "durotar", {
-      classFile = "MAGE",
-      faction = "Horde",
-      knownSpellByID = {
-        [3567] = true,
-      },
-    })
-
-    assert.equals(35, mageRoute.totalCost)
-    assert.same({ "传送：奥格瑞玛", "从奥格瑞玛前往杜隆塔尔" }, mageRoute.stepLabels)
-
-    local unknownSpellRoute = Toolbox.Navigation.PlanRoute(routeGraph, "current", "durotar", {
-      classFile = "MAGE",
-      faction = "Horde",
-      knownSpellByID = {},
-    })
-
-    assert.equals(180, unknownSpellRoute.totalCost)
-    assert.same({ "直接跨地图移动" }, unknownSpellRoute.stepLabels)
-  end)
-
-  it("builds_current_character_availability_from_runtime_spellbook", function()
+  it("builds_current_character_availability_from_runtime_spellbook_taxi_map_and_bind_location", function()
     local checkedSpellIDList = {} -- 被查询的技能 ID
+    setNavigationData({
+      taxi_start = { NodeID = "taxi_start", Kind = "taxi", UiMapID = 1, Name_lang = "起点飞行点", WalkClusterKey = "uimap_1", TaxiNodeID = 100 },
+      taxi_hidden = { NodeID = "taxi_hidden", Kind = "taxi", UiMapID = 1, Name_lang = "未开飞行点", WalkClusterKey = "uimap_1", TaxiNodeID = 101 },
+      taxi_target = { NodeID = "taxi_target", Kind = "taxi", UiMapID = 2, Name_lang = "目标飞行点", WalkClusterKey = "uimap_2", TaxiNodeID = 200 },
+      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", UiMapID = 1, Name_lang = "起点地图", WalkClusterKey = "uimap_1" },
+      uimap_2 = { NodeID = "uimap_2", Kind = "map_anchor", UiMapID = 2, Name_lang = "绑定地图", WalkClusterKey = "uimap_2" },
+    }, {}, {
+      [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
+      [2] = { Name_lang = "绑定地图", MapType = 3, ParentUiMapID = 0 },
+    }, {})
     rawset(_G, "UnitClass", function()
       return "法师", "MAGE", 8
     end)
@@ -142,6 +273,25 @@ describe("Navigation API", function()
         return 110
       end,
     })
+    rawset(_G, "C_TaxiMap", {
+      GetTaxiNodesForMap = function(uiMapID)
+        if uiMapID == 1 then
+          return {
+            { nodeID = 100, isUndiscovered = false },
+            { nodeID = 101, isUndiscovered = true },
+          }
+        end
+        if uiMapID == 2 then
+          return {
+            { nodeID = 200, isUndiscovered = false },
+          }
+        end
+        return {}
+      end,
+    })
+    rawset(_G, "GetBindLocation", function()
+      return "绑定地图"
+    end)
 
     local availabilityContext = Toolbox.Navigation.BuildCurrentCharacterAvailability({ 3567, 999999 })
 
@@ -150,6 +300,10 @@ describe("Navigation API", function()
     assert.equals(110, availabilityContext.currentUiMapID)
     assert.is_true(availabilityContext.knownSpellByID[3567])
     assert.is_nil(availabilityContext.knownSpellByID[999999])
+    assert.is_true(availabilityContext.knownTaxiNodeByID[100])
+    assert.is_nil(availabilityContext.knownTaxiNodeByID[101])
+    assert.is_true(availabilityContext.knownTaxiNodeByID[200])
+    assert.equals("uimap_2", availabilityContext.hearthBindNodeID)
     assert.same({ 3567, 999999 }, checkedSpellIDList)
   end)
 
@@ -171,7 +325,14 @@ describe("Navigation API", function()
     assert.is_true(availabilityContext.knownSpellByID[3567])
   end)
 
-  it("collects_required_spell_ids_from_route_data", function()
+  it("collects_required_spell_ids_from_route_data_and_navigation_ability_templates", function()
+    Toolbox.Data.NavigationAbilityTemplates = {
+      templates = {
+        hearth = { SpellID = 8690 },
+        teleport = { SpellID = 3567 },
+        duplicate = { SpellID = 3567 },
+      },
+    }
     local spellIDList = Toolbox.Navigation.GetRequiredSpellIDList({
       edges = {
         { requirements = { spellID = 3567 } },
@@ -181,132 +342,231 @@ describe("Navigation API", function()
       },
     })
 
-    assert.same({ 3567, 50977 }, spellIDList)
+    assert.same({ 3567, 50977, 8690 }, spellIDList)
   end)
 
-  it("plans_map_target_route_from_exported_navigation_data", function()
-    Toolbox.Data.NavigationMapNodes = {
-      nodes = {
-        [777] = { ID = 777, Name_lang = "测试目标" },
-        [888] = { ID = 888, Name_lang = "测试起点" },
-      },
-    }
-    Toolbox.Data.NavigationRouteEdges = {
-      schemaVersion = 2,
-      nodes = {
-        uimap_777 = { ID = 777, Source = "uimap", UiMapID = 777, Name_lang = "测试目标" },
-        uimap_888 = { ID = 888, Source = "uimap", UiMapID = 888, Name_lang = "测试起点" },
-      },
-      edges = {
-        {
-          from = "uimap_888",
-          to = "uimap_777",
-          cost = 12,
-          label = "前往测试目标",
-        },
-      },
-    }
-
-    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
-      uiMapID = 777,
+  it("expands_hearthstone_template_only_when_spell_and_bind_node_are_available", function()
+    setNavigationData({
+      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", Source = "uimap", UiMapID = 1, Name_lang = "起点地图", WalkClusterKey = "uimap_1" },
+      uimap_2 = { NodeID = "uimap_2", Kind = "map_anchor", Source = "uimap", UiMapID = 2, Name_lang = "炉石绑定地", WalkClusterKey = "uimap_2" },
+    }, {}, {
+      [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
+      [2] = { Name_lang = "炉石绑定地", MapType = 3, ParentUiMapID = 0 },
     }, {
-      classFile = "MAGE",
-      currentUiMapID = 888,
-      knownSpellByID = {
-        [123] = true,
+      hearth = {
+        TemplateID = "hearth",
+        Mode = "hearthstone",
+        SpellID = 8690,
+        TargetRuleKind = "hearth_bind",
+        Label = "炉石",
+        SelfUseOnly = true,
       },
     })
-
-    assert.is_nil(errorObject)
-    assert.equals(192, routeResult.totalCost)
-    assert.same({ "当前位置：测试起点", "前往测试目标", "目标位置：测试目标" }, routeResult.stepLabels)
-  end)
-
-  it("adds_terminal_cost_from_exported_via_arrival_position_to_target_coordinates", function()
-    Toolbox.Data.NavigationMapNodes = {
-      nodes = {
-        [777] = { ID = 777, Name_lang = "测试目标" },
-      },
-    }
-    Toolbox.Data.NavigationRouteEdges = {
-      schemaVersion = 2,
-      nodes = {
-        uimap_777 = { Source = "uimap", UiMapID = 777, Name_lang = "测试目标" },
-      },
-      targetRules = {},
-      edges = {},
-    }
 
     local routeResult = Toolbox.Navigation.PlanRouteToMapTarget({
-      uiMapID = 777,
-      x = 0.12,
-      y = 0.10,
+      uiMapID = 2,
+      x = 0.50,
+      y = 0.50,
     }, {
       classFile = "MAGE",
-      currentUiMapID = 777,
-      knownSpellByID = {},
+      faction = "Horde",
+      currentUiMapID = 1,
+      currentX = 0.20,
+      currentY = 0.20,
+      knownSpellByID = {
+        [8690] = true,
+      },
+      knownTaxiNodeByID = {},
+      hearthBindNodeID = "uimap_2",
     })
 
-    assert.same({ "当前位置：测试目标", "目标位置：测试目标 12.0, 10.0" }, routeResult.stepLabels)
+    assert.is_table(routeResult)
+    assert.equals(2, routeResult.totalSteps)
+    assert.equals("hearthstone", routeResult.segments[1].mode)
+
+    local noSpellRoute, noSpellError = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 2,
+      x = 0.50,
+      y = 0.50,
+    }, {
+      classFile = "MAGE",
+      faction = "Horde",
+      currentUiMapID = 1,
+      knownSpellByID = {},
+      knownTaxiNodeByID = {},
+      hearthBindNodeID = "uimap_2",
+    })
+
+    assert.is_nil(noSpellRoute)
+    assert.equals("NAVIGATION_ERR_NO_ROUTE", noSpellError.code)
+
+    local noBindRoute, noBindError = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 2,
+      x = 0.50,
+      y = 0.50,
+    }, {
+      classFile = "MAGE",
+      faction = "Horde",
+      currentUiMapID = 1,
+      knownSpellByID = {
+        [8690] = true,
+      },
+      knownTaxiNodeByID = {},
+    })
+
+    assert.is_nil(noBindRoute)
+    assert.equals("NAVIGATION_ERR_NO_ROUTE", noBindError.code)
   end)
 
-  it("consumes_simulated_public_transport_edges_for_borean_tundra_route", function()
-    Toolbox.Data.NavigationMapNodes = {
-      nodes = {
-        [85] = { ID = 85, Name_lang = "奥格瑞玛" },
-        [114] = { ID = 114, Name_lang = "北风苔原" },
+  it("expands_class_templates_only_when_class_faction_and_spell_match", function()
+    setNavigationData({
+      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", Source = "uimap", UiMapID = 1, Name_lang = "起点地图", WalkClusterKey = "uimap_1" },
+      uimap_85 = { NodeID = "uimap_85", Kind = "map_anchor", Source = "uimap", UiMapID = 85, Name_lang = "奥格瑞玛", WalkClusterKey = "uimap_85" },
+    }, {}, {
+      [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
+      [85] = { Name_lang = "奥格瑞玛", MapType = 3, ParentUiMapID = 0 },
+    }, {
+      mageTeleport = {
+        TemplateID = "mage_teleport_orgrimmar",
+        Mode = "class_teleport",
+        SpellID = 3567,
+        ClassFile = "MAGE",
+        FactionGroup = "Horde",
+        TargetRuleKind = "fixed_node",
+        ToNodeID = "uimap_85",
+        Label = "传送：奥格瑞玛",
+        SelfUseOnly = true,
       },
-    }
-    Toolbox.Data.NavigationRouteEdges = {
-      schemaVersion = 2,
-      nodes = {
-        uimap_85 = { Source = "uimap", UiMapID = 85, Name_lang = "奥格瑞玛" },
-        uimap_114 = { Source = "uimap", UiMapID = 114, Name_lang = "北风苔原" },
-        waypoint_1 = { Source = "waypoint", UiMapID = 85, Name_lang = "奥格瑞玛飞艇" },
-        waypoint_2 = { Source = "waypoint", UiMapID = 114, Name_lang = "战歌要塞" },
-      },
-      edges = {
-        {
-          from = "uimap_85",
-          to = "waypoint_1",
-          cost = 1,
-          label = "前往奥格瑞玛飞艇",
-        },
-        {
-          from = "waypoint_1",
-          to = "waypoint_2",
-          cost = 25,
-          label = "乘坐飞艇前往战歌要塞",
-        },
-        {
-          from = "waypoint_2",
-          to = "uimap_114",
-          cost = 1,
-          label = "前往北风苔原",
-        },
-      },
-    }
+    })
 
-    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
-      uiMapID = 114,
-      x = 0.45,
-      y = 0.55,
+    local routeResult = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 85,
+      x = 0.41,
+      y = 0.59,
+    }, {
+      classFile = "MAGE",
+      faction = "Horde",
+      currentUiMapID = 1,
+      knownSpellByID = {
+        [3567] = true,
+      },
+      knownTaxiNodeByID = {},
+    })
+
+    assert.is_table(routeResult)
+    assert.equals("class_teleport", routeResult.segments[1].mode)
+
+    local wrongClassRoute, wrongClassError = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 85,
+      x = 0.41,
+      y = 0.59,
     }, {
       classFile = "WARRIOR",
       faction = "Horde",
-      currentUiMapID = 85,
+      currentUiMapID = 1,
+      knownSpellByID = {
+        [3567] = true,
+      },
+      knownTaxiNodeByID = {},
+    })
+
+    assert.is_nil(wrongClassRoute)
+    assert.equals("NAVIGATION_ERR_NO_ROUTE", wrongClassError.code)
+  end)
+
+  it("allows_taxi_routes_only_when_both_endpoint_nodes_are_known", function()
+    setNavigationData({
+      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", Source = "uimap", UiMapID = 1, Name_lang = "起点地图", WalkClusterKey = "uimap_1" },
+      uimap_2 = { NodeID = "uimap_2", Kind = "map_anchor", Source = "uimap", UiMapID = 2, Name_lang = "目标地图", WalkClusterKey = "uimap_2" },
+      taxi_100 = { NodeID = "taxi_100", Kind = "taxi", Source = "taxi", UiMapID = 1, Name_lang = "起点飞行点", WalkClusterKey = "uimap_1", TaxiNodeID = 100 },
+      taxi_200 = { NodeID = "taxi_200", Kind = "taxi", Source = "taxi", UiMapID = 2, Name_lang = "目标飞行点", WalkClusterKey = "uimap_2", TaxiNodeID = 200 },
+    }, {
+      {
+        ID = 9001,
+        FromNodeID = "taxi_100",
+        ToNodeID = "taxi_200",
+        FromTaxiNodeID = 100,
+        ToTaxiNodeID = 200,
+        FromUiMapID = 1,
+        ToUiMapID = 2,
+        StepCost = 1,
+        Mode = "taxi",
+        Label = "起点飞到目标",
+        TraversedUiMapIDs = { 1, 2 },
+        TraversedUiMapNames = { "起点地图", "目标地图" },
+      },
+    }, {
+      [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
+      [2] = { Name_lang = "目标地图", MapType = 3, ParentUiMapID = 0 },
+    }, {})
+
+    local routeResult = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 2,
+      x = 0.55,
+      y = 0.44,
+    }, {
+      classFile = "MAGE",
+      faction = "Horde",
+      currentUiMapID = 1,
+      currentX = 0.20,
+      currentY = 0.20,
       knownSpellByID = {},
+      knownTaxiNodeByID = {
+        [100] = true,
+        [200] = true,
+      },
+    })
+
+    assert.is_table(routeResult)
+    assert.equals(3, routeResult.totalSteps)
+    assert.equals("taxi", routeResult.segments[2].mode)
+
+    local noTaxiRoute, noTaxiError = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 2,
+      x = 0.55,
+      y = 0.44,
+    }, {
+      classFile = "MAGE",
+      faction = "Horde",
+      currentUiMapID = 1,
+      knownSpellByID = {},
+      knownTaxiNodeByID = {
+        [100] = true,
+      },
+    })
+
+    assert.is_nil(noTaxiRoute)
+    assert.equals("NAVIGATION_ERR_NO_ROUTE", noTaxiError.code)
+  end)
+
+  it("bridges_same_walk_cluster_nodes_with_a_single_compressed_walk_segment", function()
+    setNavigationData({
+      uimap_18 = { NodeID = "uimap_18", Kind = "map_anchor", Source = "uimap", UiMapID = 18, Name_lang = "提瑞斯法林地", WalkClusterKey = "uimap_18" },
+      uimap_90 = { NodeID = "uimap_90", Kind = "map_anchor", Source = "uimap", UiMapID = 90, Name_lang = "幽暗城", WalkClusterKey = "uimap_18" },
+    }, {}, {
+      [18] = { Name_lang = "提瑞斯法林地", MapType = 3, ParentUiMapID = 0 },
+      [90] = { Name_lang = "幽暗城", MapType = 3, ParentUiMapID = 18 },
+    }, {})
+
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 18,
+      x = 0.50,
+      y = 0.50,
+    }, {
+      classFile = "PRIEST",
+      faction = "Horde",
+      currentUiMapID = 90,
+      currentX = 0.20,
+      currentY = 0.20,
+      knownSpellByID = {},
+      knownTaxiNodeByID = {},
     })
 
     assert.is_nil(errorObject)
-    assert.same({
-      "当前位置：奥格瑞玛",
-      "前往奥格瑞玛飞艇",
-      "乘坐飞艇前往战歌要塞",
-      "前往北风苔原",
-      "目标位置：北风苔原 45.0, 55.0",
-    }, routeResult.stepLabels)
-    assert.is_true(routeResult.totalCost < 300)
+    assert.is_table(routeResult)
+    assert.equals(1, routeResult.totalSteps)
+    assert.equals(1, #routeResult.segments)
+    assert.equals("walk_local", routeResult.segments[1].mode)
   end)
 
   it("rejects_world_and_continent_maps_as_navigation_targets", function()
@@ -323,129 +583,5 @@ describe("Navigation API", function()
 
     assert.is_nil(routeResult)
     assert.equals("NAVIGATION_ERR_UNSUPPORTED_MAP_LEVEL", errorObject.code)
-  end)
-
-  it("plans_orgrimmar_to_silvermoon_from_exported_route_edges", function()
-    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
-      uiMapID = 110,
-      x = 0.50,
-      y = 0.50,
-    }, {
-      classFile = "WARRIOR",
-      faction = "Horde",
-      currentUiMapID = 85,
-      knownSpellByID = {},
-    })
-
-    assert.is_nil(errorObject)
-    assert.equals("当前位置：奥格瑞玛", routeResult.stepLabels[1])
-    assert.is_true(type(routeResult.stepLabels[2]) == "string")
-    assert.is_true(string.find(routeResult.stepLabels[2], "银月城", 1, true) ~= nil)
-    assert.is_true(string.find(routeResult.stepLabels[2], "传送门", 1, true) ~= nil)
-    assert.is_true(string.find(routeResult.stepLabels[#routeResult.stepLabels], "目标位置：银月城", 1, true) ~= nil)
-  end)
-
-  it("resolves_target_point_to_a_more_specific_child_map_before_planning", function()
-    rawset(_G, "C_Map", {
-      GetMapInfoAtPosition = function(uiMapID, posX, posY)
-        assert.equals(94, uiMapID)
-        assert.equals(0.50, posX)
-        assert.equals(0.50, posY)
-        return {
-          mapID = 110,
-          name = "银月城",
-        }
-      end,
-    })
-
-    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
-      uiMapID = 94,
-      x = 0.50,
-      y = 0.50,
-      name = "银月城",
-    }, {
-      classFile = "WARRIOR",
-      faction = "Horde",
-      currentUiMapID = 85,
-      knownSpellByID = {},
-    })
-
-    assert.is_nil(errorObject)
-    assert.equals("当前位置：奥格瑞玛", routeResult.stepLabels[1])
-    assert.is_true(string.find(routeResult.stepLabels[2], "银月城", 1, true) ~= nil)
-    assert.is_true(string.find(routeResult.stepLabels[2], "传送门", 1, true) ~= nil)
-    assert.is_true(string.find(routeResult.stepLabels[#routeResult.stepLabels], "目标位置：银月城", 1, true) ~= nil)
-  end)
-
-  it("resolves_current_variant_city_map_to_a_navigable_route_node", function()
-    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
-      uiMapID = 110,
-      x = 0.50,
-      y = 0.50,
-    }, {
-      classFile = "WARRIOR",
-      faction = "Horde",
-      currentUiMapID = 1534,
-      knownSpellByID = {},
-    })
-
-    assert.is_nil(errorObject)
-    assert.equals("当前位置：奥格瑞玛", routeResult.stepLabels[1])
-    assert.is_true(string.find(routeResult.stepLabels[2], "银月城", 1, true) ~= nil)
-  end)
-
-  it("adds_portal_position_to_waypoint_link_step_labels", function()
-    rawset(_G, "CreateVector2D", function(x, y)
-      return { x = x, y = y }
-    end)
-    rawset(_G, "C_Map", {
-      GetMapPosFromWorldPos = function(worldMapID, worldPosition, hintUiMapID)
-        assert.equals(1, worldMapID)
-        assert.equals(85, hintUiMapID)
-        assert.same({ x = 10, y = 20 }, worldPosition)
-        return 85, { x = 0.41, y = 0.52 }
-      end,
-    })
-
-    Toolbox.Data.NavigationMapNodes = {
-      nodes = {
-        [85] = { ID = 85, Name_lang = "奥格瑞玛" },
-        [110] = { ID = 110, Name_lang = "银月城" },
-      },
-    }
-    Toolbox.Data.NavigationRouteEdges = {
-      schemaVersion = 3,
-      nodes = {
-        uimap_85 = { Source = "uimap", UiMapID = 85, Name_lang = "奥格瑞玛" },
-        uimap_110 = { Source = "uimap", UiMapID = 110, Name_lang = "银月城" },
-      },
-      edges = {
-        {
-          from = "uimap_85",
-          to = "uimap_110",
-          fromUiMapID = 85,
-          toUiMapID = 110,
-          cost = 30,
-          label = "使用奥格瑞玛的传送门前往银月城",
-          mode = "WAYPOINT_LINK",
-          portalWorldMapID = 1,
-          portalWorldX = 10,
-          portalWorldY = 20,
-        },
-      },
-    }
-
-    local routeResult = Toolbox.Navigation.PlanRouteToMapTarget({
-      uiMapID = 110,
-      x = 0.50,
-      y = 0.50,
-    }, {
-      classFile = "WARRIOR",
-      faction = "Horde",
-      currentUiMapID = 85,
-      knownSpellByID = {},
-    })
-
-    assert.is_true(string.find(routeResult.stepLabels[2], "奥格瑞玛 41.0, 52.0；使用奥格瑞玛的传送门前往银月城", 1, true) ~= nil)
   end)
 end)
