@@ -11,7 +11,7 @@
   - `docs/plans/navigation-plan.md`
   - `docs/tests/navigation-test.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-29
+- 最后更新：2026-04-29（V2 transport 已闭合）
 
 ## 1. 定位
 
@@ -42,6 +42,8 @@
   - `hearthstone`
   - `class_teleport`
   - `class_portal`
+- V2 已新增：
+  - `transport`（飞艇/船）
 
 ## 4. 入口与使用方式
 
@@ -60,7 +62,8 @@
 
 - 第一版不做账号其他角色能力推断，只看当前角色。
 - 第一版不实现真实地形寻路、避障或逐米移动路线。
-- `transport / public_portal / areatrigger / 道标石 / 全世界 walk component` 仍未闭合，不进入当前 V1 运行时图。
+- `public_portal / areatrigger / 全世界 walk component` 仍未闭合，不进入 V1 运行时图。
+- `transport` 已闭合（V2 第一批）。
 - 无法仅靠静态导出稳定解析目标的职业/剧情传送法术，当前不会进入 `NavigationAbilityTemplates`。
 - 当前不拦截世界地图原生点击；目标坐标由“鼠标指向 + 点击规划按钮”确定。
 
@@ -83,3 +86,4 @@
 | 2026-04-27 | 路线边消费入口统一：新增 `NavigationRouteEdges.lua`，运行时构图不再直接读取 `NavigationTaxiEdges.lua` |
 | 2026-04-27 | 接入副本入口导出数据：新增 `NavigationMapAssignments.lua` 与 `NavigationInstanceEntrances.lua`，副本入口导航使用导出的外部目标坐标 |
 | 2026-04-29 | V1 基线重定义：路线按当前角色配置和最少路径步数计算，接入 `NavigationAbilityTemplates.lua`、已开航点过滤与炉石绑定点解析 |
+| 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，导出脚本新增 transport 节点检测，`mode = "transport"` 边加入运行时路线图 |

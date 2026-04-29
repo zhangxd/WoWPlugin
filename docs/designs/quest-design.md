@@ -58,7 +58,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| `Toolbox/Modules/Quest.lua` | 模块注册、独立宿主 Frame、设置页主页面、Quest Inspector 子页面、`QUEST_TURNED_IN` 事件接入。 |
+| `Toolbox/Modules/Quest.lua` | 模块注册、独立宿主 Frame、设置页主页面、Quest Inspector 工具区、`QUEST_TURNED_IN` 事件接入。 |
 | `Toolbox/Modules/Quest/Shared.lua` | 模块内部共享命名空间、模块 DB 访问、开关状态判断。 |
 | `Toolbox/Modules/Quest/QuestNavigation.lua` | 左侧树导航、主区渲染、搜索、breadcrumb、列表内展开详情、最近完成列表与任务点击联动。 |
 
@@ -164,7 +164,7 @@
 
 - `Toolbox.MinimapButton.RegisterFlyoutEntry()` 注册“任务”飞出项。
 - 点击飞出项时优先调用 `Toolbox.Quest.OpenMainFrame()`；若当前环境不能直接打开，则回退到 `quest` 设置页。
-- Quest Inspector 作为 `quest` 模块设置子页面注册，不新增独立模块和额外 slash 命令。
+- Quest Inspector 并回 `quest` 的“任务”叶子页低频工具区，不新增独立模块、额外设置入口或额外 slash 命令。
 
 ## 6. 影响面
 
@@ -210,6 +210,7 @@
 | 2026-04-16 | 确认行内详情类型显示：使用“类型名字（ID）”格式，类型名来源统一复用 `Toolbox.Questlines` 的类型标签解析 |
 | 2026-04-17 | 确认顶部路径导航最终布局：导航栏上移到宿主标题栏下方的独立头部带，并显示在头像 / 图标右侧，正文区整体下移，视觉参考冒险手册副本节点页 |
 | 2026-04-18 | 确认任务线主视图状态区与行高收口：移除“下一步”长文案，仅保留“已完成”；任务线卡片改双行高度；展开任务行改回单行并隐藏任务线名称；移除“在进行中视图查看”按钮 |
+| 2026-04-29 | 设置宿主重构对齐：Quest Inspector 改为“任务”叶子页内低频工具区，不再描述独立设置子页面 |
 
 ## 10. 2026-04-26 渲染与缓存架构收口
 

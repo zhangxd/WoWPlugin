@@ -238,6 +238,20 @@ Expected:
 - 新字段齐全
 - 不再断言旧 `MAP_LINK` / `WAYPOINT_LINK`
 
+**待执行补充（暂不在本轮开动）**
+
+- review 跟进项：收紧 `NavigationRouteEdges.lua` 的运行时 taxi 出口，只保留 V1 稳定公共边。
+- 导出层主修复：
+  - 剔除 `FromTaxiNodeID == ToTaxiNodeID` 的自环 taxi 边。
+  - 剔除明显 `Quest Path` / `Quest -` / `Test -` 的 taxi 节点与边，不让其进入运行时图。
+  - 如后续确认 `ConditionID / VisibilityConditionID` 有稳定过滤口径，再补进导出层，而不是先塞进运行时求解。
+- 运行时仅保留轻量兜底：
+  - `taxi` 边若 `from == to`，直接判不可用。
+- 回归要求：
+  - `tests/logic/spec/navigation_data_spec.lua` 增加“无自环 / 无 quest-test taxi 数据进入 runtime export”断言。
+  - `tests/validate_data_contracts.py` 增加对应静态校验。
+- 当前状态：`待执行`。后续安排修改时，先更新本计划状态，再进入代码实现。
+
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -511,16 +525,16 @@ git add docs/features/navigation-features.md docs/tests/navigation-test.md docs/
 git commit -m "docs: finalize navigation v1 minimum-step route plan and validation notes"
 ```
 
-## 6. V2 明确延期项
+## 6. V2 已完成 / 待推进
 
-- `transport`
+**V2 已闭合：**
+- ✅ `transport`（飞艇/船）：导出脚本根据 node name 含 “Transport” / “交通工具” 识别 transport 节点，对应边输出 `mode = “transport”`；运行时 `isEdgeAvailable` 对 transport 模式与 taxi 同等待遇（两端航点需已开）。
+
+**V2 待推进（单人导航，不含需多人协助的模态）：**
 - `public_portal`
 - `areatrigger`
-- `道标石`
 - 全世界 `WalkComponent`
-- “只能飞 / 只能传送 / 没有公共路径”一类强结论
-
-这些项都不应阻塞 V1 落地，但也不允许被 V1 的实现偷偷假定为“不存在”。
+- “只能飞 / 只能传送 / 没有公共路径”一类强结论（需等所有 V2 模态闭合后引入）
 
 ## 7. 风险与处置
 
@@ -536,4 +550,5 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 | 日期 | 内容 |
 |------|------|
 | 2026-04-27 | 初版计划：围绕旧的 `cost` 路线图与世界地图入口组织实施 |
-| 2026-04-29 | 整体重写：以“当前角色配置 + 最少路径步数 + 枢纽 / 动作图”替换旧计划，V1 收口到 `walk_local / taxi / hearthstone / class_teleport / class_portal` |
+| 2026-04-29 | 整体重写：以”当前角色配置 + 最少路径步数 + 枢纽 / 动作图”替换旧计划，V1 收口到 `walk_local / taxi / hearthstone / class_teleport / class_portal` |
+| 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，导出脚本 + 运行时 + 测试全部落地，V2 待推进项更新为其余 4 项 |

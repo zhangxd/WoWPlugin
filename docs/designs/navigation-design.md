@@ -9,7 +9,7 @@
   - `docs/specs/navigation-spec.md`
   - `docs/plans/navigation-plan.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-29
+- 最后更新：2026-04-29（V2 transport 已闭合）
 
 ## 1. 背景
 
@@ -124,12 +124,11 @@
 - `taxi` 允许保留经过地图序列，并按当前角色已开航点裁剪。
 - `hearthstone` 和职业旅行能力通过导出的模板边在查询时展开。
 
-#### V2 继续补齐
+#### V2 继续补齐（已闭合标记 ✅）
 
-- `transport`
+- ✅ `transport`（飞艇/船）
 - `public_portal`
 - `areatrigger`
-- `道标石`
 - 全世界 `WalkComponent`
 
 #### V3 才允许下强结论
@@ -281,4 +280,5 @@
 | 2026-04-27 | 复审修订：目标源改为用户 waypoint，加入 `x/y` 成本模型、静态连接器 / 运行时过滤拆层与缓存策略，并明确排除 tooltip 与 EJ 性能修复 |
 | 2026-04-27 | 用户确认“开动”：真实 `Taxi*` 导出进入执行范围，`navigation_taxi_edges` 从 draft 推进为 active，生成 `NavigationTaxiEdges.lua` 并加入 TOC |
 | 2026-04-27 | 路线边统一导出：新增 `navigation_route_edges` active 契约，`NavigationRouteEdges.lua` 成为 `Toolbox.Navigation` 唯一运行时路线边入口 |
-| 2026-04-29 | 设计基线重定义：导航图改为“当前角色配置 + 最少步数 + 枢纽 / 动作图”，V1 先支持 `taxi / hearthstone / class_teleport / class_portal / walk_local`，`transport / public_portal / areatrigger / walk component` 延后到 V2 |
+| 2026-04-29 | 设计基线重定义：导航图改为”当前角色配置 + 最少步数 + 枢纽 / 动作图”，V1 先支持 `taxi / hearthstone / class_teleport / class_portal / walk_local`，`transport / public_portal / areatrigger / walk component` 延后到 V2 |
+| 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，`isEdgeAvailable` 增加 transport 模式处理，导出脚本按 node name 识别 transport 节点 |

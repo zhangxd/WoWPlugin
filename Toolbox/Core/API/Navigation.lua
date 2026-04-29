@@ -213,6 +213,7 @@ local function buildRouteSegments(routeGraph, edgePath)
       lastSegment.to = toNodeId
       lastSegment.toName = tostring(toNode.name or toNodeId)
       lastSegment.walkDistance = tonumber(lastSegment.walkDistance or 0) + buildWalkDistanceIncrement(edge)
+      lastSegment.label = edgeLabel
       appendUniqueArray(lastSegment.traversedUiMapIDs, edge.traversedUiMapIDs or edge.TraversedUiMapIDs)
       appendUniqueArray(lastSegment.traversedUiMapNames, edge.traversedUiMapNames or edge.TraversedUiMapNames)
     else
@@ -304,7 +305,8 @@ local function isEdgeAvailable(edge, availabilityContext)
     end
   end
 
-  if readEdgeMode(edge) == "taxi" then
+  local edgeMode = readEdgeMode(edge)
+  if edgeMode == "taxi" or edgeMode == "transport" then
     local knownTaxiNodeByID = context.knownTaxiNodeByID -- 已开航点集合
     local fromTaxiNodeID = tonumber(edge and (edge.fromTaxiNodeID or edge.FromTaxiNodeID)) -- 起点飞行点 ID
     local toTaxiNodeID = tonumber(edge and (edge.toTaxiNodeID or edge.ToTaxiNodeID)) -- 终点飞行点 ID
@@ -643,6 +645,18 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
         if success and isKnown == true then
           availabilityContext.knownSpellByID[numericSpellID] = true
         end
+      end
+    end
+  end
+
+  -- 炉石（SpellID 8690）由物品触发，不依赖于法术书；检查玩家背包中是否有炉石物品（ItemID 6948）
+  if not availabilityContext.knownSpellByID[8690] then
+    local itemApi = type(C_Item) == "table" and C_Item or nil
+    local getItemCountFn = (itemApi and itemApi.GetItemCount) or GetItemCount
+    if type(getItemCountFn) == "function" then
+      local itemSuccess, itemCount = pcall(getItemCountFn, 6948)
+      if itemSuccess and tonumber(itemCount) and tonumber(itemCount) > 0 then
+        availabilityContext.knownSpellByID[8690] = true
       end
     end
   end

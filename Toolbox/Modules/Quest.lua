@@ -2,7 +2,7 @@
   quest 模块（quest）。
   职责：
     1. 提供独立任务界面宿主 Frame，并托管任务视图刷新。
-    2. 管理任务相关设置与 Quest Inspector 子页面。
+    2. 管理任务相关设置与 Quest Inspector 工具区。
     3. 监听任务完成事件，维护“最近完成”数据。
 ]]
 
@@ -13,7 +13,6 @@ local CreateFrame = Internal.CreateFrame -- 统一建帧入口
 
 local questEventFrame = nil -- quest 模块事件 Frame
 local questHostFrame = nil -- quest 主界面根 Frame
-local QUEST_INSPECTOR_PAGE_ID = "quest_inspector"
 
 local questInspectorUiState = {
   requestToken = 0,
@@ -161,10 +160,10 @@ end
 ---@return string
 local function getQuestInspectorPageKey()
   local settingsHost = Toolbox and Toolbox.SettingsHost or nil -- 设置页宿主
-  if settingsHost and type(settingsHost.GetModuleSubPageKey) == "function" then
-    return settingsHost:GetModuleSubPageKey(MODULE_ID, QUEST_INSPECTOR_PAGE_ID)
+  if settingsHost and type(settingsHost.GetModulePageKey) == "function" then
+    return settingsHost:GetModulePageKey(MODULE_ID)
   end
-  return "module:" .. tostring(MODULE_ID) .. ":subpage:" .. tostring(QUEST_INSPECTOR_PAGE_ID)
+  return "quest"
 end
 
 --- 解析 QuestID 输入文本。
@@ -249,10 +248,9 @@ local function requestQuestInspectorSnapshot(questID)
   rebuildInspectorPage()
 end
 
---- 构建任务详情查询独立设置子页面。
----@param page table 页面定义
+--- 构建任务页中的 Quest Inspector 低频工具区。
 ---@param box Frame 子页面容器
-local function buildQuestInspectorSettingsPage(page, box)
+local function buildQuestInspectorSettingsPage(box)
   local localeTable = Toolbox.L or {} -- 本地化文案
   local moduleDb = getModuleDb() -- 模块存档
   local yOffset = 0 -- 当前纵向游标
@@ -553,19 +551,26 @@ Toolbox.RegisterModule({
     hintText:SetText(localeTable.EJ_QUEST_RECENT_COMPLETED_LIMIT_HINT or "")
     yOffset = yOffset - math.max(28, math.ceil((hintText:GetStringHeight() or 0) + 8))
 
-    box.realHeight = math.abs(yOffset) + 20
-  end,
+    yOffset = yOffset - 12
 
-  GetSettingsPages = function()
-    return {
-      {
-        id = QUEST_INSPECTOR_PAGE_ID,
-        titleKey = "EJ_QUEST_INSPECTOR_PAGE_TITLE",
-        introKey = "EJ_QUEST_INSPECTOR_PAGE_INTRO",
-        build = function(page, box)
-          buildQuestInspectorSettingsPage(page, box)
-        end,
-      },
-    }
+    local inspectorTitle = box:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- Inspector 标题
+    inspectorTitle:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
+    inspectorTitle:SetText(localeTable.EJ_QUEST_INSPECTOR_PAGE_TITLE or "Quest Inspector")
+    yOffset = yOffset - 24
+
+    local inspectorIntro = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- Inspector 说明
+    inspectorIntro:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
+    inspectorIntro:SetWidth(560)
+    inspectorIntro:SetJustifyH("LEFT")
+    inspectorIntro:SetText(localeTable.EJ_QUEST_INSPECTOR_PAGE_INTRO or "")
+    yOffset = yOffset - math.max(28, math.ceil((inspectorIntro:GetStringHeight() or 0) + 8))
+
+    local inspectorBox = CreateFrame("Frame", nil, box) -- Inspector 容器
+    inspectorBox:SetSize(560, 520)
+    inspectorBox:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
+    buildQuestInspectorSettingsPage(inspectorBox)
+    yOffset = yOffset - (inspectorBox.realHeight or 520)
+
+    box.realHeight = math.abs(yOffset) + 20
   end,
 })

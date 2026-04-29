@@ -56,13 +56,19 @@ def validate_settings_host() -> None:
     for needle, label in [
         ("RegisterCanvasLayoutCategory", "settings category api"),
         ("RegisterCanvasLayoutSubcategory", "settings subcategory api"),
-        ("BuildOverviewPage", "overview page builder"),
+        ("BuildLeafPage", "leaf page builder"),
+        ("BuildModuleSection", "module section builder"),
         ("BuildAboutPage", "about page builder"),
-        ("BuildModulePage", "module page builder"),
-        ("BuildSharedModuleControls", "shared module controls builder"),
-        ("GetModuleSubPageKey", "module subpage key helper"),
-        ("extraPageList", "module extra settings page collection"),
-        ("module.GetSettingsPages", "module extra settings page contract usage"),
+        ("BuildModulePrimaryControls", "module primary controls builder"),
+        ("BuildModuleSecondaryControls", "module secondary controls builder"),
+        ("GetPreferredLeafPageKey", "preferred leaf page helper"),
+        ("OpenToPageKey", "open to page helper"),
+        ('key = "general"', "general leaf page"),
+        ('key = "interface"', "interface leaf page"),
+        ('key = "map"', "map leaf page"),
+        ('key = "quest"', "quest leaf page"),
+        ('key = "encounter_journal"', "encounter journal leaf page"),
+        ('key = "about"', "about leaf page"),
         ("Toolbox.SettingsHost:Open()", "settings open function"),
         ("Toolbox.GameMenu_Init()", "game menu init function"),
     ]:
@@ -74,11 +80,22 @@ def validate_settings_host() -> None:
         raise AssertionError("settings overview preview section builder should be removed from SettingsHost")
     if "SETTINGS_PREVIEW_" in text:
         raise AssertionError("settings overview preview locale references should be removed from SettingsHost")
+    for removed_needle, removed_label in [
+        ("BuildOverviewPage", "legacy overview page builder"),
+        ("BuildModulePage", "legacy module page builder"),
+        ("BuildModuleSubPage", "legacy module subpage builder"),
+        ("BuildOverviewModuleList", "legacy overview module list builder"),
+        ("module.GetSettingsPages", "legacy module extra page registration"),
+        ('ShowStandalonePageByKey("overview")', "legacy overview standalone open"),
+    ]:
+        if removed_needle in text:
+            raise AssertionError(f"{removed_label} should be removed from SettingsHost")
 
 
 def validate_config() -> None:
     text = read_text("Toolbox", "Core", "Foundation", "Config.lua")
     for needle, label in [
+        ('settingsLastLeafPage = "general"', "settings preferred leaf page default"),
         ("chat_notify = {", "chat_notify defaults"),
         ("mover = {", "mover defaults"),
         ("blizzardDragHitMode", "mover hit mode default"),
@@ -127,7 +144,12 @@ def validate_module_registry() -> None:
 def validate_locales() -> None:
     text = read_text("Toolbox", "Core", "Foundation", "Locales.lua")
     for needle, label in [
-        ("SETTINGS_OVERVIEW_TITLE", "overview title locale"),
+        ("SETTINGS_PAGE_GENERAL_TITLE", "general page title locale"),
+        ("SETTINGS_PAGE_INTERFACE_TITLE", "interface page title locale"),
+        ("SETTINGS_PAGE_MAP_TITLE", "map page title locale"),
+        ("SETTINGS_PAGE_QUEST_TITLE", "quest page title locale"),
+        ("SETTINGS_PAGE_ENCOUNTER_JOURNAL_TITLE", "encounter journal page title locale"),
+        ("SETTINGS_PAGE_ABOUT_TITLE", "about page title locale"),
         ("SETTINGS_ABOUT_TITLE", "about title locale"),
         ("SETTINGS_MODULE_ENABLE", "shared enable locale"),
         ("SETTINGS_MODULE_DEBUG", "shared debug locale"),
@@ -140,8 +162,6 @@ def validate_locales() -> None:
         ("MODULE_QUEST", "quest module locale"),
         ("MODULE_QUEST_INTRO", "quest module intro locale"),
         ("EJ_MOUNT_FILTER_LABEL", "encounter journal mount filter locale"),
-        ("EJ_QUEST_INSPECTOR_PAGE_TITLE", "encounter journal inspector page title locale"),
-        ("EJ_QUEST_INSPECTOR_PAGE_INTRO", "encounter journal inspector page intro locale"),
         ("EJ_QUEST_INSPECTOR_INPUT_LABEL", "encounter journal inspector input label locale"),
         ("EJ_QUEST_INSPECTOR_QUERY_BUTTON", "encounter journal inspector query button locale"),
         ("EJ_QUEST_INSPECTOR_RESULT_TITLE", "encounter journal inspector result title locale"),
@@ -194,6 +214,9 @@ def validate_modules() -> None:
         # EncounterJournal 当前不暴露模块级 debug 开关回调，其余模块保留。
         if file_name != "EncounterJournal.lua":
             require_contains(text, "OnDebugSettingChanged", f"{file_name} debug callback")
+
+        if file_name == "Quest.lua" and "GetSettingsPages = function()" in text:
+            raise AssertionError("Quest module should no longer register a standalone settings subpage")
 
     require_file("Toolbox", "Modules", "MicroMenuPanels.lua")
     micromenu = read_text("Toolbox", "Modules", "MicroMenuPanels.lua")

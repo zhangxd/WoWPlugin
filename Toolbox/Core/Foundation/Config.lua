@@ -9,6 +9,8 @@ local defaults = {
     debug = false,
     -- auto：跟随游戏客户端；zhCN / enUS：强制界面语言
     locale = "auto",
+    -- 设置宿主：最近一次停留的叶子页；首次打开回退到 general
+    settingsLastLeafPage = "general",
   },
   modules = {
     mover = {

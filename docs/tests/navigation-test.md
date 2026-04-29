@@ -10,7 +10,7 @@
   - `docs/specs/navigation-spec.md`
   - `docs/designs/navigation-design.md`
   - `docs/plans/navigation-plan.md`
-- 最后更新：2026-04-29
+- 最后更新：2026-04-29（V2 transport 已闭合）
 
 ## 1. 测试背景
 
@@ -56,6 +56,7 @@
 | NAV-013 | 从真实 `wow.db` 导出 `navigation_taxi_edges` | 运行 `export_toolbox_one.py navigation_taxi_edges` | 生成 `NavigationTaxiEdges.lua`，文件头、节点与边结构符合契约 |
 | NAV-014 | 从真实 `wow.db` 导出 `navigation_ability_templates` | 运行 `export_toolbox_one.py navigation_ability_templates` | 生成 `NavigationAbilityTemplates.lua`，只保留 V1 可静态解析目标的职业旅行模板 |
 | NAV-015 | 从真实 `wow.db` 导出 `navigation_route_edges` | 运行 `export_toolbox_one.py navigation_route_edges` | 生成 `NavigationRouteEdges.lua`，运行时规划测试只覆盖统一静态路线骨架入口 |
+| NAV-016 | 注入 `transport` 模式边与两端已开航点 | `PlanRouteToMapTarget()` 规划跨大陆路线 | 路线输出含 `mode = "transport"` 段；缺少任一端航点时返回无路 |
 
 ## 5. 执行结果
 
@@ -81,14 +82,14 @@
 ## 6. 问题与阻塞
 
 - 尚未进行真实客户端内的鼠标坐标与按钮位置复测。
-- 当前 V1 仍未纳入 `transport / public_portal / areatrigger / 道标石 / 全世界 walk component`；其它交通需要后续契约导出，禁止用手工 ID 或坐标补洞。
+- `transport` 已闭合（V2 第一批）；`public_portal / areatrigger / 全世界 walk component` 仍待后续契约导出。
 
 ## 7. 结论
 
 - 本轮 Taxi、地图覆盖、副本入口、能力模板与统一静态路线骨架的契约、导出脚本、TOC 接线与逻辑测试已通过；项目总验证全绿。
 - 本轮 `navigation_route_edges` 与 `navigation_ability_templates` 已成为运行时 V1 的两条正式数据入口；`Toolbox.Navigation` 不再直接消费来源侧候选边，也不消费手工路径数据。
-- 当前代码链路满足“世界地图目标 / 副本入口目标 -> 导出数据消费 -> 最少步数求解 -> 顶部路径 UI”的 V1 验收。
-- 后续重点转向 `transport / public_portal / areatrigger / walk component` 等未闭合模态。
+- 当前代码链路满足”世界地图目标 / 副本入口目标 -> 导出数据消费 -> 最少步数求解 -> 顶部路径 UI”的 V1 验收。
+- V2 `transport`（飞艇/船）已闭合，后续重点转向 `public_portal / areatrigger / 道标石 / walk component` 等未闭合模态。
 
 ## 8. 修订记录
 
@@ -101,4 +102,5 @@
 | 2026-04-27 | 路线边统一导出落地：新增 `navigation_route_edges` 验收，运行时测试改为注入 `NavigationRouteEdges` |
 | 2026-04-27 | 修正路线边验收：禁止 `MAP_REGION` / `MAP_TRACE` 坐标派生联接进入运行时数据 |
 | 2026-04-27 | 再次收紧路线边验收：禁止 `WAYPOINT` / `WAYPOINT_ACCESS` 与 SafeLoc 坐标接入进入运行时数据 |
-| 2026-04-29 | V1 口径切换为“当前角色配置 + 最少路径步数”，新增 `navigation_ability_templates` 与 `KnownTaxiNodeIDs / HearthBindNodeID` 回归验证 |
+| 2026-04-29 | V1 口径切换为”当前角色配置 + 最少路径步数”，新增 `navigation_ability_templates` 与 `KnownTaxiNodeIDs / HearthBindNodeID` 回归验证 |
+| 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，新增 NAV-016 验证 transport 模式边的可用性过滤与路线输出 |

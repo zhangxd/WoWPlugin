@@ -9,7 +9,7 @@
   - `docs/designs/navigation-design.md`
   - `docs/plans/navigation-plan.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-29
+- 最后更新：2026-04-29（V2 transport 已闭合）
 
 ## 1. 背景
 
@@ -42,6 +42,7 @@
 - 第一版支持以下路线模式：
   - `walk_local`
   - `taxi`
+  - `transport`
   - `hearthstone`
   - `class_teleport`
   - `class_portal`
@@ -61,7 +62,7 @@
 - 账号级跨角色能力推断。
 - 战斗状态、沉默状态、技能 CD 是否转好等瞬时条件。
 - 全世界真实地形寻路、避障、逐米路径与碰撞网格。
-- 第一版内的 `transport`、`public_portal`、`areatrigger`、`道标石` 和完整世界 `WalkComponent`。
+- 第一版内的 `public_portal`、`areatrigger` 和完整世界 `WalkComponent`。
 - 第一版内的账号共享玩具、节日传送、工程道具和一次性剧情位移。
 - 对“只能飞 / 没有别的公共路径”这类排除法结论的正式判定。
 
@@ -126,4 +127,5 @@
 | 2026-04-27 | 复审修订：目标源改为用户 waypoint，明确 `x/y` 进入成本模型，排除 tooltip 修改，并将 EncounterJournal 性能修复列为待确认关联项 |
 | 2026-04-27 | 数据源规则收紧：所有 navigation 运行时数据必须由 DataContracts 契约导出，移除 `NavigationManualEdges.lua` 的运行时消费与 TOC 加载 |
 | 2026-04-27 | 路线边统一导出：新增 `navigation_route_edges` 契约，运行时构图统一消费 `NavigationRouteEdges.lua`，来源侧 `NavigationTaxiEdges.lua` 不再被 `Toolbox.Navigation` 直接读取 |
-| 2026-04-29 | 规格基线重定义：路线改为“当前角色配置 + 最少步数”；V1 先支持 `walk_local / taxi / hearthstone / class_teleport / class_portal`，世界级 `transport / public_portal / areatrigger / walk component` 延后到后续阶段 |
+| 2026-04-29 | 规格基线重定义：路线改为”当前角色配置 + 最少步数”；V1 先支持 `walk_local / taxi / hearthstone / class_teleport / class_portal`，世界级 `transport / public_portal / areatrigger / walk component` 延后到后续阶段 |
+| 2026-04-29 | V2 推进：`transport`（飞艇/船）正式进入 In Scope，导出脚本增加 transport 检测与 `mode = “transport”` 输出 |

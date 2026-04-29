@@ -1417,6 +1417,10 @@ def enrich_navigation_taxi_datasets(
         )
         if ui_map_id <= 0:
             continue
+        is_transport = (
+            "Transport" in node_name
+            or "交通工具" in node_name
+        )
         enriched_node_row = {
             "taxi_node_key": f"taxi_{taxi_node_id}",
             "taxi_node_id": taxi_node_id,
@@ -1430,6 +1434,7 @@ def enrich_navigation_taxi_datasets(
             "node_flags": int(node_row.get("node_flags") or 0),
             "condition_id": int(node_row.get("condition_id") or 0),
             "visibility_condition_id": int(node_row.get("visibility_condition_id") or 0),
+            "is_transport": is_transport,
         }
         enriched_node_rows.append(enriched_node_row)
         enriched_node_row_by_taxi_node_id[taxi_node_id] = enriched_node_row
@@ -1446,6 +1451,14 @@ def enrich_navigation_taxi_datasets(
         from_node_row = enriched_node_row_by_taxi_node_id.get(from_taxi_node_id)
         to_node_row = enriched_node_row_by_taxi_node_id.get(to_taxi_node_id)
         if path_id <= 0 or from_node_row is None or to_node_row is None:
+            continue
+
+        # 过滤：自环边（起点 == 终点）、条件限制节点（任务/剧情专用航线）
+        if from_taxi_node_id == to_taxi_node_id:
+            continue
+        if int(from_node_row.get("condition_id") or 0) != 0 or int(from_node_row.get("visibility_condition_id") or 0) != 0:
+            continue
+        if int(to_node_row.get("condition_id") or 0) != 0 or int(to_node_row.get("visibility_condition_id") or 0) != 0:
             continue
 
         traversed_ui_map_id_list = [int(from_node_row["ui_map_id"])]
@@ -1472,8 +1485,8 @@ def enrich_navigation_taxi_datasets(
                 "from_ui_map_id": int(from_node_row["ui_map_id"]),
                 "to_ui_map_id": int(to_node_row["ui_map_id"]),
                 "step_cost": 1,
-                "mode": "taxi",
-                "edge_label": "飞行前往" + str(to_node_row["node_name"]),
+                "mode": "transport" if (from_node_row.get("is_transport") or to_node_row.get("is_transport")) else "taxi",
+                "edge_label": "乘坐" + str(to_node_row["node_name"]) if from_node_row.get("is_transport") or to_node_row.get("is_transport") else "飞行前往" + str(to_node_row["node_name"]),
                 "traversed_ui_map_ids": traversed_ui_map_id_list,
                 "traversed_ui_map_names": traversed_ui_map_name_list,
             }
@@ -1548,7 +1561,7 @@ def enrich_navigation_route_datasets(
                 "from_taxi_node_id": int(taxi_edge_row.get("from_taxi_node_id") or 0),
                 "to_taxi_node_id": int(taxi_edge_row.get("to_taxi_node_id") or 0),
                 "step_cost": 1,
-                "mode": "taxi",
+                "mode": str(taxi_edge_row.get("mode") or "taxi"),
                 "edge_label": str(taxi_edge_row.get("edge_label") or ""),
                 "traversed_ui_map_ids": list(taxi_edge_row.get("traversed_ui_map_ids") or []),
                 "traversed_ui_map_names": list(taxi_edge_row.get("traversed_ui_map_names") or []),

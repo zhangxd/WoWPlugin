@@ -1,10 +1,10 @@
-﻿--[[
-  正式服 Settings 宿主：注册 Toolbox 主类目总览页、各功能真实子页面与关于页。
-  宿主负责统一绘制模块页公共区（简介、启用、调试、清理并重建），模块只渲染专属设置区。
-  `/toolbox` 与 ESC 菜单按钮默认打开主类目总览页。
-  战斗中暴雪 `Settings.OpenToCategory` 不可靠：用独立宿主（全屏半透明遮罩 + Dialog 风格底板）托起 Canvas，缩放接近系统设置内嵌时的观感；脱战后仍走系统设置。
+--[[
+  正式服 Settings 宿主：注册 Toolbox 根类目与 6 个叶子设置页。
+  宿主负责把多个模块页组合进“通用 / 界面 / 地图 / 任务 / 冒险手册 / 关于”，并统一默认打开规则。
+  `/toolbox`、ESC 菜单按钮与小地图按钮都优先回到上次停留叶子页；首次打开回退到“通用”。
+  战斗中暴雪 `Settings.OpenToCategory` 不可靠：用独立宿主（全屏半透明遮罩 + Dialog 风格底板）托起 Canvas，脱战后仍走系统设置。
   非战斗打开设置前会 `HideUIPanel(GameMenuFrame)`，避免关闭设置后仍显示 ESC 菜单。
-  勿缓存 Toolbox.L；语言切换后会重建所有页面内容。
+  勿缓存 `Toolbox.L`；语言切换后会重建所有页面内容。
 ]]
 
 Toolbox.SettingsHost = Toolbox.SettingsHost or {}
@@ -13,148 +13,178 @@ local PANEL_WIDTH = 700
 local PANEL_HEIGHT = 920
 local SCROLL_CHILD_WIDTH = 640
 local MODULE_BOX_WIDTH = 604
+local DEFAULT_LEAF_PAGE_KEY = "general" -- 默认打开的叶子页键名
 --- 战斗内独立展示时相对裸 `UIParent` 居中略缩小，贴近系统设置窗口内嵌 Canvas 的观感（可按实机再调）。
 local STANDALONE_PANEL_SCALE = 0.82
+local MODULE_LEAF_KEY_MAP = {
+  chat_notify = "general",
+  minimap_button = "general",
+  mover = "interface",
+  tooltip_anchor = "interface",
+  navigation = "map",
+  quest = "quest",
+  encounter_journal = "encounter_journal",
+}
 
 local function sanitizePageName(value)
   return tostring(value or "Page"):gsub("[^%w_]", "_")
 end
 
 local function createCanvasPanel(frameName)
-  local panel = CreateFrame("Frame", frameName, UIParent)
+  local panel = CreateFrame("Frame", frameName, UIParent) -- 叶子页面板
   panel:SetSize(PANEL_WIDTH, PANEL_HEIGHT)
   panel:Hide()
 
-  local scroll = CreateFrame("ScrollFrame", nil, panel, "ScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", 8, -8)
-  scroll:SetPoint("BOTTOMRIGHT", -28, 8)
+  local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "ScrollFrameTemplate") -- 页面滚动框
+  scrollFrame:SetPoint("TOPLEFT", 8, -8)
+  scrollFrame:SetPoint("BOTTOMRIGHT", -28, 8)
 
-  local child = CreateFrame("Frame", nil, scroll)
-  child:SetSize(SCROLL_CHILD_WIDTH, 800)
-  scroll:SetScrollChild(child)
+  local childFrame = CreateFrame("Frame", nil, scrollFrame) -- 页面滚动内容根节点
+  childFrame:SetSize(SCROLL_CHILD_WIDTH, 800)
+  scrollFrame:SetScrollChild(childFrame)
 
-  panel._toolboxScroll = scroll
-  panel._toolboxChild = child
+  panel._toolboxScroll = scrollFrame
+  panel._toolboxChild = childFrame
   return panel
 end
 
 local function resetCanvasPanel(panel)
-  local scroll = panel._toolboxScroll
-  local old = panel._toolboxChild
-  if old then
-    old:SetParent(nil)
-    old:Hide()
+  local scrollFrame = panel._toolboxScroll -- 页面滚动框
+  local oldChild = panel._toolboxChild -- 旧内容节点
+  if oldChild then
+    oldChild:SetParent(nil)
+    oldChild:Hide()
   end
 
-  local child = CreateFrame("Frame", nil, scroll)
-  child:SetSize(SCROLL_CHILD_WIDTH, 800)
-  scroll:SetScrollChild(child)
-  panel._toolboxChild = child
-  if scroll.SetVerticalScroll then
-    scroll:SetVerticalScroll(0)
+  local childFrame = CreateFrame("Frame", nil, scrollFrame) -- 新内容节点
+  childFrame:SetSize(SCROLL_CHILD_WIDTH, 800)
+  scrollFrame:SetScrollChild(childFrame)
+  panel._toolboxChild = childFrame
+  if scrollFrame.SetVerticalScroll then
+    scrollFrame:SetVerticalScroll(0)
   end
-  return child
+  return childFrame
 end
 
 local function collectSettingsModules()
-  local out = {}
-  for _, module in ipairs(Toolbox.ModuleRegistry:GetSorted()) do
-    if module.RegisterSettings then
-      out[#out + 1] = module
+  local moduleList = {} -- 带设置页的模块列表
+  for _, moduleObject in ipairs(Toolbox.ModuleRegistry:GetSorted()) do
+    if moduleObject.RegisterSettings then
+      moduleList[#moduleList + 1] = moduleObject
     end
   end
 
-  table.sort(out, function(a, b)
-    local orderA = tonumber(a.settingsOrder) or 9999
-    local orderB = tonumber(b.settingsOrder) or 9999
-    if orderA ~= orderB then
-      return orderA < orderB
+  table.sort(moduleList, function(leftModule, rightModule)
+    local leftOrder = tonumber(leftModule.settingsOrder) or 9999 -- 左侧排序值
+    local rightOrder = tonumber(rightModule.settingsOrder) or 9999 -- 右侧排序值
+    if leftOrder ~= rightOrder then
+      return leftOrder < rightOrder
     end
-    return tostring(a.id) < tostring(b.id)
+    return tostring(leftModule.id) < tostring(rightModule.id)
   end)
 
-  return out
+  return moduleList
 end
 
-local function getModuleTitle(module)
-  local L = Toolbox.L or {}
-  if module.nameKey and L[module.nameKey] then
-    return L[module.nameKey]
+local function getModuleTitle(moduleObject)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  if moduleObject.nameKey and localeTable[moduleObject.nameKey] then
+    return localeTable[moduleObject.nameKey]
   end
-  if module.name then
-    return module.name
+  if moduleObject.name then
+    return moduleObject.name
   end
-  return module.id
+  return moduleObject.id
 end
 
-local function getModuleIntro(module)
-  local L = Toolbox.L or {}
-  if module.settingsIntroKey and L[module.settingsIntroKey] then
-    return L[module.settingsIntroKey]
+local function getModuleIntro(moduleObject)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  if moduleObject.settingsIntroKey and localeTable[moduleObject.settingsIntroKey] then
+    return localeTable[moduleObject.settingsIntroKey]
   end
   return ""
 end
 
-local function getPageTitle(page)
-  local L = Toolbox.L or {}
-  if page.titleKey and L[page.titleKey] then
-    return L[page.titleKey]
+local function getPageTitle(pageObject)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  if pageObject.titleKey and localeTable[pageObject.titleKey] then
+    return localeTable[pageObject.titleKey]
   end
-  if page.titleText then
-    return page.titleText
+  if pageObject.titleText then
+    return pageObject.titleText
   end
-  if page.module then
-    return getModuleTitle(page.module)
+  if pageObject.module then
+    return getModuleTitle(pageObject.module)
   end
-  return page.key
+  return pageObject.key
 end
 
-local function getPageIntro(page)
-  local L = Toolbox.L or {}
-  if page.introKey and L[page.introKey] then
-    return L[page.introKey]
+local function getPageIntro(pageObject)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  if pageObject.introKey and localeTable[pageObject.introKey] then
+    return localeTable[pageObject.introKey]
   end
-  if type(page.introText) == "string" then
-    return page.introText
+  if type(pageObject.introText) == "string" then
+    return pageObject.introText
   end
-  if page.module and not page.isSubPage then
-    return getModuleIntro(page.module)
+  if pageObject.module then
+    return getModuleIntro(pageObject.module)
   end
   return ""
 end
 
-local function applyModuleCallbacks(module)
-  local db = Toolbox.Config.GetModule(module.id)
-  if module.OnEnabledSettingChanged then
-    module.OnEnabledSettingChanged(db.enabled ~= false)
+local function applyModuleCallbacks(moduleObject)
+  local moduleDb = Toolbox.Config.GetModule(moduleObject.id) -- 模块存档
+  if moduleObject.OnEnabledSettingChanged then
+    moduleObject.OnEnabledSettingChanged(moduleDb.enabled ~= false)
   end
-  if module.OnDebugSettingChanged then
-    module.OnDebugSettingChanged(db.debug == true)
+  if moduleObject.OnDebugSettingChanged then
+    moduleObject.OnDebugSettingChanged(moduleDb.debug == true)
   end
 end
 
-local function buildHeader(child, startY, titleText, introText)
-  local y = startY
+local function buildHeader(childFrame, startY, titleText, introText)
+  local yOffset = startY -- 当前纵向游标
 
-  local title = child:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  title:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  title:SetText(titleText or "")
-  y = y - 24
+  local titleLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 页面标题
+  titleLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  titleLabel:SetText(titleText or "")
+  yOffset = yOffset - 24
 
   if introText and introText ~= "" then
-    local intro = child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    intro:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-    intro:SetWidth(580)
-    intro:SetJustifyH("LEFT")
-    intro:SetText(introText)
-    y = y - math.max(36, math.ceil((intro:GetStringHeight() or 0) + 12))
+    local introLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 页面说明
+    introLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+    introLabel:SetWidth(580)
+    introLabel:SetJustifyH("LEFT")
+    introLabel:SetText(introText)
+    yOffset = yOffset - math.max(36, math.ceil((introLabel:GetStringHeight() or 0) + 12))
   end
 
-  return y
+  return yOffset
 end
 
-local function setChildHeight(child, y)
-  child:SetHeight(math.max(800, math.abs(y) + 40))
+local function buildSectionHeader(childFrame, startY, titleText, introText)
+  local yOffset = startY -- 当前纵向游标
+
+  local titleLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 分节标题
+  titleLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  titleLabel:SetText(titleText or "")
+  yOffset = yOffset - 22
+
+  if introText and introText ~= "" then
+    local introLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 分节说明
+    introLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+    introLabel:SetWidth(580)
+    introLabel:SetJustifyH("LEFT")
+    introLabel:SetText(introText)
+    yOffset = yOffset - math.max(30, math.ceil((introLabel:GetStringHeight() or 0) + 10))
+  end
+
+  return yOffset
+end
+
+local function setChildHeight(childFrame, yOffset)
+  childFrame:SetHeight(math.max(800, math.abs(yOffset) + 40))
 end
 
 function Toolbox.SettingsHost:GetPageByKey(pageKey)
@@ -163,22 +193,48 @@ function Toolbox.SettingsHost:GetPageByKey(pageKey)
 end
 
 function Toolbox.SettingsHost:GetModulePageKey(moduleId)
-  return "module:" .. tostring(moduleId)
+  return MODULE_LEAF_KEY_MAP[tostring(moduleId or "")] or DEFAULT_LEAF_PAGE_KEY
 end
 
-function Toolbox.SettingsHost:GetModuleSubPageKey(moduleId, pageId)
-  return "module:" .. tostring(moduleId) .. ":subpage:" .. tostring(pageId)
+--- 兼容旧调用面：额外子页已并回叶子页时，统一回到所属叶子页。
+function Toolbox.SettingsHost:GetModuleSubPageKey(moduleId)
+  return self:GetModulePageKey(moduleId)
+end
+
+--- 记录最近一次停留的叶子页，供 `/toolbox` 与各入口回到相同位置。
+---@param pageKey string 叶子页键名
+function Toolbox.SettingsHost:RememberLeafPageKey(pageKey)
+  self:EnsureCreated()
+  local pageObject = self:GetPageByKey(pageKey) -- 目标页面
+  if not pageObject or pageObject.isLeaf ~= true then
+    return
+  end
+  local globalDb = Toolbox.Config.GetGlobal() -- 全局存档
+  globalDb.settingsLastLeafPage = pageKey
+end
+
+--- 返回默认应打开的叶子页：优先上次停留，否则回退到“通用”。
+---@return string
+function Toolbox.SettingsHost:GetPreferredLeafPageKey()
+  self:EnsureCreated()
+  local globalDb = Toolbox.Config.GetGlobal() -- 全局存档
+  local savedPageKey = tostring(globalDb.settingsLastLeafPage or "") -- 记录中的叶子页键名
+  local savedPage = self:GetPageByKey(savedPageKey) -- 记录中的页面
+  if savedPage and savedPage.isLeaf == true then
+    return savedPageKey
+  end
+  return DEFAULT_LEAF_PAGE_KEY
 end
 
 --- 重建单个设置页内容；用于语言切换、模块公共开关变化后刷新 UI。
 ---@param pageKey string 页面键
 function Toolbox.SettingsHost:BuildPage(pageKey)
   self:EnsureCreated()
-  local page = self:GetPageByKey(pageKey)
-  if not page or not page.builder then
+  local pageObject = self:GetPageByKey(pageKey) -- 目标页面
+  if not pageObject or not pageObject.builder then
     return
   end
-  page.builder(page)
+  pageObject.builder(pageObject)
 end
 
 --- 重建所有已注册的设置页内容。
@@ -187,16 +243,12 @@ function Toolbox.SettingsHost:RefreshAllPages()
   if self.category and self.category.SetName and Toolbox.L then
     self.category:SetName(Toolbox.L.SETTINGS_CATEGORY_TITLE or "Toolbox")
   end
-  for _, page in ipairs(self.pages or {}) do
-    if page.category and page.category.SetName then
-      if page.key == "about" and Toolbox.L then
-        page.category:SetName(Toolbox.L.SETTINGS_ABOUT_TITLE or "About")
-      elseif page.module or page.titleKey or page.titleText then
-        page.category:SetName(getPageTitle(page))
-      end
+  for _, pageObject in ipairs(self.pages or {}) do
+    if pageObject.category and pageObject.category.SetName then
+      pageObject.category:SetName(getPageTitle(pageObject))
     end
-    if page.builder then
-      page.builder(page)
+    if pageObject.builder then
+      pageObject.builder(pageObject)
     end
   end
 end
@@ -206,322 +258,292 @@ function Toolbox.SettingsHost:Build()
   self:RefreshAllPages()
 end
 
---- 构建总览页里的界面语言区。
----@param child Frame 页面根 child
+--- 构建界面语言区。
+---@param childFrame Frame 页面根 child
 ---@param startY number 当前纵向游标
 ---@return number
-function Toolbox.SettingsHost:BuildLanguageSection(child, startY)
-  local L = Toolbox.L
-  local g = Toolbox.Config.GetGlobal()
-  local y = startY
+function Toolbox.SettingsHost:BuildLanguageSection(childFrame, startY)
+  local localeTable = Toolbox.L -- 本地化文案
+  local globalDb = Toolbox.Config.GetGlobal() -- 全局存档
+  local yOffset = startY -- 当前纵向游标
 
-  local title = child:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  title:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  title:SetText(L.LOCALE_SECTION_TITLE)
-  y = y - 24
+  local titleLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 分节标题
+  titleLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  titleLabel:SetText(localeTable.LOCALE_SECTION_TITLE)
+  yOffset = yOffset - 24
 
-  local modeButtons = {}
-  local function setLocale(pref)
-    g.locale = pref
-    for _, cb in ipairs(modeButtons) do
-      cb:SetChecked(cb.localePref == pref)
+  local modeButtonList = {} -- 语言模式按钮列表
+  local function setLocale(localeKey)
+    globalDb.locale = localeKey
+    for _, checkButton in ipairs(modeButtonList) do
+      checkButton:SetChecked(checkButton.localePref == localeKey)
     end
     Toolbox.Locale_Apply()
     Toolbox.SettingsHost:RefreshAllPages()
   end
 
-  local function makeOption(pref, label)
-    local cb = CreateFrame("CheckButton", nil, child, "InterfaceOptionsCheckButtonTemplate")
-    cb:SetPoint("TOPLEFT", child, "TOPLEFT", 20, y)
-    cb.Text:SetText(label)
-    cb.localePref = pref
-    cb:SetChecked((g.locale or "auto") == pref)
-    cb:SetScript("OnClick", function(self)
+  local function makeOption(localeKey, labelText)
+    local checkButton = CreateFrame("CheckButton", nil, childFrame, "InterfaceOptionsCheckButtonTemplate") -- 语言选项按钮
+    checkButton:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 20, yOffset)
+    checkButton.Text:SetText(labelText)
+    checkButton.localePref = localeKey
+    checkButton:SetChecked((globalDb.locale or "auto") == localeKey)
+    checkButton:SetScript("OnClick", function(self)
       setLocale(self.localePref)
     end)
-    modeButtons[#modeButtons + 1] = cb
-    y = y - 28
+    modeButtonList[#modeButtonList + 1] = checkButton
+    yOffset = yOffset - 28
   end
 
-  makeOption("auto", L.LOCALE_OPTION_AUTO)
-  makeOption("zhCN", L.LOCALE_OPTION_ZHCN)
-  makeOption("enUS", L.LOCALE_OPTION_ENUS)
+  makeOption("auto", localeTable.LOCALE_OPTION_AUTO)
+  makeOption("zhCN", localeTable.LOCALE_OPTION_ZHCN)
+  makeOption("enUS", localeTable.LOCALE_OPTION_ENUS)
 
-  y = y - 8
-  local hint = child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  hint:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  hint:SetWidth(580)
-  hint:SetJustifyH("LEFT")
-  hint:SetText(L.LOCALE_HINT)
-  y = y - 40
+  yOffset = yOffset - 8
+  local hintLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 语言切换提示
+  hintLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  hintLabel:SetWidth(580)
+  hintLabel:SetJustifyH("LEFT")
+  hintLabel:SetText(localeTable.LOCALE_HINT)
+  yOffset = yOffset - 40
 
-  return y
+  return yOffset
 end
 
---- 构建总览页里的重载界面区。
----@param child Frame 页面根 child
+--- 构建重载界面区。
+---@param childFrame Frame 页面根 child
 ---@param startY number 当前纵向游标
 ---@return number
-function Toolbox.SettingsHost:BuildReloadSection(child, startY)
-  local L = Toolbox.L
-  local y = startY
+function Toolbox.SettingsHost:BuildReloadSection(childFrame, startY)
+  local localeTable = Toolbox.L -- 本地化文案
+  local yOffset = startY -- 当前纵向游标
 
-  local btn = CreateFrame("Button", nil, child, "UIPanelButtonTemplate")
-  btn:SetSize(180, 22)
-  btn:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  btn:SetText(L.SETTINGS_RELOAD_UI)
-  btn:SetScript("OnClick", function()
+  local reloadButton = CreateFrame("Button", nil, childFrame, "UIPanelButtonTemplate") -- 重载按钮
+  reloadButton:SetSize(180, 22)
+  reloadButton:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  reloadButton:SetText(localeTable.SETTINGS_RELOAD_UI)
+  reloadButton:SetScript("OnClick", function()
     ReloadUI()
   end)
-  y = y - 32
+  yOffset = yOffset - 32
 
-  local hint = child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  hint:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  hint:SetWidth(580)
-  hint:SetJustifyH("LEFT")
-  hint:SetText(L.SETTINGS_RELOAD_HINT)
-  y = y - 44
+  local hintLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 重载说明
+  hintLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  hintLabel:SetWidth(580)
+  hintLabel:SetJustifyH("LEFT")
+  hintLabel:SetText(localeTable.SETTINGS_RELOAD_HINT)
+  yOffset = yOffset - 44
 
-  return y
+  return yOffset
 end
 
---- 构建总览页里的功能导航说明。
----@param child Frame 页面根 child
+--- 构建模块页首的高频主开关。
+---@param childFrame Frame 页面根 child
 ---@param startY number 当前纵向游标
+---@param moduleObject table 模块定义
+---@param pageKey string 所属叶子页键名
 ---@return number
-function Toolbox.SettingsHost:BuildOverviewModuleList(child, startY)
-  local L = Toolbox.L or {}
-  local y = startY
+function Toolbox.SettingsHost:BuildModulePrimaryControls(childFrame, startY, moduleObject, pageKey)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local moduleDb = Toolbox.Config.GetModule(moduleObject.id) -- 模块存档
+  local yOffset = startY -- 当前纵向游标
 
-  local title = child:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  title:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  title:SetText(L.SETTINGS_OVERVIEW_MODULES_TITLE or "")
-  y = y - 22
-
-  local hint = child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  hint:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  hint:SetWidth(580)
-  hint:SetJustifyH("LEFT")
-  hint:SetText(L.SETTINGS_OVERVIEW_MODULES_HINT or "")
-  y = y - 32
-
-  for _, module in ipairs(collectSettingsModules()) do
-    local line = child:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    line:SetPoint("TOPLEFT", child, "TOPLEFT", 16, y)
-    line:SetWidth(564)
-    line:SetJustifyH("LEFT")
-    line:SetText(string.format("• %s", getModuleTitle(module)))
-    y = y - 20
-
-    local intro = getModuleIntro(module)
-    if intro ~= "" then
-      local desc = child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      desc:SetPoint("TOPLEFT", child, "TOPLEFT", 32, y)
-      desc:SetWidth(548)
-      desc:SetJustifyH("LEFT")
-      desc:SetText(intro)
-      y = y - math.max(24, math.ceil((desc:GetStringHeight() or 0) + 8))
+  local enableButton = CreateFrame("CheckButton", nil, childFrame, "InterfaceOptionsCheckButtonTemplate") -- 启用开关
+  enableButton:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  enableButton.Text:SetText(localeTable.SETTINGS_MODULE_ENABLE or "")
+  enableButton:SetChecked(moduleDb.enabled ~= false)
+  enableButton:SetScript("OnClick", function(self)
+    moduleDb.enabled = self:GetChecked() and true or false
+    if moduleObject.OnEnabledSettingChanged then
+      moduleObject.OnEnabledSettingChanged(moduleDb.enabled ~= false)
     end
-  end
+    Toolbox.SettingsHost:BuildPage(pageKey)
+  end)
+  yOffset = yOffset - 34
 
-  y = y - 8
-  return y
+  return yOffset
 end
 
---- 构建模块页公共区（启用、调试、清理并重建）。
----@param child Frame 页面根 child
+--- 构建模块页尾的低频动作区（调试 / 重置并重建）。
+---@param childFrame Frame 页面根 child
 ---@param startY number 当前纵向游标
----@param module table 模块定义
+---@param moduleObject table 模块定义
+---@param pageKey string 所属叶子页键名
 ---@return number
-function Toolbox.SettingsHost:BuildSharedModuleControls(child, startY, module)
-  local L = Toolbox.L or {}
-  local db = Toolbox.Config.GetModule(module.id)
-  local y = startY
+function Toolbox.SettingsHost:BuildModuleSecondaryControls(childFrame, startY, moduleObject, pageKey)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local moduleDb = Toolbox.Config.GetModule(moduleObject.id) -- 模块存档
+  local yOffset = startY -- 当前纵向游标
 
-  local enable = CreateFrame("CheckButton", nil, child, "InterfaceOptionsCheckButtonTemplate")
-  enable:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  enable.Text:SetText(L.SETTINGS_MODULE_ENABLE or "")
-  enable:SetChecked(db.enabled ~= false)
-  enable:SetScript("OnClick", function(self)
-    db.enabled = self:GetChecked() and true or false
-    if module.OnEnabledSettingChanged then
-      module.OnEnabledSettingChanged(db.enabled ~= false)
+  local debugButton = CreateFrame("CheckButton", nil, childFrame, "InterfaceOptionsCheckButtonTemplate") -- 调试开关
+  debugButton:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  debugButton.Text:SetText(localeTable.SETTINGS_MODULE_DEBUG or "")
+  debugButton:SetChecked(moduleDb.debug == true)
+  debugButton:SetScript("OnClick", function(self)
+    moduleDb.debug = self:GetChecked() == true
+    if moduleObject.OnDebugSettingChanged then
+      moduleObject.OnDebugSettingChanged(moduleDb.debug == true)
     end
-    Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(module.id))
+    Toolbox.SettingsHost:BuildPage(pageKey)
   end)
-  y = y - 32
+  yOffset = yOffset - 36
 
-  local debug = CreateFrame("CheckButton", nil, child, "InterfaceOptionsCheckButtonTemplate")
-  debug:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  debug.Text:SetText(L.SETTINGS_MODULE_DEBUG or "")
-  debug:SetChecked(db.debug == true)
-  debug:SetScript("OnClick", function(self)
-    db.debug = self:GetChecked() == true
-    if module.OnDebugSettingChanged then
-      module.OnDebugSettingChanged(db.debug == true)
-    end
-    Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(module.id))
-  end)
-  y = y - 36
-
-  local reset = CreateFrame("Button", nil, child, "UIPanelButtonTemplate")
-  reset:SetSize(180, 24)
-  reset:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  reset:SetText(L.SETTINGS_MODULE_RESET_REBUILD or "")
-  reset:SetScript("OnClick", function()
-    if module.ResetToDefaultsAndRebuild then
-      module.ResetToDefaultsAndRebuild()
+  local resetButton = CreateFrame("Button", nil, childFrame, "UIPanelButtonTemplate") -- 重置并重建按钮
+  resetButton:SetSize(180, 24)
+  resetButton:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  resetButton:SetText(localeTable.SETTINGS_MODULE_RESET_REBUILD or "")
+  resetButton:SetScript("OnClick", function()
+    if moduleObject.ResetToDefaultsAndRebuild then
+      moduleObject.ResetToDefaultsAndRebuild()
     else
-      Toolbox.Config.ResetModule(module.id)
-      applyModuleCallbacks(module)
+      Toolbox.Config.ResetModule(moduleObject.id)
+      applyModuleCallbacks(moduleObject)
     end
-    if Toolbox.Chat and Toolbox.Chat.PrintAddonMessage and L.SETTINGS_MODULE_RESET_DONE_FMT then
-      Toolbox.Chat.PrintAddonMessage(string.format(L.SETTINGS_MODULE_RESET_DONE_FMT, getModuleTitle(module)))
+    if Toolbox.Chat and Toolbox.Chat.PrintAddonMessage and localeTable.SETTINGS_MODULE_RESET_DONE_FMT then
+      Toolbox.Chat.PrintAddonMessage(string.format(localeTable.SETTINGS_MODULE_RESET_DONE_FMT, getModuleTitle(moduleObject)))
     end
-    Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(module.id))
+    Toolbox.SettingsHost:BuildPage(pageKey)
   end)
-  y = y - 32
+  yOffset = yOffset - 32
 
-  local hint = child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  hint:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  hint:SetWidth(580)
-  hint:SetJustifyH("LEFT")
-  hint:SetText(L.SETTINGS_MODULE_RESET_HINT or "")
-  y = y - 36
+  local hintLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 重置说明
+  hintLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  hintLabel:SetWidth(580)
+  hintLabel:SetJustifyH("LEFT")
+  hintLabel:SetText(localeTable.SETTINGS_MODULE_RESET_HINT or "")
+  yOffset = yOffset - 36
 
-  return y
+  return yOffset
 end
 
---- 构建主类目总览页。
----@param page table 页面定义
-function Toolbox.SettingsHost:BuildOverviewPage(page)
-  local L = Toolbox.L or {}
-  local child = resetCanvasPanel(page.panel)
-  local y = -8
+--- 构建叶子页中的单个模块分节。
+---@param childFrame Frame 页面根 child
+---@param startY number 当前纵向游标
+---@param moduleObject table 模块定义
+---@param pageKey string 所属叶子页键名
+---@param showSectionHeader boolean 是否显示模块标题与简介
+---@return number
+function Toolbox.SettingsHost:BuildModuleSection(childFrame, startY, moduleObject, pageKey, showSectionHeader)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local yOffset = startY -- 当前纵向游标
 
-  y = buildHeader(child, y, L.SETTINGS_OVERVIEW_TITLE or "", L.SETTINGS_OVERVIEW_INTRO or "")
-  y = self:BuildLanguageSection(child, y)
-  y = self:BuildReloadSection(child, y)
-  y = self:BuildOverviewModuleList(child, y)
-  setChildHeight(child, y)
-end
-
---- 构建单个功能模块页。
----@param page table 页面定义
-function Toolbox.SettingsHost:BuildModulePage(page)
-  local module = page.module
-  local child = resetCanvasPanel(page.panel)
-  local y = -8
-
-  y = buildHeader(child, y, getPageTitle(page), getPageIntro(page))
-  y = self:BuildSharedModuleControls(child, y, module)
-
-  local customTitle = child:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  customTitle:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  customTitle:SetText((Toolbox.L and Toolbox.L.SETTINGS_MODULE_SECTION_TITLE) or "")
-  y = y - 24
-
-  local box = CreateFrame("Frame", nil, child)
-  box:SetSize(MODULE_BOX_WIDTH, 160)
-  box:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  module.RegisterSettings(box)
-  y = y - (box.realHeight or 160) - 16
-
-  setChildHeight(child, y)
-end
-
---- 构建模块额外设置子页面。
----@param page table 页面定义
-function Toolbox.SettingsHost:BuildModuleSubPage(page)
-  local module = page.module -- 页面所属模块
-  local child = resetCanvasPanel(page.panel)
-  local y = -8
-
-  y = buildHeader(child, y, getPageTitle(page), getPageIntro(page))
-  y = self:BuildSharedModuleControls(child, y, module)
-
-  local customTitle = child:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  customTitle:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  customTitle:SetText((Toolbox.L and Toolbox.L.SETTINGS_MODULE_SECTION_TITLE) or "")
-  y = y - 24
-
-  local box = CreateFrame("Frame", nil, child)
-  box:SetSize(MODULE_BOX_WIDTH, 240)
-  box:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  if type(page.buildContent) == "function" then
-    page.buildContent(page, box)
+  if showSectionHeader == true then
+    yOffset = buildSectionHeader(childFrame, yOffset, getModuleTitle(moduleObject), getModuleIntro(moduleObject))
   end
-  y = y - (box.realHeight or 240) - 16
 
-  setChildHeight(child, y)
+  yOffset = self:BuildModulePrimaryControls(childFrame, yOffset, moduleObject, pageKey)
+
+  local settingsTitle = childFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 模块设置标题
+  settingsTitle:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  settingsTitle:SetText(localeTable.SETTINGS_MODULE_SECTION_TITLE or "")
+  yOffset = yOffset - 24
+
+  local boxFrame = CreateFrame("Frame", nil, childFrame) -- 模块专属设置容器
+  boxFrame:SetSize(MODULE_BOX_WIDTH, 160)
+  boxFrame:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  moduleObject.RegisterSettings(boxFrame)
+  yOffset = yOffset - (boxFrame.realHeight or 160) - 16
+
+  yOffset = self:BuildModuleSecondaryControls(childFrame, yOffset, moduleObject, pageKey)
+  return yOffset - 12
+end
+
+--- 构建通用 / 界面 / 地图 / 任务 / 冒险手册叶子页。
+---@param pageObject table 页面定义
+function Toolbox.SettingsHost:BuildLeafPage(pageObject)
+  local childFrame = resetCanvasPanel(pageObject.panel) -- 页面内容根节点
+  local moduleIdList = pageObject.moduleIds or {} -- 叶子页包含的模块 id 列表
+  local yOffset = -8 -- 当前纵向游标
+
+  yOffset = buildHeader(childFrame, yOffset, getPageTitle(pageObject), getPageIntro(pageObject))
+
+  if pageObject.includeLanguageSection == true then
+    yOffset = self:BuildLanguageSection(childFrame, yOffset)
+  end
+  if pageObject.includeReloadSection == true then
+    yOffset = self:BuildReloadSection(childFrame, yOffset)
+  end
+
+  for indexNumber, moduleId in ipairs(moduleIdList) do
+    local moduleObject = self.modulesById and self.modulesById[moduleId] or nil -- 当前叶子页对应模块
+    if moduleObject then
+      local showSectionHeader = #moduleIdList > 1 -- 多模块页显示分节标题
+      yOffset = self:BuildModuleSection(childFrame, yOffset, moduleObject, pageObject.key, showSectionHeader)
+      if indexNumber < #moduleIdList then
+        yOffset = yOffset - 8
+      end
+    end
+  end
+
+  setChildHeight(childFrame, yOffset)
 end
 
 --- 构建关于页。
----@param page table 页面定义
-function Toolbox.SettingsHost:BuildAboutPage(page)
-  local L = Toolbox.L or {}
-  local child = resetCanvasPanel(page.panel)
-  local y = -8
+---@param pageObject table 页面定义
+function Toolbox.SettingsHost:BuildAboutPage(pageObject)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local childFrame = resetCanvasPanel(pageObject.panel) -- 页面内容根节点
+  local yOffset = -8 -- 当前纵向游标
 
-  y = buildHeader(child, y, L.SETTINGS_ABOUT_TITLE or "", L.SETTINGS_ABOUT_INTRO or "")
+  yOffset = buildHeader(childFrame, yOffset, getPageTitle(pageObject), getPageIntro(pageObject))
 
-  local versionLabel = child:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  versionLabel:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
+  local versionLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight") -- 版本文本
+  versionLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
   versionLabel:SetJustifyH("LEFT")
   versionLabel:SetText(string.format(
-    L.SETTINGS_ABOUT_VERSION_FMT or "%s",
+    localeTable.SETTINGS_ABOUT_VERSION_FMT or "%s",
     tostring(Toolbox.Chat.GetAddOnMetadata(Toolbox.ADDON_NAME, "Version") or "")
   ))
-  y = y - 24
+  yOffset = yOffset - 24
 
-  local clientLabel = child:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  clientLabel:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
+  local clientLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight") -- 客户端文本
+  clientLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
   clientLabel:SetJustifyH("LEFT")
-  clientLabel:SetText(L.SETTINGS_ABOUT_CLIENT or "")
-  y = y - 32
+  clientLabel:SetText(localeTable.SETTINGS_ABOUT_CLIENT or "")
+  yOffset = yOffset - 32
 
-  local commandsTitle = child:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  commandsTitle:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  commandsTitle:SetText(L.SETTINGS_ABOUT_COMMANDS_TITLE or "")
-  y = y - 24
+  local commandsTitle = childFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 常用命令标题
+  commandsTitle:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  commandsTitle:SetText(localeTable.SETTINGS_ABOUT_COMMANDS_TITLE or "")
+  yOffset = yOffset - 24
 
-  for _, key in ipairs({
+  for _, localeKey in ipairs({
     "SETTINGS_ABOUT_COMMAND_1",
     "SETTINGS_ABOUT_COMMAND_2",
     "SETTINGS_ABOUT_COMMAND_3",
     "SETTINGS_ABOUT_COMMAND_4",
   }) do
-    local line = child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    line:SetPoint("TOPLEFT", child, "TOPLEFT", 16, y)
-    line:SetWidth(560)
-    line:SetJustifyH("LEFT")
-    line:SetText("• " .. tostring(L[key] or ""))
-    y = y - 20
+    local lineLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 命令文本
+    lineLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 16, yOffset)
+    lineLabel:SetWidth(560)
+    lineLabel:SetJustifyH("LEFT")
+    lineLabel:SetText("• " .. tostring(Toolbox.L[localeKey] or ""))
+    yOffset = yOffset - 20
   end
 
-  y = y - 8
-  local docsTitle = child:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  docsTitle:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
-  docsTitle:SetText(L.SETTINGS_ABOUT_DOCS_TITLE or "")
-  y = y - 24
+  yOffset = yOffset - 8
+  local docsTitle = childFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 文档标题
+  docsTitle:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  docsTitle:SetText(localeTable.SETTINGS_ABOUT_DOCS_TITLE or "")
+  yOffset = yOffset - 24
 
-  for _, key in ipairs({
+  for _, localeKey in ipairs({
     "SETTINGS_ABOUT_DOC_1",
     "SETTINGS_ABOUT_DOC_2",
     "SETTINGS_ABOUT_DOC_3",
   }) do
-    local line = child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    line:SetPoint("TOPLEFT", child, "TOPLEFT", 16, y)
-    line:SetWidth(560)
-    line:SetJustifyH("LEFT")
-    line:SetText("• " .. tostring(L[key] or ""))
-    y = y - 20
+    local lineLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 文档文本
+    lineLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 16, yOffset)
+    lineLabel:SetWidth(560)
+    lineLabel:SetJustifyH("LEFT")
+    lineLabel:SetText("• " .. tostring(Toolbox.L[localeKey] or ""))
+    yOffset = yOffset - 20
   end
 
-  setChildHeight(child, y)
+  setChildHeight(childFrame, yOffset)
 end
 
---- 确保 Settings 主类目与各子页面已注册。
+--- 确保 Settings 根类目与各叶子页已注册。
 function Toolbox.SettingsHost:EnsureCreated()
   Toolbox_NamespaceEnsure()
   if self.category then
@@ -534,95 +556,96 @@ function Toolbox.SettingsHost:EnsureCreated()
 
   self.pages = {}
   self.pagesByKey = {}
+  self.modulesById = {}
 
-  local overviewPanel = createCanvasPanel("ToolboxSettingsOverviewPanel")
-  local overviewPage = {
-    key = "overview",
-    panel = overviewPanel,
-    builder = function(page)
-      Toolbox.SettingsHost:BuildOverviewPage(page)
-    end,
-  }
-  self.pages[#self.pages + 1] = overviewPage
-  self.pagesByKey[overviewPage.key] = overviewPage
+  local moduleList = collectSettingsModules() -- 带设置页的模块列表
+  for _, moduleObject in ipairs(moduleList) do
+    self.modulesById[moduleObject.id] = moduleObject
+  end
 
-  local category = Settings.RegisterCanvasLayoutCategory(overviewPanel, (Toolbox.L and Toolbox.L.SETTINGS_CATEGORY_TITLE) or "Toolbox")
+  local rootPanel = createCanvasPanel("ToolboxSettingsRootPanel") -- Toolbox 根类目占位面板
+  local category = Settings.RegisterCanvasLayoutCategory(rootPanel, (Toolbox.L and Toolbox.L.SETTINGS_CATEGORY_TITLE) or "Toolbox")
   Settings.RegisterAddOnCategory(category)
   self.category = category
 
-  for _, module in ipairs(collectSettingsModules()) do
-    local panelName = "ToolboxSettingsModule" .. sanitizePageName(module.id) .. "Panel"
-    local panel = createCanvasPanel(panelName)
-    local pageKey = self:GetModulePageKey(module.id)
-    local page = {
-      key = pageKey,
-      panel = panel,
-      module = module,
+  local pageList = {
+    {
+      key = "general",
+      panel = createCanvasPanel("ToolboxSettingsGeneralPanel"),
+      titleKey = "SETTINGS_PAGE_GENERAL_TITLE",
+      introKey = "SETTINGS_PAGE_GENERAL_INTRO",
+      includeLanguageSection = true,
+      includeReloadSection = true,
+      moduleIds = { "minimap_button", "chat_notify" },
+      isLeaf = true,
       builder = function(pageDef)
-        Toolbox.SettingsHost:BuildModulePage(pageDef)
+        Toolbox.SettingsHost:BuildLeafPage(pageDef)
       end,
-    }
-    self.pages[#self.pages + 1] = page
-    self.pagesByKey[page.key] = page
-
-    local subcategory = Settings.RegisterCanvasLayoutSubcategory(category, panel, getModuleTitle(module))
-    Settings.RegisterAddOnCategory(subcategory)
-    page.category = subcategory
-
-    local extraPageList = type(module.GetSettingsPages) == "function" and module.GetSettingsPages() or nil
-    if type(extraPageList) == "table" then
-      for _, extraPageDef in ipairs(extraPageList) do
-        if type(extraPageDef) == "table" and type(extraPageDef.id) == "string" and type(extraPageDef.build) == "function" then
-          local extraPanelName = "ToolboxSettingsModule"
-            .. sanitizePageName(module.id)
-            .. "SubPage"
-            .. sanitizePageName(extraPageDef.id)
-            .. "Panel"
-          local extraPanel = createCanvasPanel(extraPanelName)
-          local extraPageKey = self:GetModuleSubPageKey(module.id, extraPageDef.id)
-          local extraPage = {
-            key = extraPageKey,
-            panel = extraPanel,
-            module = module,
-            isSubPage = true,
-            titleKey = extraPageDef.titleKey,
-            titleText = extraPageDef.titleText,
-            introKey = extraPageDef.introKey,
-            introText = extraPageDef.introText,
-            buildContent = extraPageDef.build,
-            builder = function(pageDef)
-              Toolbox.SettingsHost:BuildModuleSubPage(pageDef)
-            end,
-          }
-          self.pages[#self.pages + 1] = extraPage
-          self.pagesByKey[extraPage.key] = extraPage
-
-          local extraSubcategory = Settings.RegisterCanvasLayoutSubcategory(
-            category,
-            extraPanel,
-            getPageTitle(extraPage)
-          )
-          Settings.RegisterAddOnCategory(extraSubcategory)
-          extraPage.category = extraSubcategory
-        end
-      end
-    end
-  end
-
-  local aboutPanel = createCanvasPanel("ToolboxSettingsAboutPanel")
-  local aboutPage = {
-    key = "about",
-    panel = aboutPanel,
-    builder = function(page)
-      Toolbox.SettingsHost:BuildAboutPage(page)
-    end,
+    },
+    {
+      key = "interface",
+      panel = createCanvasPanel("ToolboxSettingsInterfacePanel"),
+      titleKey = "SETTINGS_PAGE_INTERFACE_TITLE",
+      introKey = "SETTINGS_PAGE_INTERFACE_INTRO",
+      moduleIds = { "mover", "tooltip_anchor" },
+      isLeaf = true,
+      builder = function(pageDef)
+        Toolbox.SettingsHost:BuildLeafPage(pageDef)
+      end,
+    },
+    {
+      key = "map",
+      panel = createCanvasPanel("ToolboxSettingsMapPanel"),
+      titleKey = "SETTINGS_PAGE_MAP_TITLE",
+      introKey = "SETTINGS_PAGE_MAP_INTRO",
+      moduleIds = { "navigation" },
+      isLeaf = true,
+      builder = function(pageDef)
+        Toolbox.SettingsHost:BuildLeafPage(pageDef)
+      end,
+    },
+    {
+      key = "quest",
+      panel = createCanvasPanel("ToolboxSettingsQuestPanel"),
+      titleKey = "SETTINGS_PAGE_QUEST_TITLE",
+      introKey = "SETTINGS_PAGE_QUEST_INTRO",
+      moduleIds = { "quest" },
+      isLeaf = true,
+      builder = function(pageDef)
+        Toolbox.SettingsHost:BuildLeafPage(pageDef)
+      end,
+    },
+    {
+      key = "encounter_journal",
+      panel = createCanvasPanel("ToolboxSettingsEncounterJournalPanel"),
+      titleKey = "SETTINGS_PAGE_ENCOUNTER_JOURNAL_TITLE",
+      introKey = "SETTINGS_PAGE_ENCOUNTER_JOURNAL_INTRO",
+      moduleIds = { "encounter_journal" },
+      isLeaf = true,
+      builder = function(pageDef)
+        Toolbox.SettingsHost:BuildLeafPage(pageDef)
+      end,
+    },
+    {
+      key = "about",
+      panel = createCanvasPanel("ToolboxSettingsAboutPanel"),
+      titleKey = "SETTINGS_PAGE_ABOUT_TITLE",
+      introKey = "SETTINGS_PAGE_ABOUT_INTRO",
+      isLeaf = true,
+      builder = function(pageDef)
+        Toolbox.SettingsHost:BuildAboutPage(pageDef)
+      end,
+    },
   }
-  self.pages[#self.pages + 1] = aboutPage
-  self.pagesByKey[aboutPage.key] = aboutPage
 
-  local aboutCategory = Settings.RegisterCanvasLayoutSubcategory(category, aboutPanel, (Toolbox.L and Toolbox.L.SETTINGS_ABOUT_TITLE) or "About")
-  Settings.RegisterAddOnCategory(aboutCategory)
-  aboutPage.category = aboutCategory
+  for _, pageObject in ipairs(pageList) do
+    self.pages[#self.pages + 1] = pageObject
+    self.pagesByKey[pageObject.key] = pageObject
+
+    local subcategory = Settings.RegisterCanvasLayoutSubcategory(category, pageObject.panel, getPageTitle(pageObject))
+    Settings.RegisterAddOnCategory(subcategory)
+    pageObject.category = subcategory
+  end
 end
 
 --- 战斗内独立展示：全屏遮罩 + 底板（与 Canvas 分层，避免全透明与比例失调）。
@@ -633,36 +656,36 @@ local function ensureStandalonePresentationHost()
   if standalonePresentation then
     return standalonePresentation
   end
-  local host = CreateFrame("Frame", "ToolboxSettingsStandaloneHost", UIParent)
+  local host = CreateFrame("Frame", "ToolboxSettingsStandaloneHost", UIParent) -- 独立展示宿主
   host:SetFrameStrata("DIALOG")
   host:SetFrameLevel(100)
   host:SetAllPoints(UIParent)
   host:Hide()
 
-  local dimmer = CreateFrame("Button", nil, host)
+  local dimmer = CreateFrame("Button", nil, host) -- 全屏遮罩按钮
   dimmer:SetAllPoints(host)
   dimmer:SetFrameLevel(0)
-  local dimTex = dimmer:CreateTexture(nil, "BACKGROUND")
-  dimTex:SetAllPoints()
-  dimTex:SetColorTexture(0, 0, 0, 0.5)
+  local dimTexture = dimmer:CreateTexture(nil, "BACKGROUND") -- 遮罩纹理
+  dimTexture:SetAllPoints()
+  dimTexture:SetColorTexture(0, 0, 0, 0.5)
   dimmer:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   dimmer:SetScript("OnClick", function()
     Toolbox.SettingsHost:HideStandalonePresentation()
   end)
 
-  local box
+  local boxFrame -- 独立展示底板
   do
-    local ok, f = pcall(function()
+    local okFlag, backdropFrame = pcall(function()
       return CreateFrame("Frame", nil, host, "BackdropTemplate")
     end)
-    box = (ok and f) and f or CreateFrame("Frame", nil, host)
+    boxFrame = (okFlag and backdropFrame) and backdropFrame or CreateFrame("Frame", nil, host)
   end
-  box:SetFrameLevel(5)
-  local pad = 40
-  box:SetSize(PANEL_WIDTH + pad, PANEL_HEIGHT + pad)
-  box:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+  boxFrame:SetFrameLevel(5)
+  local padding = 40 -- 底板边距
+  boxFrame:SetSize(PANEL_WIDTH + padding, PANEL_HEIGHT + padding)
+  boxFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   local backdropOk = pcall(function()
-    box:SetBackdrop({
+    boxFrame:SetBackdrop({
       bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
       edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
       tile = true,
@@ -670,24 +693,24 @@ local function ensureStandalonePresentationHost()
       edgeSize = 32,
       insets = { left = 11, right = 12, top = 12, bottom = 11 },
     })
-    box:SetBackdropColor(0.06, 0.06, 0.08, 0.98)
-    box:SetBackdropBorderColor(0.5, 0.5, 0.55, 1)
+    boxFrame:SetBackdropColor(0.06, 0.06, 0.08, 0.98)
+    boxFrame:SetBackdropBorderColor(0.5, 0.5, 0.55, 1)
   end)
   if not backdropOk then
-    local bt = box:CreateTexture(nil, "ARTWORK")
-    bt:SetAllPoints()
-    bt:SetColorTexture(0.09, 0.09, 0.11, 0.98)
+    local fallbackTexture = boxFrame:CreateTexture(nil, "ARTWORK") -- 兜底底色
+    fallbackTexture:SetAllPoints()
+    fallbackTexture:SetColorTexture(0.09, 0.09, 0.11, 0.98)
   end
 
-  standalonePresentation = { host = host, dimmer = dimmer, box = box }
+  standalonePresentation = { host = host, dimmer = dimmer, box = boxFrame }
   return standalonePresentation
 end
 
 --- 打开系统设置前收起 ESC 菜单，避免仅关闭设置后仍留在游戏菜单栈顶。
 local function dismissGameMenuIfShown()
-  local gm = _G.GameMenuFrame
-  if gm and gm.IsShown and gm:IsShown() and HideUIPanel then
-    pcall(HideUIPanel, gm)
+  local gameMenuFrame = _G.GameMenuFrame -- ESC 菜单框
+  if gameMenuFrame and gameMenuFrame.IsShown and gameMenuFrame:IsShown() and HideUIPanel then
+    pcall(HideUIPanel, gameMenuFrame)
   end
 end
 
@@ -700,18 +723,18 @@ local STANDALONE_CLOSE_TEMPLATES = {
 ---@param panel Frame
 ---@return Button
 local function createStandaloneCloseButton(panel)
-  for _, tmpl in ipairs(STANDALONE_CLOSE_TEMPLATES) do
-    local ok, btn = pcall(function()
-      return CreateFrame("Button", nil, panel, tmpl)
+  for _, templateName in ipairs(STANDALONE_CLOSE_TEMPLATES) do
+    local okFlag, closeButton = pcall(function()
+      return CreateFrame("Button", nil, panel, templateName)
     end)
-    if ok and btn then
-      return btn
+    if okFlag and closeButton then
+      return closeButton
     end
   end
-  local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-  b:SetSize(24, 22)
-  b:SetText("X")
-  return b
+  local fallbackButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate") -- 兜底关闭按钮
+  fallbackButton:SetSize(24, 22)
+  fallbackButton:SetText("X")
+  return fallbackButton
 end
 
 --- 隐藏所有已注册的 Canvas 面板与战斗内嵌独立展示用的关闭键（不卸载内容）。
@@ -720,39 +743,39 @@ function Toolbox.SettingsHost:HideStandalonePresentation()
   if standalonePresentation and standalonePresentation.host then
     standalonePresentation.host:Hide()
   end
-  for _, page in ipairs(self.pages or {}) do
-    local p = page.panel
-    if p then
-      if p._toolboxStandaloneScaleApplied then
-        p:SetScale(p._toolboxStandaloneSavedScale or 1)
-        p._toolboxStandaloneScaleApplied = nil
-        p._toolboxStandaloneSavedScale = nil
+  for _, pageObject in ipairs(self.pages or {}) do
+    local panel = pageObject.panel -- 当前页面面板
+    if panel then
+      if panel._toolboxStandaloneScaleApplied then
+        panel:SetScale(panel._toolboxStandaloneSavedScale or 1)
+        panel._toolboxStandaloneScaleApplied = nil
+        panel._toolboxStandaloneSavedScale = nil
       end
-      p:Hide()
-      p:SetScript("OnKeyDown", nil)
-      p:EnableKeyboard(false)
-      if p._toolboxStandaloneClose then
-        p._toolboxStandaloneClose:Hide()
+      panel:Hide()
+      panel:SetScript("OnKeyDown", nil)
+      panel:EnableKeyboard(false)
+      if panel._toolboxStandaloneClose then
+        panel._toolboxStandaloneClose:Hide()
       end
     end
   end
 end
 
---- 战斗等场景：不经过 `Settings.OpenToCategory`，将指定页 Canvas 置于遮罩+底板之上（观感接近系统设置内嵌）。
----@param pageKey string overview / module:… / about
+--- 战斗等场景：不经过 `Settings.OpenToCategory`，将指定叶子页 Canvas 置于遮罩+底板之上。
+---@param pageKey string 叶子页键名
 function Toolbox.SettingsHost:ShowStandalonePageByKey(pageKey)
   self:EnsureCreated()
-  local page = self:GetPageByKey(pageKey)
-  if not page or not page.panel then
+  local pageObject = self:GetPageByKey(pageKey) -- 目标页面
+  if not pageObject or not pageObject.panel then
     return
   end
   self:HideStandalonePresentation()
   dismissGameMenuIfShown()
-  local sp = ensureStandalonePresentationHost()
-  local panel = page.panel
-  local box = sp.box
+  local presentation = ensureStandalonePresentationHost() -- 独立展示宿主
+  local panel = pageObject.panel -- 页面面板
+  local boxFrame = presentation.box -- 对话框底板
   panel:ClearAllPoints()
-  panel:SetPoint("CENTER", box, "CENTER", 0, 0)
+  panel:SetPoint("CENTER", boxFrame, "CENTER", 0, 0)
   panel:SetFrameStrata("DIALOG")
   panel:SetFrameLevel(200)
   panel._toolboxStandaloneSavedScale = panel:GetScale() or 1
@@ -763,91 +786,64 @@ function Toolbox.SettingsHost:ShowStandalonePageByKey(pageKey)
   pcall(function()
     panel:SetPropagateKeyboardInput(false)
   end)
-  panel:SetScript("OnKeyDown", function(_, key)
-    if key == "ESCAPE" then
+  panel:SetScript("OnKeyDown", function(_, keyName)
+    if keyName == "ESCAPE" then
       Toolbox.SettingsHost:HideStandalonePresentation()
     end
   end)
   if not panel._toolboxStandaloneClose then
-    local close = createStandaloneCloseButton(panel)
-    close:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -4, -4)
-    close:SetScript("OnClick", function()
+    local closeButton = createStandaloneCloseButton(panel) -- 独立展示关闭按钮
+    closeButton:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -4, -4)
+    closeButton:SetScript("OnClick", function()
       Toolbox.SettingsHost:HideStandalonePresentation()
     end)
-    panel._toolboxStandaloneClose = close
+    panel._toolboxStandaloneClose = closeButton
   else
     panel._toolboxStandaloneClose:Show()
   end
-  sp.host:Show()
+  presentation.host:Show()
   panel:Show()
 end
 
---- 打开主类目总览页。
-function Toolbox.SettingsHost:Open()
+--- 打开设置并定位到指定叶子页。
+---@param pageKey string 叶子页键名
+function Toolbox.SettingsHost:OpenToPageKey(pageKey)
   self:EnsureCreated()
-  if not self.category then
+  local fallbackPage = self:GetPageByKey(DEFAULT_LEAF_PAGE_KEY) -- 默认页
+  local pageObject = self:GetPageByKey(pageKey) or fallbackPage -- 目标页
+  if not pageObject then
     return
   end
+
+  self:RememberLeafPageKey(pageObject.key)
   if InCombatLockdown() then
-    self:ShowStandalonePageByKey("overview")
+    self:ShowStandalonePageByKey(pageObject.key)
     return
   end
+
   self:HideStandalonePresentation()
   dismissGameMenuIfShown()
-  if Settings and Settings.OpenToCategory then
+  if Settings and Settings.OpenToCategory and pageObject.category then
     pcall(function()
-      Settings.OpenToCategory(self.category:GetID())
+      Settings.OpenToCategory(pageObject.category:GetID())
     end)
   end
 end
 
---- 打开设置并定位到指定功能模块子页（与总览 / 关于同级）。
+--- 打开默认叶子页：优先上次停留，否则回退到“通用”。
+function Toolbox.SettingsHost:Open()
+  self:OpenToPageKey(self:GetPreferredLeafPageKey())
+end
+
+--- 打开设置并定位到指定功能模块所属叶子页。
 ---@param moduleId string modules.* 的模块 id
 function Toolbox.SettingsHost:OpenToModulePage(moduleId)
-  self:EnsureCreated()
-  if not moduleId or not Settings or not Settings.OpenToCategory then
-    self:Open()
-    return
-  end
-  local key = self:GetModulePageKey(moduleId)
-  local page = self:GetPageByKey(key)
-  if not page or not page.category then
-    self:Open()
-    return
-  end
-  if InCombatLockdown() then
-    self:ShowStandalonePageByKey(key)
-    return
-  end
-  self:HideStandalonePresentation()
-  dismissGameMenuIfShown()
-  local subCat = page.category
-  pcall(function()
-    Settings.OpenToCategory(subCat:GetID())
-  end)
+  self:OpenToPageKey(self:GetModulePageKey(moduleId))
 end
 
 --- 打开设置并定位到关于页。
 function Toolbox.SettingsHost:OpenToAbout()
-  self:EnsureCreated()
-  if not Settings or not Settings.OpenToCategory then
-    self:Open()
-    return
-  end
-  local page = self:GetPageByKey("about")
-  if not page or not page.category then
-    self:Open()
-    return
-  end
-  if InCombatLockdown() then
-    self:ShowStandalonePageByKey("about")
-    return
-  end
-  self:HideStandalonePresentation()
-  dismissGameMenuIfShown()
-  pcall(function()
-    Settings.OpenToCategory(page.category:GetID())
-  end)
+  self:OpenToPageKey("about")
 end
 
 local function tryGameMenuAttach()
@@ -856,22 +852,22 @@ local function tryGameMenuAttach()
   end
   Toolbox_NamespaceEnsure()
   Toolbox.SettingsHost:EnsureCreated()
-  local gm = _G.GameMenuFrame
-  if not gm then
+  local gameMenuFrame = _G.GameMenuFrame -- ESC 菜单框
+  if not gameMenuFrame then
     return false
   end
-  local anchor = _G.GameMenuButtonOptions or _G.GameMenuButtonSettings
-  if not anchor then
+  local anchorButton = _G.GameMenuButtonOptions or _G.GameMenuButtonSettings -- 设置按钮锚点
+  if not anchorButton then
     return false
   end
-  local b = CreateFrame("Button", "GameMenuButtonToolbox", gm, "GameMenuButtonTemplate")
-  b:SetText(Toolbox.L.GAMEMENU_TOOLBOX)
-  b:SetPoint("TOP", anchor, "BOTTOM", 0, -1)
-  b:SetScript("OnClick", function()
+  local toolboxButton = CreateFrame("Button", "GameMenuButtonToolbox", gameMenuFrame, "GameMenuButtonTemplate") -- ESC 菜单 Toolbox 按钮
+  toolboxButton:SetText(Toolbox.L.GAMEMENU_TOOLBOX)
+  toolboxButton:SetPoint("TOP", anchorButton, "BOTTOM", 0, -1)
+  toolboxButton:SetScript("OnClick", function()
     HideUIPanel(_G.GameMenuFrame)
     Toolbox.SettingsHost:Open()
   end)
-  Toolbox._gameMenuBtn = b
+  Toolbox._gameMenuBtn = toolboxButton
   return true
 end
 
@@ -885,20 +881,20 @@ function Toolbox.GameMenu_Init()
   end
   Toolbox._gameMenuHooked = true
 
-  local function attempt()
-    local gm = _G.GameMenuFrame
-    if gm and not Toolbox._gameMenuShowHooked then
+  local function attemptAttach()
+    local gameMenuFrame = _G.GameMenuFrame -- ESC 菜单框
+    if gameMenuFrame and not Toolbox._gameMenuShowHooked then
       Toolbox._gameMenuShowHooked = true
-      gm:HookScript("OnShow", tryGameMenuAttach)
+      gameMenuFrame:HookScript("OnShow", tryGameMenuAttach)
     end
     tryGameMenuAttach()
   end
 
-  local watcher = CreateFrame("Frame")
-  watcher:RegisterEvent("ADDON_LOADED")
-  watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
-  watcher:SetScript("OnEvent", function()
-    attempt()
+  local watcherFrame = CreateFrame("Frame") -- 延迟重试监听器
+  watcherFrame:RegisterEvent("ADDON_LOADED")
+  watcherFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+  watcherFrame:SetScript("OnEvent", function()
+    attemptAttach()
   end)
-  attempt()
+  attemptAttach()
 end

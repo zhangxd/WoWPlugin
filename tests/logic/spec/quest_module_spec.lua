@@ -111,7 +111,8 @@ describe("Quest module split", function()
   it("registers_quest_module_with_four_bottom_tabs", function()
     local moduleDef = harness:loadQuestModule() -- 任务模块定义
     assert.equals("quest", moduleDef.id)
-    assert.is_function(moduleDef.GetSettingsPages)
+    assert.is_function(moduleDef.RegisterSettings)
+    assert.is_nil(moduleDef.GetSettingsPages)
 
     local questHooks = Toolbox.TestHooks and Toolbox.TestHooks.Quest -- quest 测试 hook
     assert.is_truthy(type(questHooks) == "table")
@@ -1386,4 +1387,3 @@ describe("Quest module split", function()
     assert.equals(9902, questView.expandedQuestLineID)
   end)
 end)
-
