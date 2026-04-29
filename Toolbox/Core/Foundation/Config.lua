@@ -70,6 +70,16 @@ local defaults = {
       lastTargetUiMapID = 0,
       lastTargetX = 0,
       lastTargetY = 0,
+      -- 路线图组件展开态：false=精简胶囊；true=展开完整时间线
+      routeWidgetExpanded = false,
+      -- 路线图组件锚点位置
+      routeWidgetPosition = {
+        point = "TOP",
+        x = 0,
+        y = -18,
+      },
+      -- 最近 10 条路线历史；仅保存旧终点快照，用于快速重规划
+      routeHistory = {},
     },
     quest = {
       enabled = true,
@@ -466,6 +476,36 @@ function Toolbox.Config.Init()
     tooltipAnchorDb.managedUberTooltipsActive = nil
     tooltipAnchorDb.managedUberTooltipsOriginal = nil
   end
+
+  local navigationDb = type(moduleStore.navigation) == "table" and moduleStore.navigation or {} -- navigation 模块存档
+  navigationDb.routeWidgetExpanded = navigationDb.routeWidgetExpanded == true
+
+  local widgetPosition = type(navigationDb.routeWidgetPosition) == "table" and navigationDb.routeWidgetPosition or {} -- 路线图位置存档
+  local pointName = type(widgetPosition.point) == "string" and widgetPosition.point or "TOP" -- 路线图锚点名
+  navigationDb.routeWidgetPosition = {
+    point = pointName,
+    x = tonumber(widgetPosition.x) or 0,
+    y = tonumber(widgetPosition.y) or -18,
+  }
+
+  local normalizedRouteHistory = {} -- 归一化后的路线历史
+  for _, historyEntry in ipairs(type(navigationDb.routeHistory) == "table" and navigationDb.routeHistory or {}) do
+    local targetUiMapID = tonumber(type(historyEntry) == "table" and (historyEntry.targetUiMapID or historyEntry.uiMapID)) -- 历史目标地图 ID
+    if targetUiMapID and targetUiMapID > 0 then
+      normalizedRouteHistory[#normalizedRouteHistory + 1] = {
+        targetUiMapID = targetUiMapID,
+        targetX = tonumber(type(historyEntry) == "table" and (historyEntry.targetX or historyEntry.x)) or 0,
+        targetY = tonumber(type(historyEntry) == "table" and (historyEntry.targetY or historyEntry.y)) or 0,
+        targetName = type(historyEntry) == "table" and type(historyEntry.targetName or historyEntry.name) == "string" and (historyEntry.targetName or historyEntry.name) or "",
+        summaryText = type(historyEntry) == "table" and type(historyEntry.summaryText) == "string" and historyEntry.summaryText or "",
+      }
+      if #normalizedRouteHistory >= 10 then
+        break
+      end
+    end
+  end
+  navigationDb.routeHistory = normalizedRouteHistory
+  moduleStore.navigation = navigationDb
 end
 
 -- 返回 modules[moduleId] 表；若不存在则从 defaults 拷贝一份，保证字段齐全

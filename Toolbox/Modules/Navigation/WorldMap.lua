@@ -1,6 +1,6 @@
 --[[
   navigation 世界地图入口：在 WorldMapFrame 显示时创建“规划路线”按钮。
-  目标坐标读取当前用户 waypoint；若不存在有效 waypoint 或规划失败，需要给玩家明确反馈。
+  目标坐标读取当前用户 waypoint；历史重规划则直接接收显式目标快照。
 ]]
 
 Toolbox.NavigationModule = Toolbox.NavigationModule or {}
@@ -71,35 +71,50 @@ local function getRouteFailureMessage(errorObject)
   return nil
 end
 
---- 规划当前用户 waypoint 目标，并刷新顶部路径条。
-local function planRouteFromCurrentWaypointTarget()
-  local routeBar = Toolbox.NavigationModule and Toolbox.NavigationModule.RouteBar or nil -- 顶部路径条模块
-  local mapID, targetX, targetY = getUserWaypointTarget() -- 当前用户 waypoint
-  if not mapID or not targetX or not targetY then
+--- 规划指定世界地图目标，并刷新顶部路线图。
+---@param routeTarget table|nil 目标快照，至少包含 uiMapID/x/y
+---@return table|nil, table|nil
+function WorldMap.PlanRouteToTarget(routeTarget)
+  local target = type(routeTarget) == "table" and routeTarget or nil -- 规划目标
+  local numericMapID = tonumber(target and target.uiMapID) -- 目标地图 ID
+  local targetX = tonumber(target and target.x) -- 目标 X
+  local targetY = tonumber(target and target.y) -- 目标 Y
+  local routeBar = Toolbox.NavigationModule and Toolbox.NavigationModule.RouteBar or nil -- 顶部路线图模块
+  if not numericMapID or not targetX or not targetY then
     if routeBar and type(routeBar.ClearRoute) == "function" then
       routeBar.ClearRoute()
     end
     printNavigationMessage((Toolbox.L or {}).NAVIGATION_ROUTE_NEEDS_WAYPOINT or "请先在世界地图上放置目标标记。")
-    return
+    return nil, { code = "NAVIGATION_ERR_BAD_TARGET" }
   end
 
   local moduleDb = getModuleDb() -- navigation 模块存档
-  moduleDb.lastTargetUiMapID = mapID
+  moduleDb.lastTargetUiMapID = numericMapID
   moduleDb.lastTargetX = targetX
   moduleDb.lastTargetY = targetY
 
   local spellIDList = Toolbox.Navigation.GetRequiredSpellIDList(Toolbox.Data and Toolbox.Data.NavigationRouteEdges) -- 需要确认的统一路线边技能列表
   local availabilityContext = Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList) -- 当前角色可用性快照
   local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
-    uiMapID = mapID,
+    uiMapID = numericMapID,
     x = targetX,
     y = targetY,
+    name = target.name,
   }, availabilityContext)
 
   if routeResult and routeBar and type(routeBar.ShowRoute) == "function" then
-    routeBar.ShowRoute(routeResult)
-    return
+    routeBar.ShowRoute(routeResult, {
+      uiMapID = numericMapID,
+      x = targetX,
+      y = targetY,
+      name = target.name,
+    })
+    if type(routeBar.BuildRouteText) == "function" then
+      printNavigationMessage(routeBar.BuildRouteText(routeResult))
+    end
+    return routeResult, nil
   end
+
   if routeBar and type(routeBar.ClearRoute) == "function" then
     routeBar.ClearRoute()
   end
@@ -107,6 +122,25 @@ local function planRouteFromCurrentWaypointTarget()
   if failureMessage then
     printNavigationMessage(failureMessage)
   end
+  return nil, errorObject
+end
+
+--- 规划当前用户 waypoint 目标，并刷新顶部路线图。
+local function planRouteFromCurrentWaypointTarget()
+  local mapID, targetX, targetY = getUserWaypointTarget() -- 当前用户 waypoint
+  if not mapID or not targetX or not targetY then
+    local routeBar = Toolbox.NavigationModule and Toolbox.NavigationModule.RouteBar or nil -- 顶部路线图模块
+    if routeBar and type(routeBar.ClearRoute) == "function" then
+      routeBar.ClearRoute()
+    end
+    printNavigationMessage((Toolbox.L or {}).NAVIGATION_ROUTE_NEEDS_WAYPOINT or "请先在世界地图上放置目标标记。")
+    return
+  end
+  WorldMap.PlanRouteToTarget({
+    uiMapID = mapID,
+    x = targetX,
+    y = targetY,
+  })
 end
 
 --- 确保世界地图规划按钮已创建。

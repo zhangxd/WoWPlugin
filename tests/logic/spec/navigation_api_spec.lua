@@ -20,6 +20,17 @@ describe("Navigation API", function()
     }
   end
 
+  local function buildAllKnownTaxiNodeByID()
+    local knownTaxiNodeByID = {} -- 测试用：把导出图中的所有 taxi 节点视为已开启
+    for _, nodeDef in pairs(Toolbox.Data.NavigationRouteEdges and Toolbox.Data.NavigationRouteEdges.nodes or {}) do
+      local taxiNodeID = tonumber(type(nodeDef) == "table" and nodeDef.TaxiNodeID or 0) -- 导出 taxi 节点 ID
+      if taxiNodeID and taxiNodeID > 0 then
+        knownTaxiNodeByID[taxiNodeID] = true
+      end
+    end
+    return knownTaxiNodeByID
+  end
+
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
     originalUnitClass = rawget(_G, "UnitClass")
@@ -848,5 +859,155 @@ describe("Navigation API", function()
 
     assert.is_nil(routeResult)
     assert.equals("NAVIGATION_ERR_UNSUPPORTED_MAP_LEVEL", errorObject.code)
+  end)
+
+  it("routes_from_silvermoon_to_tirisfal_via_exported_public_portal_exit", function()
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 18,
+      x = 0.50,
+      y = 0.50,
+    }, {
+      classFile = "WARRIOR",
+      faction = "Horde",
+      currentUiMapID = 110,
+      knownSpellByID = {},
+      knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
+    })
+
+    assert.is_nil(errorObject)
+    assert.is_table(routeResult)
+
+    local usedSilvermoonTirisfalPortal = false -- 是否使用了银月城宝珠到提瑞斯法出口
+    for _, edgeDef in ipairs(routeResult.rawEdgePath or {}) do
+      if edgeDef.FromNodeID == "portal_118" and edgeDef.ToNodeID == "portal_119" then
+        usedSilvermoonTirisfalPortal = true
+      end
+    end
+
+    assert.is_true(usedSilvermoonTirisfalPortal)
+  end)
+
+  it("routes_from_silvermoon_to_orgrimmar_after_portal_hub_merge_is_closed", function()
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 85,
+      x = 0.50,
+      y = 0.50,
+    }, {
+      classFile = "WARRIOR",
+      faction = "Horde",
+      currentUiMapID = 110,
+      knownSpellByID = {},
+      knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
+    })
+
+    assert.is_nil(errorObject)
+    assert.is_table(routeResult)
+
+    local usedSilvermoonOrgrimmarPortal = false -- 是否使用了银月城到奥格的公共传送门
+    for _, edgeDef in ipairs(routeResult.rawEdgePath or {}) do
+      if edgeDef.FromNodeID == "portal_117" and edgeDef.ToNodeID == "portal_101" then
+        usedSilvermoonOrgrimmarPortal = true
+      end
+    end
+
+    assert.is_true(usedSilvermoonOrgrimmarPortal)
+  end)
+
+  it("routes_from_silvermoon_to_eastern_plaguelands_with_exported_static_graph", function()
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 23,
+      x = 0.50,
+      y = 0.50,
+    }, {
+      classFile = "WARRIOR",
+      faction = "Horde",
+      currentUiMapID = 110,
+      knownSpellByID = {},
+      knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
+    })
+
+    assert.is_nil(errorObject)
+    assert.is_table(routeResult)
+    assert.is_true((routeResult.totalSteps or 0) > 0)
+  end)
+
+  it("routes_from_orgrimmar_to_borean_tundra_via_direct_transport_instead_of_dalaran_flight", function()
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 114,
+      x = 0.50,
+      y = 0.50,
+    }, {
+      classFile = "WARRIOR",
+      faction = "Horde",
+      currentUiMapID = 85,
+      knownSpellByID = {},
+      knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
+    })
+
+    assert.is_nil(errorObject)
+    assert.is_table(routeResult)
+    assert.equals(3, routeResult.totalSteps)
+
+    local usedDirectTransport = false -- 是否使用了奥格到北风苔原的公共交通
+    local usedDalaranTaxiFallback = false -- 是否错误地回退到达拉然飞行点
+    for _, edgeDef in ipairs(routeResult.rawEdgePath or {}) do
+      if tostring(edgeDef.Mode or edgeDef.mode) == "transport" and string.find(tostring(edgeDef.Label or edgeDef.label or ""), "北风苔原", 1, true) ~= nil then
+        usedDirectTransport = true
+      end
+      if tostring(edgeDef.FromNodeID or edgeDef.from or "") == "taxi_310" and tostring(edgeDef.ToNodeID or edgeDef.to or "") == "taxi_257" then
+        usedDalaranTaxiFallback = true
+      end
+    end
+
+    assert.is_true(usedDirectTransport)
+    assert.is_false(usedDalaranTaxiFallback)
+  end)
+
+  it("routes_from_the_12_0_silvermoon_map_to_zulaman_without_falling_back_to_legacy_silvermoon", function()
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 2437,
+      x = 0.50,
+      y = 0.50,
+    }, {
+      classFile = "WARRIOR",
+      faction = "Horde",
+      currentUiMapID = 2393,
+      knownSpellByID = {},
+      knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
+    })
+
+    assert.is_nil(errorObject)
+    assert.is_table(routeResult)
+    assert.is_true((routeResult.totalSteps or 0) > 0)
+
+    local usedNewSilvermoonChain = false -- 是否保留了新版银月城 / 永歌森林链
+    local usedNewZulamanTaxiChain = false -- 是否接入了新版祖阿曼 taxi
+    local usedLegacySilvermoonTaxi = false -- 是否错误回退到了旧版 82/625/83/205 链
+    for _, edgeDef in ipairs(routeResult.rawEdgePath or {}) do
+      local fromNodeID = tostring(edgeDef.FromNodeID or "")
+      local toNodeID = tostring(edgeDef.ToNodeID or "")
+      if fromNodeID == "uimap_2393" or toNodeID == "uimap_2393"
+        or fromNodeID == "uimap_2395" or toNodeID == "uimap_2395"
+        or fromNodeID == "taxi_3131" or toNodeID == "taxi_3131"
+        or fromNodeID == "taxi_3132" or toNodeID == "taxi_3132" then
+        usedNewSilvermoonChain = true
+      end
+      if (fromNodeID == "taxi_3131" or fromNodeID == "taxi_3132" or fromNodeID == "taxi_3133" or fromNodeID == "taxi_3134")
+        and (toNodeID == "taxi_3106" or toNodeID == "taxi_3126" or toNodeID == "taxi_3127" or toNodeID == "taxi_3128" or toNodeID == "taxi_3129" or toNodeID == "taxi_3130") then
+        usedNewZulamanTaxiChain = true
+      end
+      if fromNodeID == "uimap_110" or toNodeID == "uimap_110"
+        or fromNodeID == "taxi_82" or toNodeID == "taxi_82"
+        or fromNodeID == "taxi_625" or toNodeID == "taxi_625"
+        or fromNodeID == "taxi_631" or toNodeID == "taxi_631"
+        or fromNodeID == "taxi_83" or toNodeID == "taxi_83"
+        or fromNodeID == "taxi_205" or toNodeID == "taxi_205" then
+        usedLegacySilvermoonTaxi = true
+      end
+    end
+
+    assert.is_true(usedNewSilvermoonChain)
+    assert.is_true(usedNewZulamanTaxiChain)
+    assert.is_false(usedLegacySilvermoonTaxi)
   end)
 end)

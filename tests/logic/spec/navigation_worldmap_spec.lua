@@ -6,7 +6,9 @@ describe("Navigation WorldMap integration", function()
   local originalCreateFrame = nil -- 原始 CreateFrame 全局
   local originalCMap = nil -- 原始 C_Map 全局
   local shownRoute = nil -- RouteBar 显示的路线
+  local shownTarget = nil -- RouteBar 记录的目标
   local chatMessages = nil -- 聊天提示记录
+  local moduleDb = nil -- navigation 模块存档
 
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
@@ -14,7 +16,14 @@ describe("Navigation WorldMap integration", function()
     originalCreateFrame = rawget(_G, "CreateFrame")
     originalCMap = rawget(_G, "C_Map")
     shownRoute = nil
+    shownTarget = nil
     chatMessages = {}
+    moduleDb = {
+      enabled = true,
+      lastTargetUiMapID = 0,
+      lastTargetX = 0,
+      lastTargetY = 0,
+    }
 
     local worldMapFrame = FakeFrame.new({ frameType = "Frame", frameName = "WorldMapFrame" }) -- 大地图 Frame
     worldMapFrame.BorderFrame = FakeFrame.new({ frameType = "Frame", parentFrame = worldMapFrame })
@@ -88,9 +97,14 @@ describe("Navigation WorldMap integration", function()
       },
       NavigationModule = {
         RouteBar = {
-          ShowRoute = function(routeResult)
+          ShowRoute = function(routeResult, target)
             shownRoute = routeResult
+            shownTarget = target
           end,
+          BuildRouteText = function(routeResult)
+            return string.format("%d步 | %s", tonumber(routeResult and routeResult.totalSteps) or 0, tostring(routeResult and routeResult.segments and routeResult.segments[1] and routeResult.segments[1].mode or ""))
+          end,
+          ClearRoute = function() end,
         },
       },
       Chat = {
@@ -100,12 +114,7 @@ describe("Navigation WorldMap integration", function()
       },
       Config = {
         GetModule = function()
-          return {
-            enabled = true,
-            lastTargetUiMapID = 0,
-            lastTargetX = 0,
-            lastTargetY = 0,
-          }
+          return moduleDb
         end,
       },
       L = {
@@ -146,6 +155,34 @@ describe("Navigation WorldMap integration", function()
     assert.is_table(shownRoute)
     assert.equals(2, shownRoute.totalSteps)
     assert.equals("class_teleport", shownRoute.segments[1].mode)
+    assert.equals(114, shownTarget.uiMapID)
+    assert.equals(0.52, shownTarget.x)
+    assert.equals(1, #chatMessages)
+    assert.is_true(string.find(chatMessages[1], "2步", 1, true) ~= nil)
+    assert.is_true(string.find(chatMessages[1], "class_teleport", 1, true) ~= nil)
+  end)
+
+  it("supports_replanning_to_an_explicit_history_target_without_reading_the_user_waypoint", function()
+    rawset(_G, "C_Map", {
+      GetUserWaypoint = function()
+        return nil
+      end,
+    })
+
+    Toolbox.NavigationModule.WorldMap.PlanRouteToTarget({
+      uiMapID = 114,
+      x = 0.52,
+      y = 0.43,
+      name = "北风苔原目标点",
+    })
+
+    assert.is_table(shownRoute)
+    assert.equals(114, shownTarget.uiMapID)
+    assert.equals(114, moduleDb.lastTargetUiMapID)
+    assert.equals(0.52, moduleDb.lastTargetX)
+    assert.equals(0.43, moduleDb.lastTargetY)
+    assert.equals(1, #chatMessages)
+    assert.is_nil(string.find(chatMessages[1], "请先在世界地图上放置目标标记。", 1, true))
   end)
 
   it("shows_disabled_button_and_chat_hint_when_user_waypoint_is_missing", function()

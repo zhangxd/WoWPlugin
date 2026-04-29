@@ -42,6 +42,12 @@
 - 运行时静态数据只允许来自 DataContracts 导出；不得重新引入手工导航边。
 - `transport / public_portal / areatrigger / 道标石 / 全世界 WalkComponent` 全部延后到 V2。
 - 在 V2 闭合前，不允许下 `only_taxi`、`must_use_transport`、`no_public_route` 这类排除法结论。
+- 顶部路线 UI 采用“默认精简胶囊 + 点击展开完整时间线”的交互，不改成世界地图内嵌面板。
+- 路线图组件允许拖动，且位置与展开状态都需要存档。
+- 路线图需要实时刷新当前步骤与偏航提示，而不是只在规划成功时静态显示。
+- 到达终点后路线图保留，手动关闭或重新规划前不自动消失。
+- 路线图需要维护最近 10 条历史记录。
+- 点击历史记录时，使用“玩家当前位置 + 历史终点”重新规划；不恢复旧起点。
 
 ## 3. 文件布局
 
@@ -539,36 +545,96 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
   - 可用性：`PlayerConditionID = 0` 无条件纳入；`924`/`923` 标 faction；其余暂不纳入
   - 出口：portal 边汇入 `navigation_route_edges` 统一静态边表
 
-### 6.1 当前导出缺口样例：`银月城 -> 东瘟疫之地`
+### 6.1 已闭合回归样例：`银月城 -> 东瘟疫之地`
 
-该样例当前应稳定返回 `NAVIGATION_ERR_NO_ROUTE`。这不是求解器 bug，也不是“游戏内绝对无法到达”的结论，而是当前静态导出图还没有闭合出完整链路。
+自 2026-04-30 起，这个样例不再是 `NAVIGATION_ERR_NO_ROUTE` 缺口，而是“静态导出图已经闭合”的回归样例。当前结论来自导出数据与逻辑测试，不依赖运行时猜测：
 
-对这一样例，当前确认需要补的导出能力如下：
+- `tests/logic/spec/navigation_data_spec.lua`
+  - 断言 `portal_117 -> portal_101`
+  - 断言 `portal_118 -> portal_119`
+  - 断言 `portal_556 -> portal_557`
+  - 断言存在至少一条与 `taxi_82` 相连的统一运行时边
+  - 断言奥格传送门房相关节点稳定落到 `UiMapID = 85` / `WalkClusterKey = "uimap_85"`
+- `tests/logic/spec/navigation_api_spec.lua`
+  - 断言 `银月城 -> 提瑞斯法林地` 可以通过导出的公共传送门出口求解
+  - 断言 `银月城 -> 奥格瑞玛` 可以通过修正后的枢纽并入规则求解
+  - 断言 `银月城 -> 东瘟疫之地` 在当前统一静态图下可求解
 
-- [ ] `walk` 闭环：补出 `uimap_94`（永歌森林/银月城簇）到 `uimap_95`（幽魂之地簇）的稳定连通规则。
-  - 规则要求：不能依赖地图矩形、视觉相邻或 `UiMap` 父链猜测。
-  - 目标结果：运行时可以把银月城簇稳定接入幽魂之地簇。
+对这一样例，当前已正式闭合的导出能力如下：
 
-- [ ] `public_portal` 端点闭环：补出 `portal_556`（萨拉斯小径 -> 东瘟疫之地）的实际 route edge。
-  - 当前状态：portal 节点已存在，但 unified edge 表没有对应边。
-  - 目标结果：幽魂之地公共入口可以静态接入东瘟疫之地图。
+- [x] `public_portal` 端点闭环：`portal_556`（萨拉斯小径 -> 东瘟疫之地）已导出为统一 route edge。
+- [x] `public_portal` 端点闭环：`portal_118`（银月城宝珠 -> 幽暗城/洛丹伦一侧）已导出为统一 route edge。
+- [x] `taxi` 闭环：`taxi_82`（银月城）已并入统一公共 taxi 图。
+- [x] 主城枢纽并入：`portal_101` 以及同房间 portal 落点已稳定并入奥格主城簇 `uimap_85`。
+- [x] 导出数据形状护栏：`NavigationRouteEdges.edges` 现要求保持 1-based 连续序列，保证运行时与测试侧 `ipairs()` 遍历不会在中途截断。
 
-- [ ] `public_portal` 端点闭环：补出 `portal_118`（银月城宝珠 -> 幽暗城/洛丹伦一侧）的实际 route edge。
-  - 当前状态：portal 节点已存在，但 unified edge 表没有对应边。
-  - 目标结果：银月城可以通过公共传送接入幽暗城周边交通网。
+这组结论只说明“当前静态导出图已能证明这条路线可达”，不代表：
 
-- [ ] `taxi` 闭环：确认并补齐 `taxi_82`（银月城）与公共 taxi 图的稳定关系。
-  - 当前状态：节点存在，但当前运行时导出图没有把它接进 taxi 网络。
-  - 目标结果：如果 DB/导出能稳定证明银月城飞行点存在公共航线，则路线图可用；如果不能证明，应在来源层明确记录缺口，而不是运行时猜。
+- 已经闭合全世界 `walk` 连通关系；
+- 已经完成 `areatrigger` / 道标石等后续模态；
+- 已经能对“只能飞 / 只能传送 / 没有公共路径”给出排除法强结论。
 
-- [ ] 主城枢纽并入：补出 `portal_101`（杜隆塔尔探路者大厅）到奥格瑞玛主枢纽 `uimap_85` 的稳定步行并入规则。
-  - 当前状态：`portal_117 -> portal_101` 已闭合，但落点仍停在杜隆塔尔侧步行簇。
-  - 目标结果：银月城到奥格公共传送可继续并入奥格主交通图，而不是停在外层落点。
+### 6.2 `areatrigger / WalkComponent` 静态来源评估（2026-04-30）
+
+当前结论已经足够指导后续实现切口：
+
+- `areatrigger`
+  - `wow.db.areatrigger` 能稳定提供 source 点位：`ID / ContinentID / Pos_0 / Pos_1 / Pos_2 / AreaTriggerActionSetID`
+  - 但 `wow.db.areatriggeractionset` 当前只有 `ID / Flags`
+  - 现状不是“导出脚本还没补”，而是“缺少 destination 数据源”
+  - 因此：
+    - [x] 维持运行时 `areatrigger` 节点 / 边为空
+    - [ ] 后续若补到 `AreaTriggerActionSetID -> 目标地图 / 坐标` 的独立静态源，再接入统一边表
+
+- `WalkComponent`
+  - 当前仓库和 `wow.db` 中，没有现成、稳定、可直接当作“世界步行连通真值”的静态来源
+  - 现有 `WalkClusterKey` 来自 `uimap + uimapassignment` 的归并启发式，只能用于本地枢纽挂接，不能升级为世界步行真值
+  - `waypointnode / waypointedge` 中带 `WaypointMapVolumeID` 的样本过少，只适合作为“显式连接器”候选，不足以覆盖全世界步行组件
+  - 因此：
+    - [x] 不把 `UiMap` 父链、矩形或 `WalkClusterKey` 启发式写成 world walk truth
+    - [ ] 后续需要独立的离线几何 / 导航资产管线来导出真正的 `navigation_walk_components`
+    - [ ] 在那之前，只继续补 `portal / volume / areatrigger` 这类显式连接器
 
 **V2 待推进（单人导航，不含需多人协助的模态）：**
 - `areatrigger`
 - 全世界 `WalkComponent`
 - “只能飞 / 只能传送 / 没有公共路径”一类强结论（需等所有 V2 模态闭合后引入）
+
+## 6.3 路线图组件改造（已确认，可执行）
+
+这部分只允许修改 `navigation` 自己的代码路径，不回退或覆盖其它仍在演进中的导航功能。
+
+**目标：**
+
+- 用可折叠路线图组件替换现有单行文本条
+- 保留当前规划入口，不改世界地图按钮语义
+- 在同一组件内补齐历史记录、拖动、实时步骤与偏航提示
+
+**本轮优先文件：**
+
+- `Toolbox/Modules/Navigation/RouteBar.lua`
+- `Toolbox/Modules/Navigation/WorldMap.lua`
+- `Toolbox/Modules/Navigation/Shared.lua`
+- `Toolbox/Modules/Navigation.lua`
+- `Toolbox/Core/Foundation/Config.lua`
+- `Toolbox/Core/Foundation/Locales.lua`
+- `tests/logic/spec/navigation_routebar_spec.lua`
+- `tests/logic/spec/navigation_worldmap_spec.lua`
+- `tests/validate_settings_subcategories.py`
+
+**本轮拆分顺序：**
+
+1. 先补 `RouteBar` 组件状态与历史记录的失败测试。
+2. 再实现胶囊 / 展开态、拖动、位置存档、展开状态存档。
+3. 再接通历史记录与“当前位置 -> 历史终点”重规划。
+4. 最后补实时步骤 / 偏航刷新与回归验证。
+
+**实现护栏：**
+
+- 不改 DataContracts、导出脚本和统一路线边语义。
+- 不改变 `WorldMap` 现有 waypoint 入口和聊天提示的成功 / 失败口径，只在其上补“历史重规划”入口调用。
+- 不影响 `navigation` 之外的模块。
+- 若发现当前未提交的导航改动与路线图组件直接冲突，先局部避让，不主动回退别人的未提交修改。
 
 ## 7. 风险与处置
 
@@ -588,3 +654,6 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 | 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，导出脚本 + 运行时 + 测试全部落地，V2 待推进项更新为其余 4 项 |
 | 2026-04-29 | V2 推进：`public_portal` 方案确认，进入实施；路线图 5 段链路已校验可导出 |
 | 2026-04-29 | 文档同步：把 `silvermoon -> eastern plaguelands` 固定为导出缺口样例，明确当前 `no route` 对应的 `walk / portal / taxi / hub merge` backlog |
+| 2026-04-30 | 导出闭环：`silvermoon -> eastern plaguelands` 从缺口样例升级为回归样例；`portal_118/556`、`taxi_82`、奥格传送门房并入与 `edges` 连续序列约束全部落地并由测试锁定 |
+| 2026-04-30 | 来源评估：确认当前 `wow.db` 只能提供 `areatrigger` source 点位，不能提供目标端点；确认 world `WalkComponent` 不存在现成静态真值，后续需独立离线管线 |
+| 2026-04-30 | 路线图改造确认：顶部文本条升级为可折叠路线图组件；交互、存档、实时刷新与最近 10 条历史记录的执行边界写入本计划 |

@@ -69,7 +69,7 @@
 - `python scripts/export/export_toolbox_one.py navigation_taxi_edges --contract-dir DataContracts --data-dir Toolbox/Data`
   - 结果：通过，生成 91 个 Taxi 节点与 129 条公共交通边。
 - `python scripts/export/export_toolbox_one.py navigation_route_edges --contract-dir DataContracts --data-dir Toolbox/Data`
-  - 结果：通过，生成统一运行时静态路线骨架文件；只保留 `map_anchor + taxi` 节点与 `taxi` 静态边。
+  - 结果：通过，生成统一运行时静态路线骨架文件；当前统一边表包含已闭合的 `taxi / transport / public_portal` 公共边，并要求 `edges` 保持 1-based 连续序列，供运行时 `ipairs()` 安全消费。
 - `python scripts/export/export_toolbox_one.py navigation_ability_templates --contract-dir DataContracts --data-dir Toolbox/Data`
   - 结果：通过，生成 `NavigationAbilityTemplates.lua`；当前保留 `炉石 + 可静态解析目标的职业旅行法术`。
 - `python tests/validate_settings_subcategories.py`
@@ -82,14 +82,16 @@
 ## 6. 问题与阻塞
 
 - 尚未进行真实客户端内的鼠标坐标与按钮位置复测。
-- `transport` 已闭合（V2 第一批）；`public_portal / areatrigger / 全世界 walk component` 仍待后续契约导出。
+- `transport` 与当前需要的 `public_portal` 样例链路已闭合；`areatrigger / 全世界 walk component` 仍待后续契约导出。
+- 当前数据回归还锁定了一个边界：在补到静态 destination 数据源之前，`NavigationRouteEdges.lua` 不允许导出 `areatrigger` 运行时节点或边。
 
 ## 7. 结论
 
 - 本轮 Taxi、地图覆盖、副本入口、能力模板与统一静态路线骨架的契约、导出脚本、TOC 接线与逻辑测试已通过；项目总验证全绿。
 - 本轮 `navigation_route_edges` 与 `navigation_ability_templates` 已成为运行时 V1 的两条正式数据入口；`Toolbox.Navigation` 不再直接消费来源侧候选边，也不消费手工路径数据。
 - 当前代码链路满足”世界地图目标 / 副本入口目标 -> 导出数据消费 -> 最少步数求解 -> 顶部路径 UI”的 V1 验收。
-- V2 `transport`（飞艇/船）已闭合，后续重点转向 `public_portal / areatrigger / 道标石 / walk component` 等未闭合模态。
+- 自 2026-04-30 起，`银月城 -> 东瘟疫之地` 已成为正向回归样例：`portal_118/556`、`taxi_82`、奥格传送门房并入与 `edges` 连续序列约束均由测试锁定。
+- 后续重点转向 `areatrigger / 道标石 / walk component` 等未闭合模态，以及更强的“唯一公共路径 / 只能飞”判定能力。
 
 ## 8. 修订记录
 
@@ -103,4 +105,5 @@
 | 2026-04-27 | 修正路线边验收：禁止 `MAP_REGION` / `MAP_TRACE` 坐标派生联接进入运行时数据 |
 | 2026-04-27 | 再次收紧路线边验收：禁止 `WAYPOINT` / `WAYPOINT_ACCESS` 与 SafeLoc 坐标接入进入运行时数据 |
 | 2026-04-29 | V1 口径切换为”当前角色配置 + 最少路径步数”，新增 `navigation_ability_templates` 与 `KnownTaxiNodeIDs / HearthBindNodeID` 回归验证 |
+| 2026-04-30 | 导出闭环回归：`银月城 -> 东瘟疫之地` 由 `NO_ROUTE` 缺口样例升级为正向样例；新增 `edges` 连续序列与东部王国公共交通链路回归 |
 | 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，新增 NAV-016 验证 transport 模式边的可用性过滤与路线输出 |

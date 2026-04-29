@@ -355,8 +355,12 @@ def validate_mover_regressions() -> None:
     require_contains(text, "ensureWorldMapDragHandle", "mover uses a dedicated world map drag handle")
     if "return frame.TitleCanvasSpacerFrame" in text:
         raise AssertionError("mover should not bind drag directly to WorldMapFrame.TitleCanvasSpacerFrame")
-    require_contains(text, 'if key == "EncounterJournal" then', "mover special-cases encounter journal drag handling")
-    require_contains(text, 'mode = HIT_TITLEBAR', "mover forces encounter journal back to titlebar drag mode")
+    require_contains(
+        text,
+        'if key == "EncounterJournal" or key == "MerchantFrame" then',
+        "mover special-cases encounter journal and merchant frame drag handling",
+    )
+    require_contains(text, 'mode = HIT_TITLEBAR', "mover forces encounter journal and merchant frame back to titlebar drag mode")
 
 
 def validate_tooltip_anchor_regressions() -> None:

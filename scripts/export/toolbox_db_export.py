@@ -690,12 +690,19 @@ def navigation_map_category(map_type: int) -> int:
 def navigation_type_rank(map_type: int) -> int:
     """给导航地图类型分配稳定优先级。"""
 
-    map_category = navigation_map_category(map_type)
-    if map_category == 3:
+    numeric_type = int(map_type or 0)
+    if numeric_type == 3:
         return 0
-    if map_category == 4:
+    if numeric_type == 6:
         return 1
-    return 2
+    if numeric_type in (4, 5):
+        return 2
+    map_category = navigation_map_category(numeric_type)
+    if map_category == 3:
+        return 3
+    if map_category == 4:
+        return 4
+    return 5
 
 
 def build_navigation_uimap_context(sqlite_conn: sqlite3.Connection) -> dict[str, Any]:
@@ -704,6 +711,7 @@ def build_navigation_uimap_context(sqlite_conn: sqlite3.Connection) -> dict[str,
     uimap_by_id: dict[int, dict[str, Any]] = {}
     primary_map_id_by_uimap_id: dict[int, int] = {}
     assignment_rows_by_uimap_id: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    assignment_candidate_rows_by_map_id: dict[int, list[dict[str, Any]]] = defaultdict(list)
     candidate_local_map_ids_by_primary_map_id: dict[int, list[int]] = defaultdict(list)
 
     for row in sqlite_conn.execute(
@@ -759,6 +767,20 @@ WHERE CAST(UiMapID AS INTEGER) > 0
                 "area": abs((max_x - min_x) * (max_y - min_y)),
             }
         )
+        map_row = uimap_by_id.get(ui_map_id)
+        if map_row is not None and int(map_row["system_id"]) == 0 and navigation_map_category(int(map_row["map_type"] or 0)) >= 3:
+            assignment_candidate_rows_by_map_id[map_id].append(
+                {
+                    "candidate_ui_map_id": ui_map_id,
+                    "candidate_name": str(map_row["name"]),
+                    "candidate_type": int(map_row["map_type"] or 0),
+                    "candidate_area": abs((max_x - min_x) * (max_y - min_y)),
+                    "min_x": min_x,
+                    "max_x": max_x,
+                    "min_y": min_y,
+                    "max_y": max_y,
+                }
+            )
         if ui_map_id not in primary_map_id_by_uimap_id:
             primary_map_id_by_uimap_id[ui_map_id] = map_id
         else:
@@ -880,7 +902,68 @@ WHERE CAST(UiMapID AS INTEGER) > 0
         "uimap_by_id": uimap_by_id,
         "canonical_local_uimap_id": canonical_local_uimap_id,
         "walk_cluster_uimap_id_by_uimap_id": walk_cluster_uimap_id_by_uimap_id,
+        "assignment_candidate_rows_by_map_id": assignment_candidate_rows_by_map_id,
     }
+
+
+def build_navigation_candidate_map_id_list(point_map_id: int) -> list[int]:
+    """给一个世界坐标点生成可命中的静态 assignment MapID 列表。"""
+
+    numeric_map_id = int(point_map_id or 0)
+    if numeric_map_id == 0:
+        return [0]
+    return [numeric_map_id, 0]
+
+
+def find_navigation_point_candidate_rows(
+    point_map_id: int,
+    pos_x: float,
+    pos_y: float,
+    ui_map_context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """基于静态 assignment 索引，查找一个世界点命中的所有导航 UiMap 候选。"""
+
+    numeric_map_id = int(point_map_id or 0)
+    numeric_pos_x = float(pos_x or 0)
+    numeric_pos_y = float(pos_y or 0)
+    point_candidate_cache = ui_map_context.setdefault("point_candidate_cache", {})
+    cache_key = (numeric_map_id, numeric_pos_x, numeric_pos_y)
+    cached_rows = point_candidate_cache.get(cache_key)
+    if cached_rows is not None:
+        return cached_rows
+
+    assignment_candidate_rows_by_map_id = ui_map_context["assignment_candidate_rows_by_map_id"]
+    matched_rows: list[dict[str, Any]] = []
+    seen_row_key: set[tuple[int, float, float, float, float, float]] = set()
+    for candidate_map_id in build_navigation_candidate_map_id_list(numeric_map_id):
+        for candidate_row in assignment_candidate_rows_by_map_id.get(candidate_map_id, []):
+            if not (
+                float(candidate_row["min_x"]) <= numeric_pos_x <= float(candidate_row["max_x"])
+                and float(candidate_row["min_y"]) <= numeric_pos_y <= float(candidate_row["max_y"])
+            ):
+                continue
+            row_key = (
+                int(candidate_row["candidate_ui_map_id"]),
+                float(candidate_row["candidate_area"]),
+                float(candidate_row["min_x"]),
+                float(candidate_row["max_x"]),
+                float(candidate_row["min_y"]),
+                float(candidate_row["max_y"]),
+            )
+            if row_key in seen_row_key:
+                continue
+            seen_row_key.add(row_key)
+            matched_rows.append(
+                {
+                    "candidate_ui_map_id": int(candidate_row["candidate_ui_map_id"]),
+                    "candidate_name": str(candidate_row["candidate_name"]),
+                    "candidate_type": int(candidate_row["candidate_type"]),
+                    "candidate_area": float(candidate_row["candidate_area"]),
+                }
+            )
+
+    point_candidate_cache[cache_key] = matched_rows
+    return matched_rows
 
 
 def choose_navigation_ui_map_id(
@@ -908,16 +991,27 @@ def choose_navigation_ui_map_id(
         if candidate_group_row is None:
             candidate_group_row = {
                 "ui_map_id": canonical_ui_map_id,
-                "min_area": float(candidate_row.get("candidate_area") or 0),
+                "canonical_area": None,
+                "fallback_area": float(candidate_row.get("candidate_area") or 0),
                 "type_rank": navigation_type_rank(int(canonical_row["map_type"] or 0)),
                 "name_match_rank": 1,
             }
             candidate_group_by_uimap_id[canonical_ui_map_id] = candidate_group_row
         else:
-            candidate_group_row["min_area"] = min(
-                float(candidate_group_row["min_area"]),
+            candidate_group_row["fallback_area"] = min(
+                float(candidate_group_row["fallback_area"]),
                 float(candidate_row.get("candidate_area") or 0),
             )
+
+        if raw_candidate_ui_map_id == canonical_ui_map_id:
+            direct_area = float(candidate_row.get("candidate_area") or 0)
+            if candidate_group_row["canonical_area"] is None:
+                candidate_group_row["canonical_area"] = direct_area
+            else:
+                candidate_group_row["canonical_area"] = min(
+                    float(candidate_group_row["canonical_area"]),
+                    direct_area,
+                )
 
         candidate_name_set = {
             normalize_navigation_name(candidate_row.get("candidate_name")),
@@ -934,11 +1028,31 @@ def choose_navigation_ui_map_id(
         key=lambda item: (
             int(item["name_match_rank"]),
             int(item["type_rank"]),
-            float(item["min_area"]),
+            float(item["canonical_area"] if item["canonical_area"] is not None else item["fallback_area"]),
             int(item["ui_map_id"]),
         ),
     )
     return int(ordered_groups[0]["ui_map_id"])
+
+
+def resolve_navigation_pathnode_ui_map_id(
+    candidate_rows: list[dict[str, Any]],
+    current_ui_map_id: int,
+    to_ui_map_id: int,
+    ui_map_context: dict[str, Any],
+) -> int:
+    """为 TaxiPathNode 选择 UiMap，优先保持路径连续，再回退到通用排序。"""
+
+    candidate_ui_map_id_set = {
+        int(candidate_row.get("candidate_ui_map_id") or 0)
+        for candidate_row in candidate_rows
+        if int(candidate_row.get("candidate_ui_map_id") or 0) > 0
+    }
+    if int(current_ui_map_id or 0) > 0 and int(current_ui_map_id or 0) in candidate_ui_map_id_set:
+        return int(current_ui_map_id)
+    if int(to_ui_map_id or 0) > 0 and int(to_ui_map_id or 0) in candidate_ui_map_id_set:
+        return int(to_ui_map_id)
+    return choose_navigation_ui_map_id(candidate_rows, ui_map_context)
 
 
 def build_navigation_walk_cluster_key(ui_map_id: int, ui_map_context: dict[str, Any]) -> str:
@@ -1285,38 +1399,24 @@ def enrich_navigation_ability_datasets(
 
 
 def fetch_navigation_taxi_node_candidate_rows(
-    sqlite_conn: sqlite3.Connection,
-    taxi_node_id_list: list[int],
+    node_rows: list[dict[str, Any]],
+    ui_map_context: dict[str, Any],
 ) -> dict[int, list[dict[str, Any]]]:
     """批量抓取 TaxiNode 点位命中的 UiMap 候选。"""
 
     candidate_rows_by_taxi_node_id: dict[int, list[dict[str, Any]]] = defaultdict(list)
-    for start_index in range(0, len(taxi_node_id_list), 200):
-        batch_id_list = taxi_node_id_list[start_index : start_index + 200]
-        if not batch_id_list:
+    for node_row in node_rows:
+        taxi_node_id = int(node_row.get("taxi_node_id") or 0)
+        if taxi_node_id <= 0:
             continue
-        placeholder_text = ",".join("?" for _ in batch_id_list)
-        sql_text = f"""
-SELECT
-  CAST(tn.ID AS INTEGER) AS taxi_node_id,
-  COALESCE(NULLIF(TRIM(tn.Name_lang), ''), 'Taxi Node #' || CAST(tn.ID AS TEXT)) AS node_name,
-  CAST(a.UiMapID AS INTEGER) AS candidate_ui_map_id,
-  COALESCE(NULLIF(TRIM(u.Name_lang), ''), 'UiMap #' || CAST(a.UiMapID AS TEXT)) AS candidate_name,
-  CAST(COALESCE(u.Type, 0) AS INTEGER) AS candidate_type,
-  ABS((CAST(a.Region_3 AS REAL) - CAST(a.Region_0 AS REAL)) * (CAST(a.Region_4 AS REAL) - CAST(a.Region_1 AS REAL))) AS candidate_area
-FROM taxinodes tn, uimapassignment a, uimap u
-WHERE CAST(tn.ID AS INTEGER) IN ({placeholder_text})
-  AND CAST(a.UiMapID AS INTEGER) = CAST(u.ID AS INTEGER)
-  AND CAST(a.MapID AS INTEGER) = CAST(tn.ContinentID AS INTEGER)
-  AND CAST(a.Region_0 AS REAL) <= CAST(tn.Pos_0 AS REAL)
-  AND CAST(a.Region_3 AS REAL) >= CAST(tn.Pos_0 AS REAL)
-  AND CAST(a.Region_1 AS REAL) <= CAST(tn.Pos_1 AS REAL)
-  AND CAST(a.Region_4 AS REAL) >= CAST(tn.Pos_1 AS REAL)
-  AND CAST(COALESCE(u.System, 0) AS INTEGER) = 0
-  AND CAST(COALESCE(u.Type, 0) AS INTEGER) >= 3
-"""
-        for row in sqlite_conn.execute(sql_text, batch_id_list):
-            candidate_rows_by_taxi_node_id[int(row["taxi_node_id"])].append(dict(row))
+        candidate_rows_by_taxi_node_id[taxi_node_id].extend(
+            find_navigation_point_candidate_rows(
+                int(node_row.get("map_id") or 0),
+                float(node_row.get("pos_x") or 0),
+                float(node_row.get("pos_y") or 0),
+                ui_map_context,
+            )
+        )
     return candidate_rows_by_taxi_node_id
 
 
@@ -1349,40 +1449,23 @@ ORDER BY CAST(PathID AS INTEGER), CAST(NodeIndex AS INTEGER)
 
 
 def fetch_navigation_taxi_pathnode_candidate_rows(
-    sqlite_conn: sqlite3.Connection,
-    path_id_list: list[int],
+    pathnode_rows_by_path_id: dict[int, list[dict[str, Any]]],
+    ui_map_context: dict[str, Any],
 ) -> dict[tuple[int, int], list[dict[str, Any]]]:
     """批量抓取 TaxiPathNode 点位命中的 UiMap 候选。"""
 
     candidate_rows_by_key: dict[tuple[int, int], list[dict[str, Any]]] = defaultdict(list)
-    for start_index in range(0, len(path_id_list), 100):
-        batch_id_list = path_id_list[start_index : start_index + 100]
-        if not batch_id_list:
-            continue
-        placeholder_text = ",".join("?" for _ in batch_id_list)
-        sql_text = f"""
-SELECT
-  CAST(tpn.PathID AS INTEGER) AS path_id,
-  CAST(tpn.NodeIndex AS INTEGER) AS node_index,
-  CAST(a.UiMapID AS INTEGER) AS candidate_ui_map_id,
-  COALESCE(NULLIF(TRIM(u.Name_lang), ''), 'UiMap #' || CAST(a.UiMapID AS TEXT)) AS candidate_name,
-  CAST(COALESCE(u.Type, 0) AS INTEGER) AS candidate_type,
-  ABS((CAST(a.Region_3 AS REAL) - CAST(a.Region_0 AS REAL)) * (CAST(a.Region_4 AS REAL) - CAST(a.Region_1 AS REAL))) AS candidate_area
-FROM taxipathnode tpn, uimapassignment a, uimap u
-WHERE CAST(tpn.PathID AS INTEGER) IN ({placeholder_text})
-  AND CAST(a.UiMapID AS INTEGER) = CAST(u.ID AS INTEGER)
-  AND CAST(a.MapID AS INTEGER) = CAST(tpn.ContinentID AS INTEGER)
-  AND CAST(a.Region_0 AS REAL) <= CAST(tpn.Loc_0 AS REAL)
-  AND CAST(a.Region_3 AS REAL) >= CAST(tpn.Loc_0 AS REAL)
-  AND CAST(a.Region_1 AS REAL) <= CAST(tpn.Loc_1 AS REAL)
-  AND CAST(a.Region_4 AS REAL) >= CAST(tpn.Loc_1 AS REAL)
-  AND CAST(COALESCE(u.System, 0) AS INTEGER) = 0
-  AND CAST(COALESCE(u.Type, 0) AS INTEGER) >= 3
-ORDER BY CAST(tpn.PathID AS INTEGER), CAST(tpn.NodeIndex AS INTEGER)
-"""
-        for row in sqlite_conn.execute(sql_text, batch_id_list):
-            key_value = (int(row["path_id"]), int(row["node_index"]))
-            candidate_rows_by_key[key_value].append(dict(row))
+    for path_id, pathnode_rows in pathnode_rows_by_path_id.items():
+        for pathnode_row in pathnode_rows:
+            key_value = (int(path_id), int(pathnode_row["node_index"]))
+            candidate_rows_by_key[key_value].extend(
+                find_navigation_point_candidate_rows(
+                    int(pathnode_row.get("map_id") or 0),
+                    float(pathnode_row.get("pos_x") or 0),
+                    float(pathnode_row.get("pos_y") or 0),
+                    ui_map_context,
+                )
+            )
     return candidate_rows_by_key
 
 
@@ -1400,8 +1483,7 @@ def enrich_navigation_taxi_datasets(
         return dataset_rows_by_name
 
     ui_map_context = build_navigation_uimap_context(sqlite_conn)
-    taxi_node_id_list = sorted({int(row.get("taxi_node_id") or 0) for row in node_rows if int(row.get("taxi_node_id") or 0) > 0})
-    node_candidate_rows_by_taxi_node_id = fetch_navigation_taxi_node_candidate_rows(sqlite_conn, taxi_node_id_list)
+    node_candidate_rows_by_taxi_node_id = fetch_navigation_taxi_node_candidate_rows(node_rows, ui_map_context)
 
     enriched_node_rows: list[dict[str, Any]] = []
     enriched_node_row_by_taxi_node_id: dict[int, dict[str, Any]] = {}
@@ -1410,6 +1492,8 @@ def enrich_navigation_taxi_datasets(
         if taxi_node_id <= 0:
             continue
         node_name = str(node_row.get("node_name") or "")
+        if is_runtime_excluded_taxi_node_name(node_name):
+            continue
         ui_map_id = choose_navigation_ui_map_id(
             node_candidate_rows_by_taxi_node_id.get(taxi_node_id, []),
             ui_map_context,
@@ -1441,7 +1525,7 @@ def enrich_navigation_taxi_datasets(
 
     path_id_list = sorted({int(row.get("path_id") or 0) for row in edge_rows if int(row.get("path_id") or 0) > 0})
     pathnode_rows_by_path_id = fetch_navigation_taxi_pathnode_rows(sqlite_conn, path_id_list)
-    pathnode_candidate_rows_by_key = fetch_navigation_taxi_pathnode_candidate_rows(sqlite_conn, path_id_list)
+    pathnode_candidate_rows_by_key = fetch_navigation_taxi_pathnode_candidate_rows(pathnode_rows_by_path_id, ui_map_context)
 
     enriched_edge_rows: list[dict[str, Any]] = []
     for edge_row in edge_rows:
@@ -1453,23 +1537,23 @@ def enrich_navigation_taxi_datasets(
         if path_id <= 0 or from_node_row is None or to_node_row is None:
             continue
 
-        # 过滤：自环边（起点 == 终点）、条件限制节点（任务/剧情专用航线）
+        # 过滤：自环边（起点 == 终点）
         if from_taxi_node_id == to_taxi_node_id:
-            continue
-        if int(from_node_row.get("condition_id") or 0) != 0 or int(from_node_row.get("visibility_condition_id") or 0) != 0:
-            continue
-        if int(to_node_row.get("condition_id") or 0) != 0 or int(to_node_row.get("visibility_condition_id") or 0) != 0:
             continue
 
         traversed_ui_map_id_list = [int(from_node_row["ui_map_id"])]
+        current_path_ui_map_id = int(from_node_row["ui_map_id"])
         for pathnode_row in pathnode_rows_by_path_id.get(path_id, []):
             candidate_key = (int(pathnode_row["path_id"]), int(pathnode_row["node_index"]))
-            pathnode_ui_map_id = choose_navigation_ui_map_id(
+            pathnode_ui_map_id = resolve_navigation_pathnode_ui_map_id(
                 pathnode_candidate_rows_by_key.get(candidate_key, []),
+                current_path_ui_map_id,
+                int(to_node_row["ui_map_id"]),
                 ui_map_context,
             )
-            if pathnode_ui_map_id > 0 and pathnode_ui_map_id != traversed_ui_map_id_list[-1]:
+            if pathnode_ui_map_id > 0 and pathnode_ui_map_id != current_path_ui_map_id:
                 traversed_ui_map_id_list.append(pathnode_ui_map_id)
+                current_path_ui_map_id = pathnode_ui_map_id
         if int(to_node_row["ui_map_id"]) != traversed_ui_map_id_list[-1]:
             traversed_ui_map_id_list.append(int(to_node_row["ui_map_id"]))
         traversed_ui_map_name_list = build_navigation_ui_map_names(traversed_ui_map_id_list, ui_map_context)
@@ -1511,8 +1595,6 @@ def fetch_navigation_portal_node_candidate_rows(
         map_id = int(node_row.get("map_id") or 0)
         world_x = float(node_row.get("world_x") or 0)
         world_y = float(node_row.get("world_y") or 0)
-        if map_id <= 0:
-            continue
         key = (map_id, world_x, world_y)
         grouped_rows.setdefault(key, []).append(int(node_row.get("waypoint_node_id") or 0))
 
@@ -1541,6 +1623,40 @@ WHERE CAST(a.UiMapID AS INTEGER) = CAST(u.ID AS INTEGER)
         for node_id in node_id_list:
             candidate_rows_by_node_id[node_id].extend(candidate_rows)
     return candidate_rows_by_node_id
+
+
+def is_runtime_excluded_taxi_node_name(node_name: str) -> bool:
+    """判断 TaxiNode 是否属于明显不应进入运行时图的 Quest/Test 节点。"""
+
+    normalized_name = str(node_name or "").strip()
+    if normalized_name == "":
+        return False
+    return (
+        normalized_name.startswith("Quest Path ")
+        or normalized_name.startswith("Quest - ")
+        or normalized_name.startswith("Test - ")
+    )
+
+
+def is_public_transport_waypoint_name(node_name: str) -> bool:
+    """判断 waypoint Type=0 名称是否表达公共交通动作。"""
+
+    normalized_name = str(node_name or "").strip()
+    if normalized_name == "":
+        return False
+    transport_keyword_list = (
+        "乘坐",
+        "搭乘",
+        "地铁",
+        "飞艇",
+        "潜水艇",
+        "缆车",
+        "岗哆拉",
+        "Gondola",
+        "Tram",
+        "Zeppelin",
+    )
+    return any(keyword in normalized_name for keyword in transport_keyword_list)
 
 
 def enrich_navigation_portal_datasets(
@@ -1644,14 +1760,116 @@ def enrich_navigation_portal_datasets(
     return dataset_rows_by_name
 
 
+def enrich_navigation_transport_datasets(
+    sqlite_conn: sqlite3.Connection,
+    dataset_rows_by_name: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    """把 waypoint Type=0 的公共交通原始数据补齐为 transport 节点 / 边。"""
+
+    transport_node_rows = list(dataset_rows_by_name.get("transport_nodes_raw", []))
+    transport_edge_rows = list(dataset_rows_by_name.get("transport_edges_raw", []))
+    if not transport_node_rows or not transport_edge_rows:
+        dataset_rows_by_name["transport_nodes"] = []
+        dataset_rows_by_name["transport_edges"] = []
+        return dataset_rows_by_name
+
+    ui_map_context = build_navigation_uimap_context(sqlite_conn)
+    candidate_rows_by_node_id = fetch_navigation_portal_node_candidate_rows(sqlite_conn, transport_node_rows)
+    faction_condition_by_id = {924: "Alliance", 923: "Horde"}
+
+    enriched_node_rows: list[dict[str, Any]] = []
+    enriched_node_row_by_node_id: dict[int, dict[str, Any]] = {}
+    for node_row in transport_node_rows:
+        waypoint_node_id = int(node_row.get("waypoint_node_id") or 0)
+        if waypoint_node_id <= 0:
+            continue
+        node_name = str(node_row.get("node_name") or "")
+        if not is_public_transport_waypoint_name(node_name):
+            continue
+        ui_map_id = choose_navigation_ui_map_id(
+            candidate_rows_by_node_id.get(waypoint_node_id, []),
+            ui_map_context,
+            hint_name=node_name,
+        )
+        if ui_map_id <= 0:
+            continue
+        enriched_node_row = {
+            "transport_node_key": f"transport_{waypoint_node_id}",
+            "waypoint_node_id": waypoint_node_id,
+            "ui_map_id": ui_map_id,
+            "map_id": int(node_row.get("map_id") or 0),
+            "node_name": node_name,
+            "walk_cluster_key": build_navigation_walk_cluster_key(ui_map_id, ui_map_context),
+            "pos_x": float(node_row.get("world_x") or 0),
+            "pos_y": float(node_row.get("world_y") or 0),
+            "pos_z": float(node_row.get("world_z") or 0),
+            "node_type": int(node_row.get("node_type") or 0),
+            "player_condition_id": int(node_row.get("player_condition_id") or 0),
+        }
+        enriched_node_rows.append(enriched_node_row)
+        enriched_node_row_by_node_id[waypoint_node_id] = enriched_node_row
+
+    enriched_edge_rows: list[dict[str, Any]] = []
+    for edge_index, edge_row in enumerate(transport_edge_rows):
+        from_node_id = int(edge_row.get("from_waypoint_node_id") or 0)
+        to_node_id = int(edge_row.get("to_waypoint_node_id") or 0)
+        from_node_row = enriched_node_row_by_node_id.get(from_node_id)
+        to_node_row = enriched_node_row_by_node_id.get(to_node_id)
+        if from_node_row is None or to_node_row is None:
+            continue
+        if from_node_id == to_node_id:
+            continue
+
+        edge_condition_id = int(edge_row.get("player_condition_id") or 0)
+        requirements_faction = faction_condition_by_id.get(edge_condition_id)
+        if edge_condition_id != 0 and requirements_faction is None:
+            continue
+
+        traversed_ui_map_ids = [
+            int(from_node_row["ui_map_id"]),
+            int(to_node_row["ui_map_id"]),
+        ]
+        traversed_ui_map_names = build_navigation_ui_map_names(traversed_ui_map_ids, ui_map_context)
+        from_node_name = str(from_node_row["node_name"] or "")
+        to_node_name = str(to_node_row["node_name"] or "")
+        if not is_public_transport_waypoint_name(from_node_name) or not is_public_transport_waypoint_name(to_node_name):
+            continue
+
+        enriched_edge_rows.append(
+            {
+                "edge_index": edge_index,
+                "waypoint_edge_id": int(edge_row.get("waypoint_edge_id") or 0),
+                "route_source": "waypoint_transport",
+                "from_node_id": str(from_node_row["transport_node_key"]),
+                "to_node_id": str(to_node_row["transport_node_key"]),
+                "from_ui_map_id": int(from_node_row["ui_map_id"]),
+                "to_ui_map_id": int(to_node_row["ui_map_id"]),
+                "step_cost": 1,
+                "mode": "transport",
+                "edge_label": from_node_name,
+                "traversed_ui_map_ids": traversed_ui_map_ids,
+                "traversed_ui_map_names": traversed_ui_map_names,
+                "requirements_faction": requirements_faction,
+            }
+        )
+
+    dataset_rows_by_name["transport_nodes"] = enriched_node_rows
+    dataset_rows_by_name["transport_edges"] = sorted(
+        enriched_edge_rows,
+        key=lambda row: (int(row["edge_index"]), int(row["waypoint_edge_id"])),
+    )
+    return dataset_rows_by_name
+
+
 def enrich_navigation_areatrigger_datasets(
     sqlite_conn: sqlite3.Connection,
     dataset_rows_by_name: dict[str, list[dict[str, Any]]],
 ) -> dict[str, list[dict[str, Any]]]:
     """把 AreaTrigger 原始数据集补齐为 areatrigger 节点 / 边。
 
-    占位实现：等确认 areatrigger / areatriggeractionset 表结构后补完整逻辑。
-    当前只写入空数据集，不参与构图。
+    当前 wow.db 里只给出了 areatrigger 的触发点位；areatriggeractionset
+    只有 ID / Flags，无法稳定恢复导航所需的目标地图与目标坐标。
+    在补到独立的 destination 数据源前，这里保持空数据集，不参与构图。
     """
 
     trigger_node_rows = list(dataset_rows_by_name.get("trigger_nodes_raw", []))
@@ -1675,6 +1893,7 @@ def enrich_navigation_route_datasets(
 
     ui_map_context = build_navigation_uimap_context(sqlite_conn)
     dataset_rows_by_name = enrich_navigation_taxi_datasets(sqlite_conn, dataset_rows_by_name)
+    dataset_rows_by_name = enrich_navigation_transport_datasets(sqlite_conn, dataset_rows_by_name)
     dataset_rows_by_name = enrich_navigation_portal_datasets(sqlite_conn, dataset_rows_by_name)
     dataset_rows_by_name = enrich_navigation_areatrigger_datasets(sqlite_conn, dataset_rows_by_name)
 
@@ -1730,6 +1949,23 @@ def enrich_navigation_route_datasets(
                 "pos_x": float(portal_node_row.get("pos_x") or 0),
                 "pos_y": float(portal_node_row.get("pos_y") or 0),
                 "pos_z": float(portal_node_row.get("pos_z") or 0),
+            }
+        )
+
+    for transport_node_row in dataset_rows_by_name.get("transport_nodes", []):
+        route_node_rows.append(
+            {
+                "node_id": str(transport_node_row.get("transport_node_key")),
+                "node_kind": "transport",
+                "route_source": "waypoint_transport",
+                "ui_map_id": int(transport_node_row.get("ui_map_id") or 0),
+                "map_id": int(transport_node_row.get("map_id") or 0),
+                "node_name": str(transport_node_row.get("node_name") or ""),
+                "walk_cluster_key": str(transport_node_row.get("walk_cluster_key") or ""),
+                "taxi_node_id": None,
+                "pos_x": float(transport_node_row.get("pos_x") or 0),
+                "pos_y": float(transport_node_row.get("pos_y") or 0),
+                "pos_z": float(transport_node_row.get("pos_z") or 0),
             }
         )
 
@@ -1793,6 +2029,27 @@ def enrich_navigation_route_datasets(
             }
         )
 
+    for transport_edge_row in dataset_rows_by_name.get("transport_edges", []):
+        route_edge_rows.append(
+            {
+                "edge_index": int(transport_edge_row.get("edge_index") or 0),
+                "path_id": int(transport_edge_row.get("waypoint_edge_id") or 0),
+                "route_source": "waypoint_transport",
+                "from_node_id": str(transport_edge_row.get("from_node_id") or ""),
+                "to_node_id": str(transport_edge_row.get("to_node_id") or ""),
+                "from_ui_map_id": int(transport_edge_row.get("from_ui_map_id") or 0),
+                "to_ui_map_id": int(transport_edge_row.get("to_ui_map_id") or 0),
+                "from_taxi_node_id": None,
+                "to_taxi_node_id": None,
+                "step_cost": 1,
+                "mode": "transport",
+                "edge_label": str(transport_edge_row.get("edge_label") or ""),
+                "traversed_ui_map_ids": list(transport_edge_row.get("traversed_ui_map_ids") or []),
+                "traversed_ui_map_names": list(transport_edge_row.get("traversed_ui_map_names") or []),
+                "requirements_faction": str(transport_edge_row.get("requirements_faction") or "") or None,
+            }
+        )
+
     for trigger_edge_row in dataset_rows_by_name.get("trigger_edges", []):
         route_edge_rows.append(
             {
@@ -1814,11 +2071,35 @@ def enrich_navigation_route_datasets(
             }
         )
 
-    dataset_rows_by_name["nodes"] = route_node_rows
-    dataset_rows_by_name["edges"] = sorted(
+    sorted_route_edge_rows = sorted(
         route_edge_rows,
-        key=lambda row: (int(row["edge_index"]), int(row["path_id"])),
+        key=lambda row: (
+            int(row["edge_index"]),
+            int(row["path_id"]),
+            str(row["route_source"]),
+            str(row["from_node_id"]),
+            str(row["to_node_id"]),
+        ),
     )
+
+    deduped_route_edge_rows: list[dict[str, Any]] = []
+    seen_runtime_edge_keys: set[tuple[int, str, str]] = set()
+    for route_edge_row in sorted_route_edge_rows:
+        runtime_edge_key = (
+            int(route_edge_row["path_id"]),
+            str(route_edge_row["from_node_id"]),
+            str(route_edge_row["to_node_id"]),
+        )
+        if runtime_edge_key in seen_runtime_edge_keys:
+            continue
+        seen_runtime_edge_keys.add(runtime_edge_key)
+        deduped_route_edge_rows.append(route_edge_row)
+
+    for runtime_edge_index, route_edge_row in enumerate(deduped_route_edge_rows, start=1):
+        route_edge_row["edge_index"] = runtime_edge_index
+
+    dataset_rows_by_name["nodes"] = route_node_rows
+    dataset_rows_by_name["edges"] = deduped_route_edge_rows
     return dataset_rows_by_name
 
 

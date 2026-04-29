@@ -1,0 +1,161 @@
+<style>
+  .route-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:16px; }
+  .route-card { border:1px solid rgba(255,255,255,.14); border-radius:18px; background:rgba(10,14,24,.9); overflow:hidden; }
+  .route-shell { padding:14px; }
+  .chip-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .chip { padding:4px 10px; border-radius:999px; font-size:12px; background:rgba(255,255,255,.08); color:#d8e0ef; }
+  .chip.warn { background:rgba(255,166,0,.15); color:#ffd27a; }
+  .top-pill { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-radius:14px; background:linear-gradient(135deg, rgba(43,86,173,.55), rgba(20,32,62,.95)); color:#f4f7ff; margin-bottom:12px; }
+  .top-pill .title { font-size:12px; opacity:.82; }
+  .top-pill .value { font-size:15px; font-weight:700; }
+  .timeline { display:flex; flex-direction:column; gap:10px; }
+  .step { display:grid; grid-template-columns:16px 1fr; gap:10px; align-items:start; }
+  .dot { width:12px; height:12px; border-radius:50%; background:#7f8ca5; margin-top:5px; box-shadow:0 0 0 3px rgba(127,140,165,.15); }
+  .dot.done { background:#57c785; box-shadow:0 0 0 3px rgba(87,199,133,.18); }
+  .dot.now { background:#4aa3ff; box-shadow:0 0 0 4px rgba(74,163,255,.18); }
+  .dot.end { background:#ffd36d; box-shadow:0 0 0 3px rgba(255,211,109,.18); }
+  .line { border-left:2px solid rgba(255,255,255,.08); margin-left:5px; padding-left:12px; }
+  .step-title { color:#f3f6fb; font-size:13px; font-weight:700; }
+  .step-sub { color:#a8b3c8; font-size:12px; margin-top:2px; line-height:1.4; }
+  .route-mini { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:8px 0 2px; color:#d3d9e6; font-size:12px; }
+  .node { padding:5px 8px; border-radius:999px; background:rgba(255,255,255,.06); }
+  .node.now { background:rgba(63,128,255,.18); color:#d7e7ff; }
+  .node.end { background:rgba(255,211,109,.16); color:#ffe4a0; }
+  .arrow { opacity:.55; }
+  .side-shell { display:grid; grid-template-columns:78px 1fr; gap:12px; align-items:stretch; }
+  .side-radar { border-radius:14px; background:radial-gradient(circle at 50% 50%, rgba(74,163,255,.22), rgba(10,16,28,.98)); display:flex; align-items:center; justify-content:center; color:#9fcaff; font-size:12px; border:1px solid rgba(90,132,210,.18); min-height:210px; }
+  .scroll-ribbon { display:flex; gap:10px; overflow:hidden; padding-top:10px; }
+  .scroll-item { min-width:110px; border-radius:14px; background:rgba(255,255,255,.06); padding:10px; }
+  .scroll-item.now { background:linear-gradient(180deg, rgba(67,127,238,.26), rgba(255,255,255,.06)); }
+  .scroll-item.end { background:linear-gradient(180deg, rgba(255,211,109,.18), rgba(255,255,255,.06)); }
+  .label-top { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#8ea0bf; margin-bottom:10px; }
+  @media (max-width: 1100px) { .route-grid { grid-template-columns:1fr; } }
+</style>
+
+<h2>导航路线图方向</h2>
+<p class="subtitle">目标：替换现在会超框的顶部文本条，同时能表达起点、下一步行为、路线链路、终点、当前位置和偏航提示。</p>
+
+<div class="options route-grid">
+  <div class="option route-card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="route-shell">
+      <div class="label-top">A · 顶部折叠胶囊 + 下拉时间线</div>
+      <div class="top-pill">
+        <div>
+          <div class="title">当前导航</div>
+          <div class="value">飞往 幽暗城飞行点</div>
+        </div>
+        <div class="chip">2 / 5</div>
+      </div>
+      <div class="chip-row">
+        <div class="chip">起点：奥格瑞玛</div>
+        <div class="chip warn">偏离路线 140码</div>
+      </div>
+      <div class="timeline">
+        <div class="step">
+          <div class="dot done"></div>
+          <div class="line">
+            <div class="step-title">起点 · 奥格瑞玛传送门大厅</div>
+            <div class="step-sub">已完成：步行到幽暗城传送门</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="dot now"></div>
+          <div class="line">
+            <div class="step-title">下一步 · 乘坐飞行点</div>
+            <div class="step-sub">链路：幽暗城 → 提瑞斯法林地 → 东瘟疫之地</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="dot end"></div>
+          <div class="line">
+            <div class="step-title">终点 · 斯坦索姆入口</div>
+            <div class="step-sub">到达后步行进入目标区域</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option route-card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="route-shell">
+      <div class="label-top">B · 右侧悬浮路线卡片</div>
+      <div class="side-shell">
+        <div class="side-radar">当前位置<br>偏航监视</div>
+        <div>
+          <div class="chip-row">
+            <div class="chip">总计 5 步</div>
+            <div class="chip">当前：第 2 步</div>
+          </div>
+          <div class="timeline">
+            <div class="step">
+              <div class="dot done"></div>
+              <div class="line">
+                <div class="step-title">奥格瑞玛</div>
+                <div class="step-sub">步行到传送门</div>
+              </div>
+            </div>
+            <div class="step">
+              <div class="dot now"></div>
+              <div class="line">
+                <div class="step-title">行为：使用传送门</div>
+                <div class="step-sub">奥格瑞玛 → 幽暗城</div>
+              </div>
+            </div>
+            <div class="step">
+              <div class="dot"></div>
+              <div class="line">
+                <div class="step-title">行为：乘坐飞行点</div>
+                <div class="step-sub">幽暗城 → 圣光之愿礼拜堂</div>
+              </div>
+            </div>
+            <div class="step">
+              <div class="dot end"></div>
+              <div class="line">
+                <div class="step-title">终点：副本入口</div>
+                <div class="step-sub">离路过远时卡片顶部变黄提示</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option route-card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="route-shell">
+      <div class="label-top">C · 顶部节点带 + 底部详情区</div>
+      <div class="chip-row">
+        <div class="chip">起点可见</div>
+        <div class="chip">路线链路强</div>
+        <div class="chip warn">偏航时高亮当前节点</div>
+      </div>
+      <div class="route-mini">
+        <div class="node">奥格瑞玛</div>
+        <div class="arrow">→</div>
+        <div class="node now">幽暗城</div>
+        <div class="arrow">→</div>
+        <div class="node">圣光之愿</div>
+        <div class="arrow">→</div>
+        <div class="node end">斯坦索姆</div>
+      </div>
+      <div class="scroll-ribbon">
+        <div class="scroll-item">
+          <div class="step-title">起始位置</div>
+          <div class="step-sub">奥格瑞玛传送门大厅</div>
+        </div>
+        <div class="scroll-item now">
+          <div class="step-title">正在进行</div>
+          <div class="step-sub">飞往幽暗城，下一步去飞行管理员</div>
+        </div>
+        <div class="scroll-item">
+          <div class="step-title">路线链路</div>
+          <div class="step-sub">传送门 → 飞行点 → 步行</div>
+        </div>
+        <div class="scroll-item end">
+          <div class="step-title">终点</div>
+          <div class="step-sub">斯坦索姆入口</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

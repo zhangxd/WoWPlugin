@@ -191,6 +191,13 @@ describe("Toolbox.Config navigation module defaults", function()
     assert.equals(0, moduleDb.lastTargetUiMapID)
     assert.equals(0, moduleDb.lastTargetX)
     assert.equals(0, moduleDb.lastTargetY)
+    assert.is_false(moduleDb.routeWidgetExpanded)
+    assert.same({
+      point = "TOP",
+      x = 0,
+      y = -18,
+    }, moduleDb.routeWidgetPosition)
+    assert.same({}, moduleDb.routeHistory)
   end)
 end)
 

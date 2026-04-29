@@ -223,6 +223,8 @@ local function buildRouteSegments(routeGraph, edgePath)
         to = toNodeId,
         fromName = tostring(fromNode.name or fromNodeId),
         toName = tostring(toNode.name or toNodeId),
+        fromUiMapID = tonumber(fromNode.uiMapID),
+        toUiMapID = tonumber(toNode.uiMapID),
         label = edgeLabel,
         traversedUiMapIDs = copyArray(edge.traversedUiMapIDs or edge.TraversedUiMapIDs),
         traversedUiMapNames = copyArray(edge.traversedUiMapNames or edge.TraversedUiMapNames),
@@ -305,8 +307,13 @@ local function isEdgeAvailable(edge, availabilityContext)
     end
   end
 
+  local factionRequirement = edge and edge.FactionRequirement or nil -- 静态公共边的阵营限制
+  if factionRequirement and factionRequirement ~= context.faction then
+    return false
+  end
+
   local edgeMode = readEdgeMode(edge)
-  if edgeMode == "taxi" or edgeMode == "transport" then
+  if edgeMode == "taxi" then
     local knownTaxiNodeByID = context.knownTaxiNodeByID -- 已开航点集合
     local fromTaxiNodeID = tonumber(edge and (edge.fromTaxiNodeID or edge.FromTaxiNodeID)) -- 起点飞行点 ID
     local toTaxiNodeID = tonumber(edge and (edge.toTaxiNodeID or edge.ToTaxiNodeID)) -- 终点飞行点 ID
@@ -318,10 +325,17 @@ local function isEdgeAvailable(edge, availabilityContext)
     end
   end
 
-  if edgeMode == "public_portal" then
-    local factionRequirement = edge and edge.FactionRequirement or nil -- 阵营限制
-    if factionRequirement and factionRequirement ~= context.faction then
-      return false
+  if edgeMode == "transport" then
+    local fromTaxiNodeID = tonumber(edge and (edge.fromTaxiNodeID or edge.FromTaxiNodeID)) -- 起点飞行点 ID
+    local toTaxiNodeID = tonumber(edge and (edge.toTaxiNodeID or edge.ToTaxiNodeID)) -- 终点飞行点 ID
+    if fromTaxiNodeID or toTaxiNodeID then
+      local knownTaxiNodeByID = context.knownTaxiNodeByID -- 已开航点集合
+      if type(knownTaxiNodeByID) ~= "table" or not fromTaxiNodeID or not toTaxiNodeID then
+        return false
+      end
+      if knownTaxiNodeByID[fromTaxiNodeID] ~= true or knownTaxiNodeByID[toTaxiNodeID] ~= true then
+        return false
+      end
     end
   end
 
@@ -583,6 +597,45 @@ local function estimateInMapTravelCost(uiMapID, fromX, fromY, toX, toY)
   return math.floor((distance * 120) + 0.5)
 end
 
+--- 读取当前角色所在地图与归一化坐标。
+---@return table locationSnapshot 仅包含 currentUiMapID/currentX/currentY
+local function buildCurrentLocationSnapshot()
+  local locationSnapshot = {
+    currentUiMapID = nil,
+    currentX = nil,
+    currentY = nil,
+  } -- 当前角色位置快照
+
+  local mapApi = type(C_Map) == "table" and C_Map or nil -- 地图 API 表
+  local getBestMapForUnit = mapApi and mapApi.GetBestMapForUnit or nil -- 当前单位所在 UiMap 查询
+  if type(getBestMapForUnit) == "function" then
+    local success, currentMapID = pcall(getBestMapForUnit, "player") -- 当前角色所在地图查询结果
+    if success and type(currentMapID) == "number" and currentMapID > 0 then
+      locationSnapshot.currentUiMapID = currentMapID
+    end
+  end
+
+  local getPlayerMapPosition = mapApi and mapApi.GetPlayerMapPosition or nil -- 当前单位坐标查询
+  if locationSnapshot.currentUiMapID and type(getPlayerMapPosition) == "function" then
+    local success, positionValue = pcall(getPlayerMapPosition, locationSnapshot.currentUiMapID, "player") -- 当前角色坐标查询结果
+    if success then
+      local currentX, currentY = readVectorXY(positionValue) -- 当前角色归一化坐标
+      if isNormalizedPosition(currentX, currentY) then
+        locationSnapshot.currentX = currentX
+        locationSnapshot.currentY = currentY
+      end
+    end
+  end
+
+  return locationSnapshot
+end
+
+--- 构建当前角色位置快照，供轻量 UI 刷新读取。
+---@return table locationSnapshot 仅包含 currentUiMapID/currentX/currentY
+function Toolbox.Navigation.GetCurrentLocationSnapshot()
+  return buildCurrentLocationSnapshot()
+end
+
 --- 从当前角色运行时状态构建路径边可用性快照。
 --- `C_SpellBook.IsSpellInSpellBook` 是当前 Retail 推荐的 spellbook 查询入口；
 --- 旧客户端或测试环境缺失时回退到 `C_SpellBook.IsSpellKnown`，调用失败按未知处理。
@@ -614,25 +667,10 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
     end
   end
 
-  local mapApi = type(C_Map) == "table" and C_Map or nil -- 地图 API 表
-  local getBestMapForUnit = mapApi and mapApi.GetBestMapForUnit or nil -- 当前单位所在 UiMap 查询
-  if type(getBestMapForUnit) == "function" then
-    local success, currentMapID = pcall(getBestMapForUnit, "player") -- 当前角色所在地图查询结果
-    if success and type(currentMapID) == "number" and currentMapID > 0 then
-      availabilityContext.currentUiMapID = currentMapID
-    end
-  end
-  local getPlayerMapPosition = mapApi and mapApi.GetPlayerMapPosition or nil -- 当前单位坐标查询
-  if availabilityContext.currentUiMapID and type(getPlayerMapPosition) == "function" then
-    local success, positionValue = pcall(getPlayerMapPosition, availabilityContext.currentUiMapID, "player") -- 当前角色坐标查询结果
-    if success then
-      local currentX, currentY = readVectorXY(positionValue) -- 当前角色归一化坐标
-      if isNormalizedPosition(currentX, currentY) then
-        availabilityContext.currentX = currentX
-        availabilityContext.currentY = currentY
-      end
-    end
-  end
+  local locationSnapshot = buildCurrentLocationSnapshot() -- 当前角色位置快照
+  availabilityContext.currentUiMapID = locationSnapshot.currentUiMapID
+  availabilityContext.currentX = locationSnapshot.currentX
+  availabilityContext.currentY = locationSnapshot.currentY
 
   availabilityContext.knownTaxiNodeByID = buildKnownTaxiNodeByID()
   if type(GetBindLocation) == "function" then
@@ -747,20 +785,28 @@ local function resolveRouteMapID(rawMapID, resolvedAtPositionMapID, mapNodes, ed
 
   local rankedCandidateList = {} -- 排序后的候选地图列表
   local rankedSet = {} -- 已加入候选的地图 ID 集合
-  local function pushRankedCandidate(mapID)
+  local candidateSourceRankByMapID = {} -- 候选来源优先级（原图/父链优先于同名回退）
+  local function pushRankedCandidate(mapID, sourceRank)
     local numericMapID = tonumber(mapID) -- 候选地图 ID
-    if numericMapID and numericMapID > 0 and not rankedSet[numericMapID] then
-      rankedSet[numericMapID] = true
-      rankedCandidateList[#rankedCandidateList + 1] = numericMapID
+    local numericSourceRank = tonumber(sourceRank) or 99 -- 候选来源分层
+    if numericMapID and numericMapID > 0 then
+      local previousSourceRank = tonumber(candidateSourceRankByMapID[numericMapID]) -- 已记录来源优先级
+      if previousSourceRank == nil or numericSourceRank < previousSourceRank then
+        candidateSourceRankByMapID[numericMapID] = numericSourceRank
+      end
+      if not rankedSet[numericMapID] then
+        rankedSet[numericMapID] = true
+        rankedCandidateList[#rankedCandidateList + 1] = numericMapID
+      end
     end
   end
 
   for _, searchMapID in ipairs(searchMapIDList) do
     local parentCandidateSet = buildRouteMapCandidateSet(searchMapID, mapNodes) -- 原始地图与父链候选
-    pushRankedCandidate(searchMapID)
+    pushRankedCandidate(searchMapID, 0)
     for candidateMapID in pairs(parentCandidateSet) do
       if candidateMapID ~= searchMapID then
-        pushRankedCandidate(candidateMapID)
+        pushRankedCandidate(candidateMapID, 1)
       end
     end
 
@@ -769,7 +815,7 @@ local function resolveRouteMapID(rawMapID, resolvedAtPositionMapID, mapNodes, ed
     if searchName ~= "" then
       for candidateMapID, nodeDef in pairs(type(mapNodes) == "table" and mapNodes or {}) do
         if tostring(nodeDef and nodeDef.Name_lang or "") == searchName then
-          pushRankedCandidate(candidateMapID)
+          pushRankedCandidate(candidateMapID, 2)
         end
       end
     end
@@ -777,10 +823,24 @@ local function resolveRouteMapID(rawMapID, resolvedAtPositionMapID, mapNodes, ed
 
   local bestMapID = nil -- 最优候选地图 ID
   local bestScore = nil -- 最优候选评分
+  local function isScoreBetter(candidateScore, currentBestScore)
+    if currentBestScore == nil then
+      return true
+    end
+    for scoreIndex = 1, #candidateScore do
+      local candidateValue = tonumber(candidateScore[scoreIndex]) or 0 -- 当前层级评分
+      local bestValue = tonumber(currentBestScore[scoreIndex]) or 0 -- 已知最优层级评分
+      if candidateValue ~= bestValue then
+        return candidateValue < bestValue
+      end
+    end
+    return false
+  end
   for _, candidateMapID in ipairs(rankedCandidateList) do
     local nodeDef = type(mapNodes) == "table" and mapNodes[candidateMapID] or nil -- 候选地图定义
     local mapType = tonumber(nodeDef and nodeDef.MapType) or 99 -- 候选地图类型
     local degree = tonumber(edgeDegreeByUiMapID and edgeDegreeByUiMapID[candidateMapID]) or 0 -- 候选地图关联边数量
+    local sourceRank = tonumber(candidateSourceRankByMapID[candidateMapID]) or 99 -- 候选来源优先级
     local mapTypeRank = 4 -- 地图类型优先级
     if mapType == 3 then
       mapTypeRank = 0
@@ -791,8 +851,13 @@ local function resolveRouteMapID(rawMapID, resolvedAtPositionMapID, mapNodes, ed
     elseif mapType < 3 then
       mapTypeRank = 3
     end
-    local score = mapTypeRank * 10000000 + (degree > 0 and 0 or 100000) + candidateMapID -- 候选排序分数
-    if bestScore == nil or score < bestScore then
+    local score = {
+      mapTypeRank,
+      degree > 0 and 0 or 1,
+      sourceRank,
+      candidateMapID,
+    } -- 候选排序分数：连边存在优先，其次保留原图/父链，再回退同名老图
+    if isScoreBetter(score, bestScore) then
       bestScore = score
       bestMapID = candidateMapID
     end
