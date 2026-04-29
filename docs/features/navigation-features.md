@@ -11,7 +11,7 @@
   - `docs/plans/navigation-plan.md`
   - `docs/tests/navigation-test.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-29（V2 transport 已闭合）
+- 最后更新：2026-04-29（V2 public_portal 方案确认）
 
 ## 1. 定位
 
@@ -87,3 +87,4 @@
 | 2026-04-27 | 接入副本入口导出数据：新增 `NavigationMapAssignments.lua` 与 `NavigationInstanceEntrances.lua`，副本入口导航使用导出的外部目标坐标 |
 | 2026-04-29 | V1 基线重定义：路线按当前角色配置和最少路径步数计算，接入 `NavigationAbilityTemplates.lua`、已开航点过滤与炉石绑定点解析 |
 | 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，导出脚本新增 transport 节点检测，`mode = "transport"` 边加入运行时路线图 |
+| 2026-04-29 | V2 推进：`public_portal` 方案确认，进入实施 |

@@ -1500,6 +1500,150 @@ def enrich_navigation_taxi_datasets(
     return dataset_rows_by_name
 
 
+def fetch_navigation_portal_node_candidate_rows(
+    sqlite_conn: sqlite3.Connection,
+    portal_node_rows: list[dict[str, Any]],
+) -> dict[int, list[dict[str, Any]]]:
+    """批量抓取 waypoint portal 节点点位命中的 UiMap 候选。"""
+
+    grouped_rows: dict[tuple[int, float, float], list[int]] = {}
+    for node_row in portal_node_rows:
+        map_id = int(node_row.get("map_id") or 0)
+        world_x = float(node_row.get("world_x") or 0)
+        world_y = float(node_row.get("world_y") or 0)
+        if map_id <= 0:
+            continue
+        key = (map_id, world_x, world_y)
+        grouped_rows.setdefault(key, []).append(int(node_row.get("waypoint_node_id") or 0))
+
+    candidate_rows_by_node_id: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for (map_id, world_x, world_y), node_id_list in grouped_rows.items():
+        sql_text = """
+SELECT
+  CAST(a.UiMapID AS INTEGER) AS candidate_ui_map_id,
+  COALESCE(NULLIF(TRIM(u.Name_lang), ''), 'UiMap #' || CAST(a.UiMapID AS TEXT)) AS candidate_name,
+  CAST(COALESCE(u.Type, 0) AS INTEGER) AS candidate_type,
+  ABS((CAST(a.Region_3 AS REAL) - CAST(a.Region_0 AS REAL)) * (CAST(a.Region_4 AS REAL) - CAST(a.Region_1 AS REAL))) AS candidate_area
+FROM uimapassignment a, uimap u
+WHERE CAST(a.UiMapID AS INTEGER) = CAST(u.ID AS INTEGER)
+  AND CAST(a.MapID AS INTEGER) = ?
+  AND CAST(a.Region_0 AS REAL) <= ?
+  AND CAST(a.Region_3 AS REAL) >= ?
+  AND CAST(a.Region_1 AS REAL) <= ?
+  AND CAST(a.Region_4 AS REAL) >= ?
+  AND CAST(COALESCE(u.System, 0) AS INTEGER) = 0
+  AND CAST(COALESCE(u.Type, 0) AS INTEGER) >= 3
+"""
+        rows = sqlite_conn.execute(sql_text, (map_id, world_x, world_x, world_y, world_y)).fetchall()
+        if not rows:
+            continue
+        candidate_rows = [dict(row) for row in rows]
+        for node_id in node_id_list:
+            candidate_rows_by_node_id[node_id].extend(candidate_rows)
+    return candidate_rows_by_node_id
+
+
+def enrich_navigation_portal_datasets(
+    sqlite_conn: sqlite3.Connection,
+    dataset_rows_by_name: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    """把 waypoint portal 原始数据集补齐为 public_portal 节点 / 边。"""
+
+    portal_node_rows = list(dataset_rows_by_name.get("portal_nodes_raw", []))
+    portal_edge_rows = list(dataset_rows_by_name.get("portal_edges_raw", []))
+    if not portal_node_rows or not portal_edge_rows:
+        dataset_rows_by_name["portal_nodes"] = []
+        dataset_rows_by_name["portal_edges"] = []
+        return dataset_rows_by_name
+
+    ui_map_context = build_navigation_uimap_context(sqlite_conn)
+    candidate_rows_by_node_id = fetch_navigation_portal_node_candidate_rows(sqlite_conn, portal_node_rows)
+
+    # 内联的联盟/部落阵营条件 ID
+    faction_condition_by_id = {924: "Alliance", 923: "Horde"}
+
+    enriched_node_rows: list[dict[str, Any]] = []
+    enriched_node_row_by_node_id: dict[int, dict[str, Any]] = {}
+    for node_row in portal_node_rows:
+        waypoint_node_id = int(node_row.get("waypoint_node_id") or 0)
+        if waypoint_node_id <= 0:
+            continue
+        node_name = str(node_row.get("node_name") or "")
+        node_type = int(node_row.get("node_type") or 0)
+        if node_type not in (1, 2):
+            continue
+        ui_map_id = choose_navigation_ui_map_id(
+            candidate_rows_by_node_id.get(waypoint_node_id, []),
+            ui_map_context,
+            hint_name=node_name,
+        )
+        if ui_map_id <= 0:
+            continue
+        enriched_node_row = {
+            "portal_node_key": f"portal_{waypoint_node_id}",
+            "waypoint_node_id": waypoint_node_id,
+            "ui_map_id": ui_map_id,
+            "map_id": int(node_row.get("map_id") or 0),
+            "node_name": node_name,
+            "walk_cluster_key": build_navigation_walk_cluster_key(ui_map_id, ui_map_context),
+            "pos_x": float(node_row.get("world_x") or 0),
+            "pos_y": float(node_row.get("world_y") or 0),
+            "pos_z": float(node_row.get("world_z") or 0),
+            "node_type": node_type,
+            "player_condition_id": int(node_row.get("player_condition_id") or 0),
+        }
+        enriched_node_rows.append(enriched_node_row)
+        enriched_node_row_by_node_id[waypoint_node_id] = enriched_node_row
+
+    enriched_edge_rows: list[dict[str, Any]] = []
+    for edge_index, edge_row in enumerate(portal_edge_rows):
+        from_node_id = int(edge_row.get("from_waypoint_node_id") or 0)
+        to_node_id = int(edge_row.get("to_waypoint_node_id") or 0)
+        from_node_row = enriched_node_row_by_node_id.get(from_node_id)
+        to_node_row = enriched_node_row_by_node_id.get(to_node_id)
+        if from_node_row is None or to_node_row is None:
+            continue
+
+        # 自环边过滤
+        if from_node_id == to_node_id:
+            continue
+
+        # PlayerConditionID 分层：0 无条件纳入；924/923 标 faction；其余暂不纳入
+        from_condition_id = int(edge_row.get("player_condition_id") or 0)
+        requirements_faction = faction_condition_by_id.get(from_condition_id)
+        if from_condition_id != 0 and requirements_faction is None:
+            continue
+
+        traversed_ui_map_ids = [int(from_node_row["ui_map_id"]), int(to_node_row["ui_map_id"])]
+        traversed_ui_map_names = build_navigation_ui_map_names(traversed_ui_map_ids, ui_map_context)
+
+        from_node_name = str(from_node_row["node_name"])
+        to_node_name = str(to_node_row["node_name"])
+
+        edge_data = {
+            "edge_index": edge_index,
+            "route_source": "portal",
+            "from_node_id": str(from_node_row["portal_node_key"]),
+            "to_node_id": str(to_node_row["portal_node_key"]),
+            "from_ui_map_id": int(from_node_row["ui_map_id"]),
+            "to_ui_map_id": int(to_node_row["ui_map_id"]),
+            "step_cost": 1,
+            "mode": "public_portal",
+            "edge_label": from_node_name + "\xe2\x86\x92" + to_node_name,
+            "traversed_ui_map_ids": traversed_ui_map_ids,
+            "traversed_ui_map_names": traversed_ui_map_names,
+            "requirements_faction": requirements_faction,
+        }
+        enriched_edge_rows.append(edge_data)
+
+    dataset_rows_by_name["portal_nodes"] = enriched_node_rows
+    dataset_rows_by_name["portal_edges"] = sorted(
+        enriched_edge_rows,
+        key=lambda row: (int(row["edge_index"]), str(row["from_node_id"])),
+    )
+    return dataset_rows_by_name
+
+
 def enrich_navigation_route_datasets(
     sqlite_conn: sqlite3.Connection,
     dataset_rows_by_name: dict[str, list[dict[str, Any]]],
@@ -1508,6 +1652,7 @@ def enrich_navigation_route_datasets(
 
     ui_map_context = build_navigation_uimap_context(sqlite_conn)
     dataset_rows_by_name = enrich_navigation_taxi_datasets(sqlite_conn, dataset_rows_by_name)
+    dataset_rows_by_name = enrich_navigation_portal_datasets(sqlite_conn, dataset_rows_by_name)
 
     route_node_rows: list[dict[str, Any]] = []
     for raw_anchor_row in dataset_rows_by_name.get("map_anchor_raw", []):
@@ -1547,6 +1692,23 @@ def enrich_navigation_route_datasets(
             }
         )
 
+    for portal_node_row in dataset_rows_by_name.get("portal_nodes", []):
+        route_node_rows.append(
+            {
+                "node_id": str(portal_node_row.get("portal_node_key")),
+                "node_kind": "portal",
+                "route_source": "portal",
+                "ui_map_id": int(portal_node_row.get("ui_map_id") or 0),
+                "map_id": int(portal_node_row.get("map_id") or 0),
+                "node_name": str(portal_node_row.get("node_name") or ""),
+                "walk_cluster_key": str(portal_node_row.get("walk_cluster_key") or ""),
+                "taxi_node_id": None,
+                "pos_x": float(portal_node_row.get("pos_x") or 0),
+                "pos_y": float(portal_node_row.get("pos_y") or 0),
+                "pos_z": float(portal_node_row.get("pos_z") or 0),
+            }
+        )
+
     route_edge_rows: list[dict[str, Any]] = []
     for taxi_edge_row in dataset_rows_by_name.get("edges", []):
         route_edge_rows.append(
@@ -1565,6 +1727,27 @@ def enrich_navigation_route_datasets(
                 "edge_label": str(taxi_edge_row.get("edge_label") or ""),
                 "traversed_ui_map_ids": list(taxi_edge_row.get("traversed_ui_map_ids") or []),
                 "traversed_ui_map_names": list(taxi_edge_row.get("traversed_ui_map_names") or []),
+            }
+        )
+
+    for portal_edge_row in dataset_rows_by_name.get("portal_edges", []):
+        route_edge_rows.append(
+            {
+                "edge_index": int(portal_edge_row.get("edge_index") or 0),
+                "path_id": 0,
+                "route_source": "portal",
+                "from_node_id": str(portal_edge_row.get("from_node_id") or ""),
+                "to_node_id": str(portal_edge_row.get("to_node_id") or ""),
+                "from_ui_map_id": int(portal_edge_row.get("from_ui_map_id") or 0),
+                "to_ui_map_id": int(portal_edge_row.get("to_ui_map_id") or 0),
+                "from_taxi_node_id": None,
+                "to_taxi_node_id": None,
+                "step_cost": 1,
+                "mode": "public_portal",
+                "edge_label": str(portal_edge_row.get("edge_label") or ""),
+                "traversed_ui_map_ids": list(portal_edge_row.get("traversed_ui_map_ids") or []),
+                "traversed_ui_map_names": list(portal_edge_row.get("traversed_ui_map_names") or []),
+                "requirements_faction": str(portal_edge_row.get("requirements_faction") or "") or None,
             }
         )
 

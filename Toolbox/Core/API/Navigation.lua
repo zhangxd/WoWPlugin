@@ -318,6 +318,13 @@ local function isEdgeAvailable(edge, availabilityContext)
     end
   end
 
+  if edgeMode == "public_portal" then
+    local factionRequirement = edge and edge.FactionRequirement or nil -- 阵营限制
+    if factionRequirement and factionRequirement ~= context.faction then
+      return false
+    end
+  end
+
   return true
 end
 

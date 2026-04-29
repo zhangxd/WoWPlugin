@@ -530,8 +530,15 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 **V2 已闭合：**
 - ✅ `transport`（飞艇/船）：导出脚本根据 node name 含 “Transport” / “交通工具” 识别 transport 节点，对应边输出 `mode = “transport”`；运行时 `isEdgeAvailable` 对 transport 模式与 taxi 同等待遇（两端航点需已开）。
 
+**V2 进行中：**
+- 🔄 `public_portal` — 2026-04-29 方案确认，进入实施：
+  - 数据来源：复用 `navigation_waypoint_edges` 管道（`waypointedge` + `waypointnode`），筛选 Type=1→Type=2 portal 边
+  - 节点映射：新建 `portal_{waypoint_id}` 节点，保留精确坐标；enrichment 走 `walk_cluster_uimap_id_by_uimap_id` 确定 `WalkClusterKey`
+  - 接入方式：`WalkClusterKey` 连接同连通域 `map_anchor`，复用 `addDynamicWalkLocalEdges`
+  - 可用性：`PlayerConditionID = 0` 无条件纳入；`924`/`923` 标 faction；其余暂不纳入
+  - 出口：portal 边汇入 `navigation_route_edges` 统一静态边表
+
 **V2 待推进（单人导航，不含需多人协助的模态）：**
-- `public_portal`
 - `areatrigger`
 - 全世界 `WalkComponent`
 - “只能飞 / 只能传送 / 没有公共路径”一类强结论（需等所有 V2 模态闭合后引入）
@@ -552,3 +559,4 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 | 2026-04-27 | 初版计划：围绕旧的 `cost` 路线图与世界地图入口组织实施 |
 | 2026-04-29 | 整体重写：以”当前角色配置 + 最少路径步数 + 枢纽 / 动作图”替换旧计划，V1 收口到 `walk_local / taxi / hearthstone / class_teleport / class_portal` |
 | 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，导出脚本 + 运行时 + 测试全部落地，V2 待推进项更新为其余 4 项 |
+| 2026-04-29 | V2 推进：`public_portal` 方案确认，进入实施；路线图 5 段链路已校验可导出 |

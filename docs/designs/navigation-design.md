@@ -9,7 +9,7 @@
   - `docs/specs/navigation-spec.md`
   - `docs/plans/navigation-plan.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-29（V2 transport 已闭合）
+- 最后更新：2026-04-29（V2 public_portal 方案确认）
 
 ## 1. 背景
 
@@ -127,9 +127,16 @@
 #### V2 继续补齐（已闭合标记 ✅）
 
 - ✅ `transport`（飞艇/船）
-- `public_portal`
+- 🔄 `public_portal`（公共传送门）— 2026-04-29 确认方案，进入实施
 - `areatrigger`
 - 全世界 `WalkComponent`
+
+**public_portal 已确认方案：**
+- 数据来源：复用 `navigation_waypoint_edges` 的 `waypointedge` + `waypointnode` 管道，筛选 Type=1→Type=2 portal 边
+- 节点类型：新建 `portal_{waypoint_id}` 节点，保留 waypoint 精确坐标（`PosX`/`PosY`），通过 `WalkClusterKey` 接入本地步行网
+- 边模式：`mode = "public_portal"`，`stepCost = 1`
+- 可用性：`PlayerConditionID = 0` 的边无条件纳入；`924`（Alliance）/ `923`（Horde）标注 `faction`；其余 V2 暂不纳入
+- 出口：portal 边通过 enrichment 汇入 `navigation_route_edges` 统一静态边表，不新增运行时数据文件
 
 #### V3 才允许下强结论
 
@@ -282,3 +289,4 @@
 | 2026-04-27 | 路线边统一导出：新增 `navigation_route_edges` active 契约，`NavigationRouteEdges.lua` 成为 `Toolbox.Navigation` 唯一运行时路线边入口 |
 | 2026-04-29 | 设计基线重定义：导航图改为”当前角色配置 + 最少步数 + 枢纽 / 动作图”，V1 先支持 `taxi / hearthstone / class_teleport / class_portal / walk_local`，`transport / public_portal / areatrigger / walk component` 延后到 V2 |
 | 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，`isEdgeAvailable` 增加 transport 模式处理，导出脚本按 node name 识别 transport 节点 |
+| 2026-04-29 | V2 推进：`public_portal` 方案确认，进入实施（waypoint 管道 → 统一边表，portal_N 节点 + WalkClusterKey 接入，faction 分层过滤） |

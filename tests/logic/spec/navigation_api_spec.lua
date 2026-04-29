@@ -635,6 +635,96 @@ describe("Navigation API", function()
     assert.equals("walk_local", routeResult.segments[1].mode)
   end)
 
+  it("allows_public_portal_edges_for_all_characters_regardless_of_taxi_nodes", function()
+    setNavigationData({
+      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", Source = "uimap", UiMapID = 1, Name_lang = "暴风城", WalkClusterKey = "uimap_1" },
+      uimap_12 = { NodeID = "uimap_12", Kind = "map_anchor", Source = "uimap", UiMapID = 12, Name_lang = "卡利姆多", WalkClusterKey = "uimap_12" },
+      portal_100 = { NodeID = "portal_100", Kind = "portal", Source = "portal", UiMapID = 1, Name_lang = "使用巫师圣殿的传送门前往海加尔山", WalkClusterKey = "uimap_1" },
+      portal_200 = { NodeID = "portal_200", Kind = "portal", Source = "portal", UiMapID = 12, Name_lang = "海加尔山", WalkClusterKey = "uimap_12" },
+    }, {
+      {
+        ID = 0,
+        FromNodeID = "portal_100",
+        ToNodeID = "portal_200",
+        FromUiMapID = 1,
+        ToUiMapID = 12,
+        StepCost = 1,
+        Mode = "public_portal",
+        Label = "使用巫师圣殿的传送门前往海加尔山→海加尔山",
+        TraversedUiMapIDs = { 1, 12 },
+        TraversedUiMapNames = { "暴风城", "卡利姆多" },
+      },
+    }, {
+      [1] = { Name_lang = "暴风城", MapType = 3, ParentUiMapID = 0 },
+      [12] = { Name_lang = "卡利姆多", MapType = 3, ParentUiMapID = 0 },
+    }, {})
+
+    local routeResult = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 12,
+      x = 0.50,
+      y = 0.50,
+    }, {
+      classFile = "WARRIOR",
+      faction = "Alliance",
+      currentUiMapID = 1,
+      currentX = 0.20,
+      currentY = 0.20,
+      knownSpellByID = {},
+      knownTaxiNodeByID = {},
+    })
+
+    assert.is_table(routeResult)
+    assert.is_nil(routeResult.errorObject)
+    assert.equals("public_portal", routeResult.segments[2].mode)
+    assert.equals("海加尔山", routeResult.segments[2].toName)
+  end)
+
+  it("filters_public_portal_edges_by_faction_requirement", function()
+    local routeGraph = {
+      nodes = {
+        start = { id = "start", name = "起点" },
+        alliancePortal = { id = "alliancePortal", name = "联盟传送门出口" },
+        hordePortal = { id = "hordePortal", name = "部落传送门出口" },
+      },
+      edges = {
+        {
+          from = "start",
+          to = "alliancePortal",
+          stepCost = 1,
+          mode = "public_portal",
+          label = "联盟专属传送门",
+          FactionRequirement = "Alliance",
+          traversedUiMapIDs = { 1, 2 },
+          traversedUiMapNames = { "暴风城", "铁炉堡" },
+        },
+        {
+          from = "start",
+          to = "hordePortal",
+          stepCost = 1,
+          mode = "public_portal",
+          label = "部落专属传送门",
+          FactionRequirement = "Horde",
+          traversedUiMapIDs = { 1, 3 },
+          traversedUiMapNames = { "暴风城", "奥格瑞玛" },
+        },
+      },
+    }
+
+    local allianceGraph = Toolbox.Navigation.FilterRouteGraph(routeGraph, {
+      faction = "Alliance",
+    })
+
+    assert.equals(1, #allianceGraph.edges)
+    assert.equals("alliancePortal", allianceGraph.edges[1].to)
+
+    local hordeGraph = Toolbox.Navigation.FilterRouteGraph(routeGraph, {
+      faction = "Horde",
+    })
+
+    assert.equals(1, #hordeGraph.edges)
+    assert.equals("hordePortal", hordeGraph.edges[1].to)
+  end)
+
   it("rejects_world_and_continent_maps_as_navigation_targets", function()
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 947,

@@ -9,7 +9,7 @@
   - `docs/designs/navigation-design.md`
   - `docs/plans/navigation-plan.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-29（V2 transport 已闭合）
+- 最后更新：2026-04-29（V2 public_portal 方案确认）
 
 ## 1. 背景
 
@@ -129,3 +129,4 @@
 | 2026-04-27 | 路线边统一导出：新增 `navigation_route_edges` 契约，运行时构图统一消费 `NavigationRouteEdges.lua`，来源侧 `NavigationTaxiEdges.lua` 不再被 `Toolbox.Navigation` 直接读取 |
 | 2026-04-29 | 规格基线重定义：路线改为”当前角色配置 + 最少步数”；V1 先支持 `walk_local / taxi / hearthstone / class_teleport / class_portal`，世界级 `transport / public_portal / areatrigger / walk component` 延后到后续阶段 |
 | 2026-04-29 | V2 推进：`transport`（飞艇/船）正式进入 In Scope，导出脚本增加 transport 检测与 `mode = “transport”` 输出 |
+| 2026-04-29 | V2 推进：`public_portal` 方案确认，waypoint 管道接入统一静态边表 |

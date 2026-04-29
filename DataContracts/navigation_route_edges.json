@@ -1,8 +1,8 @@
 {
   "contract": {
     "contract_id": "navigation_route_edges",
-    "schema_version": 15,
-    "summary": "navigation V1 统一静态路线骨架（map_anchor + taxi）",
+    "schema_version": 16,
+    "summary": "navigation V2 统一静态路线骨架（map_anchor + taxi + portal）",
     "source_of_truth": "WoWPlugin",
     "status": "active"
   },
@@ -18,34 +18,44 @@
       "uimapassignment",
       "taxinodes",
       "taxipath",
-      "taxipathnode"
+      "taxipathnode",
+      "waypointnode",
+      "waypointedge",
+      "waypointsafelocs"
     ],
     "sql": "SELECT 1 AS placeholder",
     "query": {
-      "from": "uimap / uimapassignment / taxinodes / taxipath / taxipathnode",
+      "from": "uimap / uimapassignment / taxinodes / taxipath / taxipathnode / waypointnode / waypointedge",
       "joins": [
         "uimap + uimapassignment 生成 map_anchor 锚点",
         "taxinodes + taxipath + taxipathnode 生成 taxi 节点与静态边",
-        "supplemental 根据静态覆盖关系补齐 WalkClusterKey 与 TraversedUiMap 序列"
+        "waypointnode + waypointsafelocs 生成 portal 节点（Type=1/2）",
+        "waypointedge 连接 portal 入口 → 出口",
+        "supplemental 补齐 WalkClusterKey、映射 UiMap、生成统一 route nodes + edges"
       ],
       "select": [
-        "map_anchor_raw：V1 参与导航的 UiMap 锚点",
+        "map_anchor_raw：V2 参与导航的 UiMap 锚点",
         "nodes_raw：TaxiNode 原始记录",
         "edges_raw：TaxiPath 原始记录",
-        "supplemental：统一汇总成 runtime nodes + edges"
+        "portal_nodes_raw：waypoint portal 节点（Type=1 portal 入口 + Type=2 portal 出口）",
+        "portal_edges_raw：portal 入口 → 出口边",
+        "supplemental：统一汇总成 runtime nodes + edges（含 taxi + transport + public_portal）"
       ],
       "where": [
-        "统一静态骨架不再导出 MAP_LINK / WAYPOINT_LINK / UiMap 邻接猜想",
-        "V1 runtime 只消费 map_anchor 节点、taxi 节点和 taxi 静态边",
-        "walk_local 不提前导出成全世界边，运行时按 WalkClusterKey 动态补接"
+        "统一静态骨架不导出 MAP_LINK / WAYPOINT_LINK / UiMap 邻接猜想",
+        "V2 runtime 消费 map_anchor 节点、taxi 节点、portal 节点，以及 taxi / transport / public_portal 静态边",
+        "walk_local 不提前导出成全世界边，运行时按 WalkClusterKey 动态补接",
+        "public_portal 边按 PlayerConditionID 分层：0 无条件纳入，924/923 标注 faction，其余暂不纳入"
       ],
       "group_by": [],
       "order_by": [
         "map_anchor_raw.ui_map_id ASC",
         "nodes_raw.taxi_node_id ASC",
-        "edges_raw.path_id ASC"
+        "edges_raw.path_id ASC",
+        "portal_nodes_raw.waypoint_node_id ASC",
+        "portal_edges_raw.waypoint_node_id ASC"
       ],
-      "row_granularity": "map_anchor_raw 一行代表一个 UiMap 锚点；nodes_raw 一行代表一个 TaxiNode；edges_raw 一行代表一条 TaxiPath"
+      "row_granularity": "map_anchor_raw 一行代表一个 UiMap 锚点；nodes_raw 一行代表一个 TaxiNode；edges_raw 一行代表一条 TaxiPath；portal_nodes_raw 一行代表一个 portal 入口/出口节点；portal_edges_raw 一行代表一条 portal 边"
     },
     "supplemental_sources": [
       {
@@ -74,7 +84,7 @@
           "order_by": [
             "ui_map_id ASC"
           ],
-          "row_granularity": "一行代表一个 V1 map_anchor 原始锚点"
+          "row_granularity": "一行代表一个 V2 map_anchor 原始锚点"
         }
       },
       "nodes_raw": {
@@ -124,6 +134,60 @@
           ],
           "row_granularity": "一行代表一条 TaxiPath 原始记录"
         }
+      },
+      "portal_nodes_raw": {
+        "sql": "SELECT CAST(node.ID AS INTEGER) AS waypoint_node_id, COALESCE(NULLIF(TRIM(node.Name_lang), ''), 'Portal #' || CAST(node.ID AS TEXT)) AS node_name, CAST(COALESCE(node.Type, 0) AS INTEGER) AS node_type, CAST(COALESCE(node.PlayerConditionID, 0) AS INTEGER) AS player_condition_id, CAST(COALESCE(loc.MapID, 0) AS INTEGER) AS map_id, CAST(COALESCE(loc.Pos_0, 0) AS REAL) AS world_x, CAST(COALESCE(loc.Pos_1, 0) AS REAL) AS world_y, CAST(COALESCE(loc.Pos_2, 0) AS REAL) AS world_z FROM waypointnode node LEFT JOIN waypointsafelocs loc ON CAST(loc.ID AS INTEGER) = CAST(node.SafeLocID AS INTEGER) WHERE CAST(node.ID AS INTEGER) > 0 AND CAST(COALESCE(node.Type, 0) AS INTEGER) IN (1, 2) ORDER BY CAST(node.ID AS INTEGER)",
+        "query": {
+          "from": "waypointnode",
+          "joins": [
+            "waypointsafelocs ON SafeLocID，恢复世界坐标"
+          ],
+          "select": [
+            "waypoint_node_id",
+            "node_name",
+            "node_type",
+            "player_condition_id",
+            "map_id",
+            "world_x",
+            "world_y",
+            "world_z"
+          ],
+          "where": [
+            "waypointnode.ID > 0",
+            "waypointnode.Type IN (1, 2)：1 = portal 入口，2 = portal 出口"
+          ],
+          "group_by": [],
+          "order_by": [
+            "waypoint_node_id ASC"
+          ],
+          "row_granularity": "一行代表一个 waypoint portal 节点（入口或出口）"
+        }
+      },
+      "portal_edges_raw": {
+        "sql": "SELECT CAST(edge.ID AS INTEGER) AS waypoint_edge_id, CAST(edge.Start AS INTEGER) AS from_waypoint_node_id, CAST(edge.End AS INTEGER) AS to_waypoint_node_id, CAST(COALESCE(edge.PlayerConditionID, 0) AS INTEGER) AS player_condition_id FROM waypointedge edge LEFT JOIN waypointnode start_node ON CAST(start_node.ID AS INTEGER) = CAST(edge.Start AS INTEGER) LEFT JOIN waypointnode end_node ON CAST(end_node.ID AS INTEGER) = CAST(edge.End AS INTEGER) WHERE CAST(edge.ID AS INTEGER) > 0 AND CAST(edge.Start AS INTEGER) > 0 AND CAST(edge.End AS INTEGER) > 0 AND CAST(COALESCE(start_node.Type, -1) AS INTEGER) = 1 AND CAST(COALESCE(end_node.Type, -1) AS INTEGER) = 2 ORDER BY CAST(edge.ID AS INTEGER)",
+        "query": {
+          "from": "waypointedge",
+          "joins": [
+            "waypointnode Start（确认为 Type=1 portal 入口）",
+            "waypointnode End（确认为 Type=2 portal 出口）"
+          ],
+          "select": [
+            "waypoint_edge_id",
+            "from_waypoint_node_id",
+            "to_waypoint_node_id",
+            "player_condition_id"
+          ],
+          "where": [
+            "Start/End 均大于 0",
+            "Start.Type = 1（portal 入口）",
+            "End.Type = 2（portal 出口）"
+          ],
+          "group_by": [],
+          "order_by": [
+            "waypoint_edge_id ASC"
+          ],
+          "row_granularity": "一行代表一条 public portal 连接边（入口 → 出口）"
+        }
       }
     }
   },
@@ -135,7 +199,7 @@
       {
         "name": "metadata",
         "metadata": {
-          "schemaVersion": 15,
+          "schemaVersion": 16,
           "sourceMode": "live",
           "generatedAt": "@generated_at"
         }
@@ -178,11 +242,12 @@
         "block_type": "map_object",
         "key_field": "edge_index",
         "dedupe_by": [
-          "path_id"
+          "path_id",
+          "from_node_id",
+          "to_node_id"
         ],
         "required_fields": [
           "edge_index",
-          "path_id",
           "from_node_id",
           "to_node_id",
           "mode",
@@ -205,7 +270,8 @@
           "Mode": "mode",
           "Label": "edge_label",
           "TraversedUiMapIDs": "traversed_ui_map_ids",
-          "TraversedUiMapNames": "traversed_ui_map_names"
+          "TraversedUiMapNames": "traversed_ui_map_names",
+          "FactionRequirement": "requirements_faction"
         }
       }
     ]
@@ -217,7 +283,7 @@
     "sort_rules": []
   },
   "versioning": {
-    "current_schema_version": 15,
+    "current_schema_version": 16,
     "change_log": [
       {
         "schema_version": 14,
@@ -226,6 +292,10 @@
       {
         "schema_version": 15,
         "summary": "V1 改为统一静态路线骨架：只保留 map_anchor / taxi 节点与 taxi 静态边"
+      },
+      {
+        "schema_version": 16,
+        "summary": "V2 public_portal：新增 portal 节点（portal_N）+ public_portal 边，汇入统一静态边表"
       }
     ]
   }
