@@ -1644,6 +1644,29 @@ def enrich_navigation_portal_datasets(
     return dataset_rows_by_name
 
 
+def enrich_navigation_areatrigger_datasets(
+    sqlite_conn: sqlite3.Connection,
+    dataset_rows_by_name: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    """把 AreaTrigger 原始数据集补齐为 areatrigger 节点 / 边。
+
+    占位实现：等确认 areatrigger / areatriggeractionset 表结构后补完整逻辑。
+    当前只写入空数据集，不参与构图。
+    """
+
+    trigger_node_rows = list(dataset_rows_by_name.get("trigger_nodes_raw", []))
+    trigger_edge_rows = list(dataset_rows_by_name.get("trigger_edges_raw", []))
+    if not trigger_node_rows or not trigger_edge_rows:
+        dataset_rows_by_name["trigger_nodes"] = []
+        dataset_rows_by_name["trigger_edges"] = []
+        return dataset_rows_by_name
+
+    # TODO：等表结构确认后实现完整 enrichment
+    dataset_rows_by_name["trigger_nodes"] = []
+    dataset_rows_by_name["trigger_edges"] = []
+    return dataset_rows_by_name
+
+
 def enrich_navigation_route_datasets(
     sqlite_conn: sqlite3.Connection,
     dataset_rows_by_name: dict[str, list[dict[str, Any]]],
@@ -1653,6 +1676,7 @@ def enrich_navigation_route_datasets(
     ui_map_context = build_navigation_uimap_context(sqlite_conn)
     dataset_rows_by_name = enrich_navigation_taxi_datasets(sqlite_conn, dataset_rows_by_name)
     dataset_rows_by_name = enrich_navigation_portal_datasets(sqlite_conn, dataset_rows_by_name)
+    dataset_rows_by_name = enrich_navigation_areatrigger_datasets(sqlite_conn, dataset_rows_by_name)
 
     route_node_rows: list[dict[str, Any]] = []
     for raw_anchor_row in dataset_rows_by_name.get("map_anchor_raw", []):
@@ -1709,6 +1733,23 @@ def enrich_navigation_route_datasets(
             }
         )
 
+    for trigger_node_row in dataset_rows_by_name.get("trigger_nodes", []):
+        route_node_rows.append(
+            {
+                "node_id": str(trigger_node_row.get("trigger_node_key")),
+                "node_kind": "areatrigger",
+                "route_source": "areatrigger",
+                "ui_map_id": int(trigger_node_row.get("ui_map_id") or 0),
+                "map_id": int(trigger_node_row.get("map_id") or 0),
+                "node_name": str(trigger_node_row.get("node_name") or ""),
+                "walk_cluster_key": str(trigger_node_row.get("walk_cluster_key") or ""),
+                "taxi_node_id": None,
+                "pos_x": float(trigger_node_row.get("pos_x") or 0),
+                "pos_y": float(trigger_node_row.get("pos_y") or 0),
+                "pos_z": float(trigger_node_row.get("pos_z") or 0),
+            }
+        )
+
     route_edge_rows: list[dict[str, Any]] = []
     for taxi_edge_row in dataset_rows_by_name.get("edges", []):
         route_edge_rows.append(
@@ -1748,6 +1789,26 @@ def enrich_navigation_route_datasets(
                 "traversed_ui_map_ids": list(portal_edge_row.get("traversed_ui_map_ids") or []),
                 "traversed_ui_map_names": list(portal_edge_row.get("traversed_ui_map_names") or []),
                 "requirements_faction": str(portal_edge_row.get("requirements_faction") or "") or None,
+            }
+        )
+
+    for trigger_edge_row in dataset_rows_by_name.get("trigger_edges", []):
+        route_edge_rows.append(
+            {
+                "edge_index": int(trigger_edge_row.get("edge_index") or 0),
+                "path_id": 0,
+                "route_source": "areatrigger",
+                "from_node_id": str(trigger_edge_row.get("from_node_id") or ""),
+                "to_node_id": str(trigger_edge_row.get("to_node_id") or ""),
+                "from_ui_map_id": int(trigger_edge_row.get("from_ui_map_id") or 0),
+                "to_ui_map_id": int(trigger_edge_row.get("to_ui_map_id") or 0),
+                "from_taxi_node_id": None,
+                "to_taxi_node_id": None,
+                "step_cost": 1,
+                "mode": "areatrigger",
+                "edge_label": str(trigger_edge_row.get("edge_label") or ""),
+                "traversed_ui_map_ids": list(trigger_edge_row.get("traversed_ui_map_ids") or []),
+                "traversed_ui_map_names": list(trigger_edge_row.get("traversed_ui_map_names") or []),
             }
         )
 

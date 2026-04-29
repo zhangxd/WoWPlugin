@@ -725,6 +725,56 @@ describe("Navigation API", function()
     assert.equals("hordePortal", hordeGraph.edges[1].to)
   end)
 
+  it("allows_areatrigger_edges_for_all_characters_as_public_transitions", function()
+    local routeGraph = {
+      nodes = {
+        start = { id = "start", name = "起点" },
+        triggerZone = { id = "triggerZone", name = "黑暗之门入口" },
+        triggerExit = { id = "triggerExit", name = "黑暗之门出口" },
+        target = { id = "target", name = "目标" },
+      },
+      edges = {
+        {
+          from = "start",
+          to = "triggerZone",
+          stepCost = 1,
+          mode = "walk_local",
+          label = "走向黑暗之门",
+          traversedUiMapIDs = { 1 },
+          traversedUiMapNames = { "诅咒之地" },
+        },
+        {
+          from = "triggerZone",
+          to = "triggerExit",
+          stepCost = 1,
+          mode = "areatrigger",
+          label = "穿过黑暗之门→地狱火半岛",
+          traversedUiMapIDs = { 1, 2 },
+          traversedUiMapNames = { "诅咒之地", "地狱火半岛" },
+        },
+        {
+          from = "triggerExit",
+          to = "target",
+          stepCost = 1,
+          mode = "walk_local",
+          label = "抵达目标",
+          traversedUiMapIDs = { 2 },
+          traversedUiMapNames = { "地狱火半岛" },
+        },
+      },
+    }
+
+    local routeResult, errorObject = Toolbox.Navigation.FindShortestPath(routeGraph, "start", "target")
+
+    assert.is_nil(errorObject)
+    assert.equals(3, routeResult.totalSteps)
+    -- areatrigger 段在压缩后的 segments 中
+    local areatriggerSegment = routeResult.segments[2]
+    assert.equals("areatrigger", areatriggerSegment.mode)
+    assert.equals("triggerZone", areatriggerSegment.from)
+    assert.equals("triggerExit", areatriggerSegment.to)
+  end)
+
   it("rejects_world_and_continent_maps_as_navigation_targets", function()
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 947,

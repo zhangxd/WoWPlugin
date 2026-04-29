@@ -1,8 +1,8 @@
 {
   "contract": {
     "contract_id": "navigation_route_edges",
-    "schema_version": 16,
-    "summary": "navigation V2 统一静态路线骨架（map_anchor + taxi + portal）",
+    "schema_version": 17,
+    "summary": "navigation V2 统一静态路线骨架（map_anchor + taxi + portal + areatrigger 占位）",
     "source_of_truth": "WoWPlugin",
     "status": "active"
   },
@@ -21,7 +21,9 @@
       "taxipathnode",
       "waypointnode",
       "waypointedge",
-      "waypointsafelocs"
+      "waypointsafelocs",
+      "areatrigger",
+      "areatriggeractionset"
     ],
     "sql": "SELECT 1 AS placeholder",
     "query": {
@@ -31,6 +33,7 @@
         "taxinodes + taxipath + taxipathnode 生成 taxi 节点与静态边",
         "waypointnode + waypointsafelocs 生成 portal 节点（Type=1/2）",
         "waypointedge 连接 portal 入口 → 出口",
+        "areatrigger + areatriggeractionset 生成 areatrigger 节点与边（占位，表结构待确认）",
         "supplemental 补齐 WalkClusterKey、映射 UiMap、生成统一 route nodes + edges"
       ],
       "select": [
@@ -39,13 +42,16 @@
         "edges_raw：TaxiPath 原始记录",
         "portal_nodes_raw：waypoint portal 节点（Type=1 portal 入口 + Type=2 portal 出口）",
         "portal_edges_raw：portal 入口 → 出口边",
-        "supplemental：统一汇总成 runtime nodes + edges（含 taxi + transport + public_portal）"
+        "trigger_nodes_raw：areatrigger 触发区域节点（占位）",
+        "trigger_edges_raw：areatrigger 触发 → 目标边（占位）",
+        "supplemental：统一汇总成 runtime nodes + edges（含 taxi + transport + public_portal + areatrigger）"
       ],
       "where": [
         "统一静态骨架不导出 MAP_LINK / WAYPOINT_LINK / UiMap 邻接猜想",
         "V2 runtime 消费 map_anchor 节点、taxi 节点、portal 节点，以及 taxi / transport / public_portal 静态边",
         "walk_local 不提前导出成全世界边，运行时按 WalkClusterKey 动态补接",
-        "public_portal 边按 PlayerConditionID 分层：0 无条件纳入，924/923 标注 faction，其余暂不纳入"
+        "public_portal 边按 PlayerConditionID 分层：0 无条件纳入，924/923 标注 faction，其余暂不纳入",
+        "areatrigger 边为公共设施，对所有角色可用（占位，过滤规则待确认）"
       ],
       "group_by": [],
       "order_by": [
@@ -188,6 +194,47 @@
           ],
           "row_granularity": "一行代表一条 public portal 连接边（入口 → 出口）"
         }
+      },
+      "trigger_nodes_raw": {
+        "sql": "SELECT CAST(ID AS INTEGER) AS trigger_id, CAST(COALESCE(ContinentID, 0) AS INTEGER) AS map_id, CAST(COALESCE(X, 0) AS REAL) AS pos_x, CAST(COALESCE(Y, 0) AS REAL) AS pos_y, CAST(COALESCE(Z, 0) AS REAL) AS pos_z, CAST(COALESCE(Radius, 0) AS REAL) AS radius FROM areatrigger WHERE CAST(ID AS INTEGER) > 0 ORDER BY CAST(ID AS INTEGER)",
+        "query": {
+          "from": "areatrigger",
+          "joins": [],
+          "select": [
+            "trigger_id",
+            "map_id",
+            "pos_x",
+            "pos_y",
+            "pos_z",
+            "radius"
+          ],
+          "where": [
+            "areatrigger.ID > 0"
+          ],
+          "group_by": [],
+          "order_by": [
+            "trigger_id ASC"
+          ],
+          "row_granularity": "一行代表一个 areatrigger 触发区域（占位，待确认表结构与目标坐标来源）"
+        }
+      },
+      "trigger_edges_raw": {
+        "sql": "SELECT 1 AS placeholder FROM areatrigger WHERE 1 = 0",
+        "query": {
+          "from": "areatrigger + areatriggeractionset",
+          "joins": [
+            "areatrigger.AreaTriggerActionSetID → areatriggeractionset.ID（待确认）"
+          ],
+          "select": [
+            "（占位：等表结构确认后补）"
+          ],
+          "where": [
+            "（占位：等表结构确认后补）"
+          ],
+          "group_by": [],
+          "order_by": [],
+          "row_granularity": "一行代表一条 areatrigger 传送边（触发区域 → 目标坐标），占位"
+        }
       }
     }
   },
@@ -199,7 +246,7 @@
       {
         "name": "metadata",
         "metadata": {
-          "schemaVersion": 16,
+          "schemaVersion": 17,
           "sourceMode": "live",
           "generatedAt": "@generated_at"
         }
@@ -283,7 +330,7 @@
     "sort_rules": []
   },
   "versioning": {
-    "current_schema_version": 16,
+    "current_schema_version": 17,
     "change_log": [
       {
         "schema_version": 14,
@@ -296,6 +343,10 @@
       {
         "schema_version": 16,
         "summary": "V2 public_portal：新增 portal 节点（portal_N）+ public_portal 边，汇入统一静态边表"
+      },
+      {
+        "schema_version": 17,
+        "summary": "V2 areatrigger 占位：新增 trigger 节点 / 边骨架，待表结构确认后补完整 enrichment"
       }
     ]
   }
