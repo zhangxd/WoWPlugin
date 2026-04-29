@@ -172,7 +172,7 @@ sequenceDiagram
 |------|-----------------|------|------|
 | 窗口拖动（自建 + 可选暴雪） | `mover` | `modules.mover`（`enabled`/`debug`/`frames`/`blizzardDragHitMode`/`allowDragInCombat`）；旧 `micromenu_panels.frames` 一次性迁入 `mover` | 归入“界面”叶子页：启用、拖动命中模式、战斗中是否允许拖；调试与“清理并重建”位于页底低频区；暴雪顶层仅代码内 `PANEL_KEYS` |
 | Tooltip 锚点 | `tooltip_anchor` | `modules.tooltip_anchor`（`enabled`/`debug`/`mode`/`offsetX`/`offsetY`） | 归入“界面”叶子页：启用、锚点模式与偏移；调试与“清理并重建”位于页底低频区 |
-| 小地图打开设置按钮 | `minimap_button` | `modules.minimap_button`（`enabled`/`debug`/`showMinimapButton`/`showCoordsOnMinimap`/`minimapCoordsAnchor`/`minimapPos`/`buttonShape`/`flyoutExpand`/`flyoutSlotIds`/`flyoutLauncherGap`/`flyoutPad`/`flyoutGap`） | 归入“通用”叶子页：是否显示小地图按钮、坐标显示、恢复默认位置；款式（圆/方）、展开方式（纵向/横向）、悬停项顺序与功能池拖放、`flyoutSlotIds`；内置“冒险手册”飞出项会打开冒险指南，并在 tooltip 里追加当前副本锁定摘要 |
+| 小地图打开设置按钮 | `minimap_button` | `modules.minimap_button`（`enabled`/`debug`/`showMinimapButton`/`showCoordsOnMinimap`/`minimapCoordsAnchor`/`minimapPos`/`flyoutSlotIds`） | 归入“通用”叶子页：是否显示小地图按钮、坐标显示、恢复默认位置，以及悬停菜单功能勾选；运行时固定为圆形主按钮 + 横向悬停菜单，`flyoutSlotIds` 仅表示勾选加入的功能项。内置“冒险手册”飞出项会打开冒险指南，并在 tooltip 里追加当前副本锁定摘要 |
 | 加载聊天提示 | `chat_notify` | `modules.chat_notify`（`enabled`/`debug`） | 归入“通用”叶子页：加载提示说明文案；调试与“清理并重建”位于页底低频区 |
 | 冒险指南增强 | `encounter_journal` | `modules.encounter_journal`（`enabled`/`debug`/`mountFilterEnabled`/`listPinAlwaysVisible`）+ `Toolbox.Data.MountDrops` + `Toolbox.Data.InstanceMapIDs` + `Toolbox.Data.InstanceEntrances` + `Toolbox.EJ` | 归入“冒险手册”叶子页：覆盖副本列表“仅坐骑”、副本列表图钉导航、列表锁定叠加、悬停锁定详情、详情页重置标签，以及 `EJMicroButton` / 小地图“冒险手册” tooltip 锁定摘要。入口导航不新增额外存档字段，运行时入口缺精确 `journalInstanceID` 时读取 DB 生成的 `InstanceEntrances` 静态入口，跟随模块总开关。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
 | 地图导航 | `navigation` | `modules.navigation`（`enabled`/`debug`/`lastTargetUiMapID`/`lastTargetX`/`lastTargetY`）+ `Toolbox.Navigation` + `Toolbox.Data.NavigationMapNodes` + `Toolbox.Data.NavigationMapAssignments` + `Toolbox.Data.NavigationInstanceEntrances` + `Toolbox.Data.NavigationAbilityTemplates` + `Toolbox.Data.NavigationRouteEdges` | 归入“地图”叶子页：当前导航基线已收敛为“当前角色配置 + 最少路径步数”的多模态路线图。V1 先支持 `taxi / hearthstone / class_teleport / class_portal / walk_local`，并要求输出每段方式与经过地图；`transport / public_portal / areatrigger / walk component` 留待后续阶段补齐。地图基础节点由 `navigation_map_nodes` 正式导出，`navigation_map_assignments` 当前仅导出 `UiMap <-> MapID` 关系，副本入口外部目标由 `navigation_instance_entrances` 正式导出，能力模板由 `navigation_ability_templates` 正式导出，运行时静态路线边统一由 `navigation_route_edges` 正式导出。`navigation_taxi_edges` 只作为 Taxi 来源侧导出，不再由运行时构图链路直接消费；`Region_*`、轨迹坐标与 SafeLoc 坐标不再进入运行时路线图。所有导航运行时数据必须由 DataContracts 契约导出，`NavigationManualEdges.lua` 不得作为运行时数据源。详见 [specs/navigation-spec.md](./specs/navigation-spec.md)、[designs/navigation-design.md](./designs/navigation-design.md)、[plans/navigation-plan.md](./plans/navigation-plan.md)。 |
@@ -199,7 +199,7 @@ ToolboxDB = {
     mover = { enabled = true, debug = false, ... },
     micromenu_panels = { enabled = true, debug = false, ... },
     tooltip_anchor = { enabled = true, debug = false, ... },
-    minimap_button = { enabled = true, debug = false, showMinimapButton = true, showCoordsOnMinimap = true, minimapCoordsAnchor = "bottom", minimapPos = nil, buttonShape = "round", flyoutExpand = "vertical", flyoutSlotIds = { "reload_ui" }, flyoutLauncherGap = 0, flyoutPad = 4, flyoutGap = 0 },
+    minimap_button = { enabled = true, debug = false, showMinimapButton = true, showCoordsOnMinimap = true, minimapCoordsAnchor = "bottom", minimapPos = nil, flyoutSlotIds = { "reload_ui", "tb_flyout_quest" } },
     chat_notify = { enabled = true, debug = false, ... },
     encounter_journal = {
       enabled = true,
@@ -332,7 +332,7 @@ ToolboxDB = {
 | **领域对外 API** | `Toolbox.EJ` 负责锁定、坐骑掉落、入口查找、系统 waypoint 导航和锁定摘要；入口查找按当前 `journalInstanceID` 直接读取 DB 生成的 `Toolbox.Data.InstanceEntrances` 并转换世界坐标。 |
 | **锁定映射策略** | `Toolbox.EJ.GetAllLockoutsForInstance` 以 `GetSavedInstanceInfo` 第 14 返回值（mapID）为输入，优先通过 `C_EncounterJournal.GetInstanceForGameMap` 映射 `journalInstanceID`；若运行时 API 不可用，再与 `EJ_GetInstanceInfo(journalInstanceID)` 的 mapID 对齐，并以 `InstanceMapIDs` 单向表兜底；若 mapID 不可判定，则按副本名兜底匹配。 |
 | **列表筛选与锁定** | 提供“仅坐骑”筛选、列表行内 CD 叠加、悬停锁定详情。 |
-| **列表导航与交互** | 在列表条目右下角提供图钉按钮，点击后查找该条目副本入口、打开入口地图并设置系统用户 waypoint / super tracking；未勾选 `listPinAlwaysVisible` 时保留“单击焦点 / 双击进入详情页”的列表交互。`厄运之槌 - 戈多克议会` 等运行时只返回聚合入口的条目，使用 `instance_entrances` 契约导出的精确静态入口补足。 |
+| **列表导航与交互** | 在列表条目右下角提供图钉按钮，点击后查找该条目副本入口、打开入口地图并设置系统用户 waypoint / super tracking；未勾选 `listPinAlwaysVisible` 时图钉仅在鼠标悬停可导航条目时显示，列表单击继续沿用 Blizzard 原生进入详情页行为。`厄运之槌 - 戈多克议会` 等运行时只返回聚合入口的条目，使用 `instance_entrances` 契约导出的精确静态入口补足。 |
 | **详情页增强** | 在详情页标题区域显示重置时间，优先当前难度，当前难度未命中时回退该副本可用锁定。详情页不再提供“仅坐骑”筛选。当前副本 ID 优先读取 `EJ_GetCurrentInstance()`，无效时回退 `EncounterJournal.instanceID`。 |
 | **外部入口** | 小地图飞出菜单中的“冒险手册”项和 `EJMicroButton` tooltip 都会显示当前副本锁定摘要。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
 
@@ -415,6 +415,7 @@ ToolboxDB = {
 | 2026-04-04 | 暴雪窗口拖动并入 **`mover`**：`ShowUIPanel` 全局挂接 + 原懒加载补挂；`micromenu_panels` 存档迁移；`MicroMenuPanels.lua` 兼容委托 |
 | 2026-04-05 | 规范重构：三关关 3 触发条件精确化（移除「新 ToolboxDB 键」）；RegisterSettings 补充允许读取存档值；§5.3 After(0.06) 加限制条件；§2.1 领域对外 API 表补充 `Toolbox.MinimapButton.RegisterFlyoutEntry`；§3 补充账号级 vs 角色级存档约定 |
 | 2026-04-08 | 冒险手册锁定摘要增强：小地图悬停菜单内置“冒险手册”项与右下角 `EJMicroButton` tooltip 均追加当前副本锁定摘要（实例/难度/重置时间，团队本含进度）；`Toolbox.EJ` 增加锁定摘要与 tooltip 行构建接口 |
+| 2026-04-29 | 小地图按钮设置收口：`minimap_button` 固定为圆形主按钮 + 横向悬停菜单；设置页移除展开方式 / 款式 / 预览 / 拖放功能池，仅保留勾选加入 `flyoutSlotIds` 的能力 |
 | 2026-04-10 | 任务线链路对齐：`InstanceQuestlines` 升级并按 schema v3 使用；`QuestlineProgress` 增加 `SetDataOverride`（测试注入）与可恢复容错（坏引用不再导致整页签失效）；补充 `encounter_journal` 任务页签映射说明与离线逻辑测试规范链接 |
 | 2026-04-11 | 任务页签进入多视图阶段：`InstanceQuestlines` 切到 schema v4 DB-shape 文档结构；`Type / NpcIDs / NpcPos` 归入运行时字段层；`Toolbox.Questlines` 负责静态数据 + 动态数据的统一组装；`encounter_journal` 接入状态/类型/地图三视图与新选择状态键 |
 | 2026-04-12 | 按当前代码重写冒险指南相关架构：移除已下线的 `ej_mount_filter` / `dungeon_raid_directory` 表述，对齐 `encounter_journal`、`Toolbox.EJ`、`Toolbox.Questlines`、小地图飞出项与 TOC 实际结构；新增 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md) 作为冒险指南总设计 |

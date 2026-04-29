@@ -625,6 +625,11 @@ local function applyBlizzardPanel(frame, key)
   frame:SetClampedToScreen(true)
   local db = getMoverDb()
   local mode = db.blizzardDragHitMode or HIT_TITLEBAR
+  -- 冒险手册列表区承载 ScrollBox 条目点击；全窗透明拖动层会吞掉列表点击，
+  -- 因此这里强制回退到仅标题栏拖动。
+  if key == "EncounterJournal" then
+    mode = HIT_TITLEBAR
+  end
   ---@param drag Frame
   local function bindBlizzardDragSurface(drag)
     pcall(function()

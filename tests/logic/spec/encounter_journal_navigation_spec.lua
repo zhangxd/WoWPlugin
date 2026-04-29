@@ -45,6 +45,28 @@ describe("EncounterJournal entrance navigation", function()
     assert.equals(0.64, entrance.position.y)
   end)
 
+  it("treats_hidden_instance_select_as_not_being_on_instance_list", function()
+    local encounterJournalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal", UIParent) -- 冒险指南根框体
+    local dungeonTabButton = harness.runtime.CreateFrame("Button", nil, encounterJournalFrame) -- 地下城页签
+    local raidTabButton = harness.runtime.CreateFrame("Button", nil, encounterJournalFrame) -- 团队页签
+    local instanceSelectFrame = harness.runtime.CreateFrame("Frame", nil, encounterJournalFrame) -- 副本列表面板
+    local encounterFrame = harness.runtime.CreateFrame("Frame", nil, encounterJournalFrame) -- 详情面板
+
+    dungeonTabButton:SetID(1)
+    raidTabButton:SetID(2)
+    encounterJournalFrame.dungeonsTab = dungeonTabButton
+    encounterJournalFrame.raidsTab = raidTabButton
+    encounterJournalFrame.selectedTab = 1
+    encounterJournalFrame.instanceSelect = instanceSelectFrame
+    encounterJournalFrame.encounter = encounterFrame
+
+    encounterJournalFrame:Show()
+    instanceSelectFrame:Hide()
+    encounterFrame:Show()
+
+    assert.is_false(Toolbox.EJ.IsRaidOrDungeonInstanceListTab())
+  end)
+
   it("opens_map_and_sets_super_tracked_user_waypoint_for_entrance", function()
     local waypointCalls = {} -- waypoint 设置调用
     local superTrackCalls = {} -- super track 调用
@@ -400,7 +422,7 @@ describe("EncounterJournal entrance navigation", function()
     assert.matches("测试副本入口", lastTrace.text)
   end)
 
-  it("single_click_focuses_row_without_entering_and_hover_reveals_non_focused_pin", function()
+  it("single_click_preserves_original_enter_behavior_and_hover_reveals_pin", function()
     harness:teardown()
     harness = Harness.new({
       locale = "zhCN",
@@ -453,8 +475,8 @@ describe("EncounterJournal entrance navigation", function()
 
     firstRow:RunScript("OnClick", "LeftButton")
 
-    assert.equals(0, enterCallCount)
-    assert.is_true(firstButton:IsShown())
+    assert.equals(1, enterCallCount)
+    assert.is_false(firstButton:IsShown())
     assert.is_false(secondButton:IsShown())
 
     secondRow:RunScript("OnEnter")
@@ -462,7 +484,7 @@ describe("EncounterJournal entrance navigation", function()
 
     secondRow:RunScript("OnLeave")
     assert.is_false(secondButton:IsShown())
-    assert.is_true(firstButton:IsShown())
+    assert.is_false(firstButton:IsShown())
   end)
 
   it("keeps_hover_pin_visible_when_cursor_moves_from_row_to_pin", function()
@@ -519,44 +541,4 @@ describe("EncounterJournal entrance navigation", function()
     assert.is_false(buttonObject:IsShown())
   end)
 
-  it("double_click_uses_original_enter_behavior_for_focused_row", function()
-    harness:teardown()
-    harness = Harness.new({
-      locale = "zhCN",
-      addonLoadedSeed = { Blizzard_EncounterJournal = false },
-    })
-
-    harness.moduleDb.listPinAlwaysVisible = false
-    local encounterJournalFrame = harness.runtime.CreateFrame("Frame", "EncounterJournal", UIParent) -- 冒险指南根框体
-    local instanceSelectFrame = harness.runtime.CreateFrame("Frame", nil, encounterJournalFrame) -- 副本列表面板
-    local scrollBoxFrame = harness.runtime.CreateFrame("Frame", nil, instanceSelectFrame) -- 列表滚动框
-    local enterCallCount = 0 -- 进入副本调用次数
-
-    local rowFrame = harness.runtime.CreateFrame("Button", nil, scrollBoxFrame) -- 副本列表行
-    rowFrame.GetElementData = function()
-      return { instanceID = 2001, name = "测试副本" }
-    end
-    rowFrame:SetScript("OnClick", function()
-      enterCallCount = enterCallCount + 1
-    end)
-
-    scrollBoxFrame.ForEachFrame = function(_, callback)
-      callback(rowFrame)
-    end
-    instanceSelectFrame.ScrollBox = scrollBoxFrame
-    encounterJournalFrame.instanceSelect = instanceSelectFrame
-    encounterJournalFrame:Show()
-    instanceSelectFrame:Show()
-    scrollBoxFrame:Show()
-    rowFrame:Show()
-
-    harness:loadEncounterJournalModule()
-    harness.moduleDef.OnModuleEnable()
-
-    rowFrame:RunScript("OnClick", "LeftButton")
-    assert.equals(0, enterCallCount)
-
-    rowFrame:RunScript("OnDoubleClick", "LeftButton")
-    assert.equals(1, enterCallCount)
-  end)
 end)

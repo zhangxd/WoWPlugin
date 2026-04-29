@@ -18,7 +18,6 @@ Internal.scrollBoxCache = Internal.scrollBoxCache or {
   ttl = 5,
 }
 Internal.listNavigationState = Internal.listNavigationState or {
-  focusedJournalInstanceID = nil,
   hoveredJournalInstanceID = nil,
 }
 
@@ -127,7 +126,6 @@ end
 
 --- 清空当前列表交互状态。
 function Internal.ResetListNavigationState()
-  Internal.listNavigationState.focusedJournalInstanceID = nil
   Internal.listNavigationState.hoveredJournalInstanceID = nil
 end
 

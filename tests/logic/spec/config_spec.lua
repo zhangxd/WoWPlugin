@@ -194,6 +194,64 @@ describe("Toolbox.Config navigation module defaults", function()
   end)
 end)
 
+describe("Toolbox.Config minimap_button deprecated settings cleanup", function()
+  local originalToolbox = nil -- 原始 Toolbox 全局
+  local originalToolboxDB = nil -- 原始 ToolboxDB 全局
+  local originalCopyTable = nil -- 原始 CopyTable 全局
+
+  before_each(function()
+    originalToolbox = rawget(_G, "Toolbox")
+    originalToolboxDB = rawget(_G, "ToolboxDB")
+    originalCopyTable = rawget(_G, "CopyTable")
+
+    rawset(_G, "Toolbox", {
+      Config = {},
+    })
+    rawset(_G, "CopyTable", deepCopyTable)
+  end)
+
+  after_each(function()
+    rawset(_G, "Toolbox", originalToolbox)
+    rawset(_G, "ToolboxDB", originalToolboxDB)
+    rawset(_G, "CopyTable", originalCopyTable)
+  end)
+
+  it("clears_removed_minimap_button_settings_and_keeps_selected_flyout_entries", function()
+    rawset(_G, "ToolboxDB", {
+      version = 2,
+      global = {},
+      modules = {
+        minimap_button = {
+          enabled = true,
+          showMinimapButton = true,
+          showCoordsOnMinimap = true,
+          minimapCoordsAnchor = "bottom",
+          minimapPos = 225,
+          buttonShape = "square",
+          flyoutExpand = "vertical",
+          flyoutLauncherGap = 12,
+          flyoutPad = 18,
+          flyoutGap = 7,
+          flyoutSlotIds = { "open_settings", "tb_flyout_quest" },
+        },
+      },
+    })
+
+    local configChunk = assert(loadfile("Toolbox/Core/Foundation/Config.lua")) -- Config chunk
+    configChunk()
+    Toolbox.Config.Init()
+
+    local moduleDb = ToolboxDB.modules.minimap_button -- 小地图按钮模块存档
+    assert.is_table(moduleDb)
+    assert.is_nil(moduleDb.buttonShape)
+    assert.is_nil(moduleDb.flyoutExpand)
+    assert.is_nil(moduleDb.flyoutLauncherGap)
+    assert.is_nil(moduleDb.flyoutPad)
+    assert.is_nil(moduleDb.flyoutGap)
+    assert.same({ "open_settings", "tb_flyout_quest" }, moduleDb.flyoutSlotIds)
+  end)
+end)
+
 describe("Toolbox.Config encounter_journal list pin defaults", function()
   local originalToolbox = nil -- 原始 Toolbox 全局
   local originalToolboxDB = nil -- 原始 ToolboxDB 全局

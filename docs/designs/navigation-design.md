@@ -9,7 +9,7 @@
   - `docs/specs/navigation-spec.md`
   - `docs/plans/navigation-plan.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-29（V2 public_portal 方案确认）
+- 最后更新：2026-04-29（实现/导出对齐，统一边表基线同步到 v17）
 
 ## 1. 背景
 
@@ -73,14 +73,17 @@
 | `Toolbox/Modules/Navigation/Shared.lua` | 模块内共享命名空间、DB 访问、启用状态判断。 |
 | `Toolbox/Modules/Navigation/WorldMap.lua` | 世界地图 waypoint 入口，负责读取目标点并触发规划。 |
 | `Toolbox/Modules/Navigation/RouteBar.lua` | 顶部路径 UI，负责显示步骤、清除路线、刷新布局。 |
+| `Toolbox/Data/NavigationMapNodes.lua` | 查询时地图基础节点表；负责 `UiMap` 名称、层级和目标落点引用。 |
 | `Toolbox/Data/NavigationAbilityTemplates.lua` | 查询时能力模板表；运行时按当前角色配置展开 `hearthstone / class_teleport / class_portal`。 |
 | `Toolbox/Data/NavigationRouteEdges.lua` | 统一运行时静态边表；运行时只消费这一个静态边入口。 |
+| `DataContracts/navigation_map_nodes.json` | 地图基础节点契约，负责导出 `NavigationMapNodes.lua`。 |
 | `DataContracts/navigation_ability_templates.json` | 能力模板契约，负责导出可稳定闭合的 V1 旅行法术模板。 |
 | `DataContracts/navigation_route_edges.json` | 统一运行时静态边契约，负责汇总当前已闭合的公共路线边。 |
 
 说明：
 
 - 来源侧可以保留 `navigation_taxi_edges` 这类追溯契约，但运行时路径图只能消费统一静态边出口。
+- 当前 runtime 实际静态消费为 `NavigationRouteEdges.lua + NavigationMapNodes.lua + NavigationAbilityTemplates.lua`。
 - 能力模板定义本身也走导出契约；运行时只负责根据当前角色配置决定哪些模板可展开。
 - 未来若增加 `transport`、`portal`、`walk component` 等来源契约，也必须先汇总进统一运行时边表后才能参与构图。
 
@@ -94,7 +97,7 @@
 
 2. `RouteEdgeStatic`
    - 纯静态、与角色配置无关的边。
-   - 模式示例：`taxi`、`portal`、`areatrigger`、`transport`、`walk`。
+   - 模式示例：`taxi`、`transport`、`public_portal`、`areatrigger`、`walk_local`。
 
 3. `AbilityEdgeTemplate`
    - 查询时按当前角色配置展开的边模板。
@@ -127,16 +130,17 @@
 #### V2 继续补齐（已闭合标记 ✅）
 
 - ✅ `transport`（飞艇/船）
-- 🔄 `public_portal`（公共传送门）— 2026-04-29 确认方案，进入实施
-- `areatrigger`
+- ✅ `public_portal`（公共传送门）
+- `areatrigger`（当前仅占位）
 - 全世界 `WalkComponent`
 
-**public_portal 已确认方案：**
+**public_portal 当前实现口径：**
 - 数据来源：复用 `navigation_waypoint_edges` 的 `waypointedge` + `waypointnode` 管道，筛选 Type=1→Type=2 portal 边
 - 节点类型：新建 `portal_{waypoint_id}` 节点，保留 waypoint 精确坐标（`PosX`/`PosY`），通过 `WalkClusterKey` 接入本地步行网
 - 边模式：`mode = "public_portal"`，`stepCost = 1`
 - 可用性：`PlayerConditionID = 0` 的边无条件纳入；`924`（Alliance）/ `923`（Horde）标注 `faction`；其余 V2 暂不纳入
 - 出口：portal 边通过 enrichment 汇入 `navigation_route_edges` 统一静态边表，不新增运行时数据文件
+- 当前仓库默认导出基线已推进到 `navigation_route_edges` schema v17；如果需要严格 V1-only 数据包，必须额外拆分冻结输出。
 
 #### V3 才允许下强结论
 
@@ -164,7 +168,8 @@
 
 求解器：
 
-- 主求解器改为 BFS；图上每条有效边的基础代价都是 1。
+- 主求解器按“最少步数优先 + 平局规则”展开候选状态，不再按预计耗时做 Dijkstra 排序。
+- 图上每条有效边的基础步数代价都是 1；连续 `walk_local` 在展示层压缩为一段。
 - 不再把“施法时间”“换乘时间”“世界距离”作为主排序权重。
 
 平局规则：
@@ -189,6 +194,10 @@
 - 不满足职业 / 阵营 / 已学法术 / 已开航点条件的边直接视为不可用。
 - 未知可用性的边不进入候选图。
 - 当前角色配置是运行时输入，不回写静态导出。
+- 当前角色可用性快照允许使用运行时 API，但仅限于：
+  - `C_TaxiMap.GetTaxiNodesForMap`：收集已开航点
+  - `GetBindLocation`：解析炉石绑定点
+  - `C_Map.GetMapInfoAtPosition`：把当前点 / 目标点细化到更具体的地图节点
 
 ### 5.6 世界关系表达
 
@@ -213,6 +222,7 @@
 - 运行时静态边只能来自 DataContracts 契约导出。
 - 统一运行时边表继续作为唯一静态消费入口。
 - `taxi` 已经是当前最成熟的一层：既能导出节点和边，也能导出经过地图序列。
+- 旧的 `targetRules` / `WAYPOINT_LINK` 运行时旁路已经移除；路线真值不再依赖它们。
 
 能力边规则：
 
@@ -222,8 +232,38 @@
 
 未闭合模态：
 
-- `transport`、`public_portal`、`areatrigger`、`道标石` 仍需继续解静态目标端点。
+- `areatrigger`、`道标石` 仍需继续解静态目标端点。
 - `walk` 仍需独立构建连通组件，不能再由地图矩形关系或 `UiMap` 邻接推导。
+
+### 5.7.1 当前闭环边界样例：`银月城 -> 东瘟疫之地`
+
+这个样例用于固定一个重要口径：当前 unified graph 的运行结果如果是 `no route`，表示“现有静态导出图还不能证明该路线成立”，不表示“游戏内绝对无法到达”。
+
+当前已知存在的相关节点包括：
+
+- `银月城 (UiMapID=110)`、`东瘟疫之地 (UiMapID=23)`
+- `uimap_94`（永歌森林步行簇）、`uimap_95`（幽魂之地步行簇）、`uimap_23`（东瘟疫之地锚点）
+- `portal_117`（日怒之塔 -> 奥格瑞玛）、`portal_118`（内部圣殿宝珠 -> 幽暗城）
+- `portal_556`（萨拉斯小径 -> 东瘟疫之地）
+- `taxi_82`（银月城）、`taxi_383` / `taxi_67` / `taxi_68`（东瘟疫之地）
+
+当前已闭合、可参与求解的关键边只有：
+
+- `portal_117 -> portal_101`，也就是银月城到杜隆塔尔探路者大厅的 `public_portal`
+
+但这条路线仍然不能成立，因为当前静态图还缺以下闭环：
+
+1. `uimap_94 -> uimap_95` 没有可证明的 `walk` 连通；不能因为地图视觉上接壤就自动视为可步行。
+2. `portal_556` 虽然已有 portal 节点，但当前 unified edge 表没有对应 route edge。
+3. `portal_118` 虽然已有 portal 节点，但当前 unified edge 表没有对应 route edge。
+4. `taxi_82` 节点存在，但当前没有把银月城飞行点闭合进 taxi 网络。
+5. `portal_101` 落在杜隆塔尔步行簇，当前没有独立规则把它稳定并入奥格瑞玛主枢纽 `uimap_85`。
+
+因此，按当前导出基线，`银月城 -> 东瘟疫之地` 的正确运行时结果应当是：
+
+- `NAVIGATION_ERR_NO_ROUTE`
+
+该结论是“当前导出图能力边界”的结论，不是对游戏真实世界可达性的排除法结论。
 
 ### 5.8 路线输出
 
@@ -274,6 +314,7 @@
 - 数据验证：
   - `taxi` 边继续校验经过地图序列完整性。
   - 统一运行时静态边表仍禁止手工维护 ID。
+  - 文档和运行时都以当前 contract schema 为准，默认统一边表当前为 v17。
 - 表达验证：
   - 输出的每一段都带方式和经过地图。
   - 连续 `walk` 被压缩为单段展示。
@@ -290,3 +331,5 @@
 | 2026-04-29 | 设计基线重定义：导航图改为”当前角色配置 + 最少步数 + 枢纽 / 动作图”，V1 先支持 `taxi / hearthstone / class_teleport / class_portal / walk_local`，`transport / public_portal / areatrigger / walk component` 延后到 V2 |
 | 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，`isEdgeAvailable` 增加 transport 模式处理，导出脚本按 node name 识别 transport 节点 |
 | 2026-04-29 | V2 推进：`public_portal` 方案确认，进入实施（waypoint 管道 → 统一边表，portal_N 节点 + WalkClusterKey 接入，faction 分层过滤） |
+| 2026-04-29 | 文档同步：明确 runtime 当前实际消费 `NavigationRouteEdges + NavigationMapNodes + NavigationAbilityTemplates`，默认统一边表已推进到 schema v17，`public_portal` 已参与求解，旧 `targetRules / WAYPOINT_LINK` 旁路已移除 |
+| 2026-04-29 | 边界样例同步：固定 `银月城 -> 东瘟疫之地` 当前应返回 `NAVIGATION_ERR_NO_ROUTE`，其含义是“导出图未闭合”，不是“游戏内不可达” |

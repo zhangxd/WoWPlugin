@@ -77,10 +77,12 @@ describe("Navigation data", function()
 
     local exportedData = Toolbox.Data.NavigationRouteEdges -- 契约导出的统一路径边数据
     for _, edgeDef in ipairs(exportedData.edges or {}) do
-      assert.not_equals("MAP_LINK", edgeDef.mode)
-      assert.not_equals("WAYPOINT_LINK", edgeDef.mode)
-      assert.not_equals("uimaplink", edgeDef.source)
-      assert.not_equals("waypointedge_resolved", edgeDef.source)
+      assert.is_string(edgeDef.Mode)
+      assert.is_string(edgeDef.Source)
+      assert.not_equals("MAP_LINK", edgeDef.Mode)
+      assert.not_equals("WAYPOINT_LINK", edgeDef.Mode)
+      assert.not_equals("uimaplink", edgeDef.Source)
+      assert.not_equals("waypointedge_resolved", edgeDef.Source)
     end
   end)
 

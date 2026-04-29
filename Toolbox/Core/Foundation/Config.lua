@@ -45,16 +45,7 @@ local defaults = {
       minimapCoordsAnchor = "bottom",
       -- 沿小地图边缘的角度（度），与 LibDBIcon 一致；nil 表示默认 225°（左上象限靠外）
       minimapPos = nil,
-      -- 悬停展开菜单：首项相对面板左上内边距、相邻两项之间的额外竖直间距（像素）；布局见 MinimapButton.lua
-      flyoutPad = 4,
-      flyoutGap = 0,
-      -- 展开区右缘与微缩按钮左缘之间的横向间距（像素），对应 SetPoint RIGHT/LEFT 的 x 偏移绝对值
-      flyoutLauncherGap = 0,
-      -- 微缩主按钮外观：round 圆形（默认）| square 方形
-      buttonShape = "round",
-      -- 悬停展开方向：vertical 纵向叠放（默认）| horizontal 横向一排（靠小地图一侧为首项）
-      flyoutExpand = "vertical",
-      -- 悬停展开项 id 列表（顺序即显示顺序）；id 须已由 RegisterFlyoutEntry 注册
+      -- 悬停展开项 id 列表（仅表示勾选加入的功能；显示顺序按 flyoutCatalog.order 固定）
       flyoutSlotIds = { "reload_ui", "tb_flyout_quest" },
     },
     chat_notify = {
@@ -450,17 +441,24 @@ function Toolbox.Config.Init()
   end
 
   local minimapButtonDb = type(moduleStore.minimap_button) == "table" and moduleStore.minimap_button or nil -- 小地图按钮存档
-  if type(minimapButtonDb) == "table" and type(minimapButtonDb.flyoutSlotIds) == "table" then
-    local hasQuestEntry = false -- 是否已存在 quest 入口
-    for _, slotId in ipairs(minimapButtonDb.flyoutSlotIds) do
-      if slotId == "tb_flyout_quest" then
-        hasQuestEntry = true
-        break
+  if type(minimapButtonDb) == "table" then
+    if type(minimapButtonDb.flyoutSlotIds) == "table" then
+      local hasQuestEntry = false -- 是否已存在 quest 入口
+      for _, slotId in ipairs(minimapButtonDb.flyoutSlotIds) do
+        if slotId == "tb_flyout_quest" then
+          hasQuestEntry = true
+          break
+        end
+      end
+      if not hasQuestEntry then
+        minimapButtonDb.flyoutSlotIds[#minimapButtonDb.flyoutSlotIds + 1] = "tb_flyout_quest"
       end
     end
-    if not hasQuestEntry then
-      minimapButtonDb.flyoutSlotIds[#minimapButtonDb.flyoutSlotIds + 1] = "tb_flyout_quest"
-    end
+    minimapButtonDb.buttonShape = nil
+    minimapButtonDb.flyoutExpand = nil
+    minimapButtonDb.flyoutLauncherGap = nil
+    minimapButtonDb.flyoutPad = nil
+    minimapButtonDb.flyoutGap = nil
   end
 
   local tooltipAnchorDb = type(moduleStore.tooltip_anchor) == "table" and moduleStore.tooltip_anchor or nil -- tooltip 锚点存档

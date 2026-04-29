@@ -126,6 +126,23 @@ def validate_config() -> None:
         raise AssertionError("encounter journal overlay migration assignment should be removed from config")
     if "encJournalDb.ejLockoutOverlayEnabled" in text:
         raise AssertionError("encounter journal legacy overlay alias cleanup should be removed from config")
+    for removed_key in [
+        "buttonShape = \"round\"",
+        "flyoutExpand = \"vertical\"",
+        "flyoutLauncherGap = 0",
+        "flyoutPad = 4",
+        "flyoutGap = 0",
+    ]:
+        if removed_key in text:
+            raise AssertionError(f"minimap button removed config key should not remain: {removed_key}")
+    for cleanup_needle, cleanup_label in [
+        ("minimapButtonDb.buttonShape = nil", "minimap button shape cleanup"),
+        ("minimapButtonDb.flyoutExpand = nil", "minimap flyout expand cleanup"),
+        ("minimapButtonDb.flyoutLauncherGap = nil", "minimap flyout launcher gap cleanup"),
+        ("minimapButtonDb.flyoutPad = nil", "minimap flyout pad cleanup"),
+        ("minimapButtonDb.flyoutGap = nil", "minimap flyout gap cleanup"),
+    ]:
+        require_contains(text, cleanup_needle, cleanup_label)
 
 
 def validate_module_registry() -> None:
@@ -184,6 +201,20 @@ def validate_locales() -> None:
         "EJ_LOCKOUT_OVERLAY_LABEL",
         "EJ_DETAIL_MOUNT_ONLY_LABEL",
         "EJ_DETAIL_MOUNT_ONLY_HINT",
+        "MINIMAP_PREVIEW_SECTION",
+        "MINIMAP_PREVIEW_DRAG_HINT",
+        "MINIMAP_PREVIEW_DRAG_TOOLTIP_LAUNCHER_GAP",
+        "MINIMAP_PREVIEW_DRAG_TOOLTIP_PAD",
+        "MINIMAP_PREVIEW_DRAG_TOOLTIP_ENTRY_GAP",
+        "MINIMAP_FLYOUT_EXPAND_LABEL",
+        "MINIMAP_FLYOUT_EXPAND_VERTICAL",
+        "MINIMAP_FLYOUT_EXPAND_HORIZONTAL",
+        "MINIMAP_FLYOUT_POOL_HINT",
+        "MINIMAP_FLYOUT_DROP_HERE",
+        "MINIMAP_FLYOUT_ADD_ALL",
+        "MINIMAP_SHAPE_LABEL",
+        "MINIMAP_SHAPE_ROUND",
+        "MINIMAP_SHAPE_SQUARE",
     ]:
         if removed_key in text:
             raise AssertionError(f"encounter journal removed locale key should not remain: {removed_key}")
@@ -306,7 +337,9 @@ def validate_encounter_journal_regressions() -> None:
     require_contains(ej_api_text, "local selectedRootTabID = encounterJournalFrame.selectedTab", "ej domain api reads selected root tab id from encounter journal")
     if "PanelTemplates_GetSelectedTab" in ej_api_text:
         raise AssertionError("ej domain api should not fallback selected tab detection to panel template helper")
-    require_contains(ej_api_text, "return selectedRootTabID == dungeonTabID or selectedRootTabID == raidTabID", "ej domain api compares selected root tab id against dungeon and raid ids")
+    require_contains(ej_api_text, "if selectedRootTabID ~= dungeonTabID and selectedRootTabID ~= raidTabID then", "ej domain api compares selected root tab id against dungeon and raid ids before continuing")
+    require_contains(ej_api_text, "local instanceSelectFrame = encounterJournalFrame.instanceSelect", "ej domain api checks the live instanceSelect frame instead of only root tab state")
+    require_contains(ej_api_text, "local listShownSuccess, listShown = pcall(function() return instanceSelectFrame:IsShown() end)", "ej domain api verifies instanceSelect visibility before treating the page as list state")
 
 
 def validate_mover_regressions() -> None:
@@ -322,6 +355,8 @@ def validate_mover_regressions() -> None:
     require_contains(text, "ensureWorldMapDragHandle", "mover uses a dedicated world map drag handle")
     if "return frame.TitleCanvasSpacerFrame" in text:
         raise AssertionError("mover should not bind drag directly to WorldMapFrame.TitleCanvasSpacerFrame")
+    require_contains(text, 'if key == "EncounterJournal" then', "mover special-cases encounter journal drag handling")
+    require_contains(text, 'mode = HIT_TITLEBAR', "mover forces encounter journal back to titlebar drag mode")
 
 
 def validate_tooltip_anchor_regressions() -> None:
@@ -356,6 +391,28 @@ def validate_minimap_button_regressions() -> None:
     require_contains(text, "local rightOrder = tonumber(rightDef and rightDef.order) or 100", "minimap flyout order sort right")
     require_contains(text, "if leftOrder ~= rightOrder then", "minimap flyout order priority compare")
     require_contains(text, "return leftId < rightId", "minimap flyout order tie-break by id")
+    for removed_needle, removed_label in [
+        ("getButtonShape()", "minimap button shape helper"),
+        ("getFlyoutExpand()", "minimap flyout expand helper"),
+        ("previewWrap", "minimap preview wrapper"),
+        ("previewLauncher", "minimap preview launcher"),
+        ("previewFlyout", "minimap preview flyout"),
+        ("flyoutPool", "minimap flyout pool"),
+        ("flyoutDropBar", "minimap flyout drop bar"),
+        ("flyoutAddAllBtn", "minimap flyout add-all button"),
+        ("shapeRound", "minimap round shape checkbox"),
+        ("shapeSquare", "minimap square shape checkbox"),
+        ("expandV", "minimap vertical expand checkbox"),
+        ("expandH", "minimap horizontal expand checkbox"),
+        ("MINIMAP_PREVIEW_", "minimap preview locale usage"),
+        ("MINIMAP_FLYOUT_EXPAND_", "minimap expand locale usage"),
+        ("MINIMAP_SHAPE_", "minimap shape locale usage"),
+        ("MINIMAP_FLYOUT_POOL_HINT", "minimap flyout pool hint locale usage"),
+        ("MINIMAP_FLYOUT_DROP_HERE", "minimap flyout drop bar locale usage"),
+        ("MINIMAP_FLYOUT_ADD_ALL", "minimap flyout add-all locale usage"),
+    ]:
+        if removed_needle in text:
+            raise AssertionError(f"{removed_label} should be removed from MinimapButton")
 
 
 def validate_adventure_journal_tooltip_lockout_feature() -> None:

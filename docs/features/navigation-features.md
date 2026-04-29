@@ -11,7 +11,7 @@
   - `docs/plans/navigation-plan.md`
   - `docs/tests/navigation-test.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-29（V2 public_portal 方案确认）
+- 最后更新：2026-04-29（实现/导出对齐，补充当前覆盖边界）
 
 ## 1. 定位
 
@@ -29,21 +29,21 @@
 - 点击“规划路线”会读取当前用户 waypoint 的 `uiMapID` 与归一化坐标。
 - 路径规划只消费 DataContracts 契约导出的导航数据；当前角色快照至少包含 `Class / Faction / KnownSpellIDs / KnownTaxiNodeIDs / HearthBindNodeID`。
 - 顶部路径条 `ToolboxNavigationRouteBar` 会在屏幕顶部中间显示总步数与逐段路线。
-- 当前静态数据分两层：
+- 当前静态数据按职责分成多份导出表：
   - `Toolbox.Data.NavigationMapNodes`：由 `DataContracts/navigation_map_nodes.json` 通过正式导出脚本生成的 UiMap 基础节点。
   - `Toolbox.Data.NavigationMapAssignments`：由 `DataContracts/navigation_map_assignments.json` 从 `uimapassignment` 导出的世界坐标覆盖范围。
   - `Toolbox.Data.NavigationInstanceEntrances`：由 `DataContracts/navigation_instance_entrances.json` 从 `journalinstanceentrance` 等表导出的副本入口外部目标。
   - `Toolbox.Data.NavigationTaxiEdges`：由 `DataContracts/navigation_taxi_edges.json` 从 `wow.db` 的 `TaxiNodes / TaxiPath / TaxiPathNode` 导出的 Taxi 来源侧数据。
-  - `Toolbox.Data.NavigationRouteEdges`：由 `DataContracts/navigation_route_edges.json` 统一导出的运行时静态路线骨架；当前只保留 `map_anchor + taxi` 节点与 `taxi` 静态边。
+  - `Toolbox.Data.NavigationRouteEdges`：由 `DataContracts/navigation_route_edges.json` 统一导出的运行时静态路线骨架；当前包含已闭合的 `taxi / transport / public_portal` 公共边，以及对应运行时节点。
   - `Toolbox.Data.NavigationAbilityTemplates`：由 `DataContracts/navigation_ability_templates.json` 导出的能力模板；当前覆盖 `hearthstone` 与可静态解析目标的职业旅行法术。
-- 当前 V1 运行时主闭环为：
+- 当前运行时已支持：
   - `walk_local`
   - `taxi`
+  - `transport`
+  - `public_portal`
   - `hearthstone`
   - `class_teleport`
   - `class_portal`
-- V2 已新增：
-  - `transport`（飞艇/船）
 
 ## 4. 入口与使用方式
 
@@ -62,10 +62,11 @@
 
 - 第一版不做账号其他角色能力推断，只看当前角色。
 - 第一版不实现真实地形寻路、避障或逐米移动路线。
-- `public_portal / areatrigger / 全世界 walk component` 仍未闭合，不进入 V1 运行时图。
-- `transport` 已闭合（V2 第一批）。
+- `public_portal` 已进入运行时图，但世界覆盖仍未闭合；“节点存在”不等于“这条世界路线已经静态可证明”。
+- `areatrigger / 全世界 walk component` 仍未闭合，不进入实际可达路径。
 - 无法仅靠静态导出稳定解析目标的职业/剧情传送法术，当前不会进入 `NavigationAbilityTemplates`。
 - 当前不拦截世界地图原生点击；目标坐标由“鼠标指向 + 点击规划按钮”确定。
+- 当前 `银月城 -> 东瘟疫之地` 仍会返回 `NAVIGATION_ERR_NO_ROUTE`；这表示导出图尚未闭合该路线，不表示系统已经静态证明“游戏内绝对不可达”。
 
 ## 7. 关联文档
 
@@ -88,3 +89,4 @@
 | 2026-04-29 | V1 基线重定义：路线按当前角色配置和最少路径步数计算，接入 `NavigationAbilityTemplates.lua`、已开航点过滤与炉石绑定点解析 |
 | 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，导出脚本新增 transport 节点检测，`mode = "transport"` 边加入运行时路线图 |
 | 2026-04-29 | V2 推进：`public_portal` 方案确认，进入实施 |
+| 2026-04-29 | 文档同步：对齐当前实现，明确 `public_portal` 已参与运行时求解，并补充 `银月城 -> 东瘟疫之地` 的导出边界样例 |

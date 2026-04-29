@@ -671,86 +671,6 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
   return availabilityContext
 end
 
---- 计算中转落点到目标点的终段成本。
----@param viaNodeDef table 候选中转点定义
----@param target table 地图目标
----@return number
-local function buildTerminalTravelCost(viaNodeDef, target)
-  local arrivalMapID = tonumber(viaNodeDef and (viaNodeDef.arrivalUiMapID or target and target.uiMapID)) -- 中转落点地图 ID
-  local targetMapID = tonumber(target and target.uiMapID) -- 目标地图 ID
-  if not arrivalMapID or not targetMapID or arrivalMapID ~= targetMapID then
-    return 0
-  end
-  local arrivalX = tonumber(viaNodeDef and viaNodeDef.arrivalX) -- 中转落点 X
-  local arrivalY = tonumber(viaNodeDef and viaNodeDef.arrivalY) -- 中转落点 Y
-  local targetX = tonumber(target and target.x) -- 目标 X
-  local targetY = tonumber(target and target.y) -- 目标 Y
-  local travelCost = estimateInMapTravelCost(arrivalMapID, arrivalX, arrivalY, targetX, targetY) -- 终段移动成本
-  return tonumber(travelCost) or 0
-end
-
---- 为目标规则添加一个候选中转点到目标的连接边。
----@param routeGraph table 正在构建的路径图
----@param viaNodeDef table 候选中转点定义
----@param target table 地图目标
----@param targetNodeId string 目标节点 ID
----@param targetName string 目标显示名
-local function addTargetViaNodeEdge(routeGraph, viaNodeDef, target, targetNodeId, targetName)
-  local viaNodeId = type(viaNodeDef) == "table" and viaNodeDef.node or nil -- 中转节点 ID
-  if not viaNodeId or not routeGraph.nodes[viaNodeId] then
-    return
-  end
-  local baseCost = tonumber(viaNodeDef.cost) or 0 -- 中转规则固定成本
-  local terminalCost = buildTerminalTravelCost(viaNodeDef, target) -- 中转落点到目标点的终段成本
-
-  routeGraph.edges[#routeGraph.edges + 1] = {
-    from = viaNodeId,
-    to = targetNodeId,
-    cost = baseCost + terminalCost,
-    stepCost = 1,
-    label = viaNodeDef.label or ("前往" .. targetName),
-    mode = viaNodeDef.mode or WALK_LOCAL_MODE,
-    traversedUiMapIDs = copyArray(viaNodeDef.traversedUiMapIDs or viaNodeDef.TraversedUiMapIDs or { target.uiMapID }),
-    traversedUiMapNames = copyArray(viaNodeDef.traversedUiMapNames or viaNodeDef.TraversedUiMapNames or { targetName }),
-  }
-end
-
---- 将世界坐标转换为指定 UiMap 的归一化坐标。
----@param worldMapID number|nil 世界坐标所属 MapID
----@param worldX number|nil 世界坐标 X
----@param worldY number|nil 世界坐标 Y
----@param hintUiMapID number|nil 目标 UiMap 提示
----@return number|nil, number|nil
-local function convertWorldPositionToUiMapPosition(worldMapID, worldX, worldY, hintUiMapID)
-  if not tonumber(worldMapID) or tonumber(worldMapID) <= 0 or type(CreateVector2D) ~= "function" then
-    return nil, nil
-  end
-  local mapApi = type(C_Map) == "table" and C_Map or nil -- 地图 API 表
-  local getMapPosFromWorldPos = mapApi and mapApi.GetMapPosFromWorldPos or nil -- 世界坐标转地图坐标
-  if type(getMapPosFromWorldPos) ~= "function" then
-    return nil, nil
-  end
-
-  local vectorSuccess, worldPosition = pcall(CreateVector2D, worldX, worldY) -- 世界坐标向量
-  if not vectorSuccess or not worldPosition then
-    return nil, nil
-  end
-
-  local convertSuccess = false -- 坐标转换是否成功
-  local targetUiMapID = nil -- 转换得到的地图 ID
-  local targetPosition = nil -- 转换得到的归一化坐标
-  if tonumber(hintUiMapID) and tonumber(hintUiMapID) > 0 then
-    convertSuccess, targetUiMapID, targetPosition = pcall(getMapPosFromWorldPos, worldMapID, worldPosition, hintUiMapID)
-  else
-    convertSuccess, targetUiMapID, targetPosition = pcall(getMapPosFromWorldPos, worldMapID, worldPosition)
-  end
-  if not convertSuccess or not tonumber(targetUiMapID) or tonumber(targetUiMapID) <= 0 or not targetPosition then
-    return nil, nil
-  end
-
-  return readVectorXY(targetPosition)
-end
-
 --- 生成最终目标坐标点的步骤文案。
 ---@param target table 地图目标
 ---@param targetName string 目标显示名
@@ -926,31 +846,11 @@ local function resolveConcreteTarget(target)
   return resolvedTarget
 end
 
---- 为含 portal 点位的路线边补充地图坐标文案。
+--- 读取路线边文案。
 ---@param edge table|nil 路线边
 ---@return string|nil
 local function buildRouteEdgeLabel(edge)
-  local baseLabel = type(edge) == "table" and edge.label or nil -- 原始步骤文案
-  if type(baseLabel) ~= "string" or baseLabel == "" then
-    return baseLabel
-  end
-  if edge.mode ~= "WAYPOINT_LINK" then
-    return baseLabel
-  end
-
-  local portalWorldMapID = tonumber(edge.portalWorldMapID) -- portal 世界坐标 MapID
-  local portalWorldX = tonumber(edge.portalWorldX) -- portal 世界坐标 X
-  local portalWorldY = tonumber(edge.portalWorldY) -- portal 世界坐标 Y
-  local fromUiMapID = tonumber(edge.fromUiMapID) -- 边起点 UiMapID
-  local fromX, fromY = convertWorldPositionToUiMapPosition(portalWorldMapID, portalWorldX, portalWorldY, fromUiMapID) -- portal 在起点地图上的归一化坐标
-  if not isNormalizedPosition(fromX, fromY) then
-    return baseLabel
-  end
-
-  local routeGraphNode = Toolbox.Data and Toolbox.Data.NavigationMapNodes and Toolbox.Data.NavigationMapNodes.nodes or {} -- 地图基础节点
-  local fromNode = routeGraphNode[fromUiMapID] -- 起点地图定义
-  local fromName = tostring((fromNode and fromNode.Name_lang) or ("Map #" .. tostring(fromUiMapID))) -- 起点地图显示名
-  return string.format("%s %.1f, %.1f；%s", fromName, fromX * 100, fromY * 100, baseLabel)
+  return type(edge) == "table" and edge.label or nil
 end
 
 --- 向路径图写入一组节点定义。
@@ -1158,9 +1058,8 @@ end
 --- 计算当前位置直接前往目标点的成本。
 ---@param target table 地图目标
 ---@param availabilityContext table|nil 当前角色可用性快照
----@param targetRule table 目标规则
 ---@return number
-local function buildDirectTargetCost(target, availabilityContext, targetRule)
+local function buildDirectTargetCost(target, availabilityContext)
   local targetMapID = tonumber(target and target.uiMapID) -- 目标地图 ID
   local currentMapID = tonumber(availabilityContext and availabilityContext.currentUiMapID) -- 当前地图 ID
   local currentX = tonumber(availabilityContext and availabilityContext.currentX) -- 当前 X
@@ -1173,7 +1072,7 @@ local function buildDirectTargetCost(target, availabilityContext, targetRule)
       return travelCost
     end
   end
-  return tonumber(targetRule and targetRule.directCost) or 180
+  return 180
 end
 
 --- 构建第一版地图目标路径图。
@@ -1184,8 +1083,6 @@ local function buildMapTargetRouteGraph(target, availabilityContext)
   local targetMapID = tonumber(target and target.uiMapID) or 0 -- 目标地图 ID
   local mapNodes = Toolbox.Data and Toolbox.Data.NavigationMapNodes and Toolbox.Data.NavigationMapNodes.nodes or {} -- 地图基础节点
   local routeEdgeData = Toolbox.Data and Toolbox.Data.NavigationRouteEdges or {} -- 契约导出的统一路线边数据
-  local targetRules = type(routeEdgeData.targetRules) == "table" and routeEdgeData.targetRules or {} -- 契约导出的目标规则表
-  local targetRule = targetRules[targetMapID] or {} -- 当前目标规则
   local targetNodeId = "target" -- 目标节点 ID
   local targetMapNodeId = "uimap_" .. tostring(targetMapID) -- 目标 UiMap 节点 ID
   local targetNode = mapNodes[targetMapID] -- 目标地图节点
@@ -1216,17 +1113,13 @@ local function buildMapTargetRouteGraph(target, availabilityContext)
     routeGraph.edges[#routeGraph.edges + 1] = {
       from = targetMapNodeId,
       to = targetNodeId,
-      cost = buildDirectTargetCost(target, { currentUiMapID = targetMapID }, targetRule),
+      cost = buildDirectTargetCost(target, { currentUiMapID = targetMapID }),
       stepCost = 1,
       label = targetPointLabel,
       mode = WALK_LOCAL_MODE,
       traversedUiMapIDs = { targetMapID },
       traversedUiMapNames = { targetName },
     }
-  end
-
-  for _, viaNodeDef in ipairs(type(targetRule.viaNodes) == "table" and targetRule.viaNodes or {}) do
-    addTargetViaNodeEdge(routeGraph, viaNodeDef, target, targetNodeId, targetName)
   end
 
   return routeGraph

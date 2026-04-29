@@ -1768,6 +1768,7 @@ def enrich_navigation_route_datasets(
                 "edge_label": str(taxi_edge_row.get("edge_label") or ""),
                 "traversed_ui_map_ids": list(taxi_edge_row.get("traversed_ui_map_ids") or []),
                 "traversed_ui_map_names": list(taxi_edge_row.get("traversed_ui_map_names") or []),
+                "requirements_faction": None,
             }
         )
 
@@ -1809,6 +1810,7 @@ def enrich_navigation_route_datasets(
                 "edge_label": str(trigger_edge_row.get("edge_label") or ""),
                 "traversed_ui_map_ids": list(trigger_edge_row.get("traversed_ui_map_ids") or []),
                 "traversed_ui_map_names": list(trigger_edge_row.get("traversed_ui_map_names") or []),
+                "requirements_faction": None,
             }
         )
 

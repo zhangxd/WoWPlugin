@@ -1,6 +1,6 @@
 ﻿--[[
   模块 minimap_button：小地图上的圆形按钮（暴雪小地图图标用底图 + 边框 + 图标圆形遮罩，与 LibDBIcon 视觉一致），点击打开 Toolbox 设置总览。
-  悬停时在按钮左侧展开纵向操作列（RegisterFlyoutEntry 注册项；启动后 RegisterBuiltinFlyoutCatalog 会登记各模块设置、冒险手册、关于等，设置页可拖入或「全部加入」）。
+  悬停时在按钮左侧展开横向操作列（RegisterFlyoutEntry 注册项；启动后 RegisterBuiltinFlyoutCatalog 会登记各模块设置、冒险手册、关于等，设置页通过勾选决定是否加入菜单）。
   位置算法与拖动命中与 LibDBIcon-1.0 同类：角度（度）+ 沿小地图形状约束。
   生命周期：MinimapCluster OnShow；可见性由模块启用与「显示小地图按钮」决定。
 ]]
@@ -24,13 +24,10 @@ local flyoutFrame
 --- 透明命中层：填补主按钮左缘与展开区右缘之间的缝，使光标移入子按钮时不会先被判定为离开。
 local flyoutBridge
 local flyoutHideHandle
---- 悬停菜单项（显示顺序）；由 syncFlyoutRegistryFromDb 根据 flyoutSlotIds 从 flyoutCatalog 填充。
+--- 悬停菜单项（按 flyoutCatalog.order 固定排序）；由 syncFlyoutRegistryFromDb 根据 flyoutSlotIds 勾选结果填充。
 local flyoutRegistry = {}
 --- 已注册的悬停项模板 id → 定义（供 flyoutSlotIds 引用）。
 local flyoutCatalog = {}
---- 方形按钮用：遮罩用全白纹理等效于不裁切圆（避免圆形 SetMask 残留）。
-local TEX_MASK_SQUARE_PASS = "Interface\\Buttons\\WHITE8X8"
-
 --- 按钮中心相对小地图「理论圆/方」半径外推像素，与 LibDBIcon lib.radius 一致。
 local MINIMAP_ICON_RADIUS_EXTRA = 5
 
@@ -41,14 +38,6 @@ local MINIMAP_COORDS_ANCHOR_BOTTOM = "bottom"
 local COORDS_UPDATE_INTERVAL_SEC = 0.1
 
 local rad, cos, sin, sqrt, max, min, deg, atan2 = math.rad, math.cos, math.sin, math.sqrt, math.max, math.min, math.deg, math.atan2
-
---- 去掉首尾空白，避免设置框 GetText 带空格时 tonumber 失败而回退默认间距。
-local function strtrim(s)
-  if not s then
-    return ""
-  end
-  return (tostring(s):gsub("^%s*(.-)%s*$", "%1"))
-end
 
 --- GetMinimapShape 四象限是否按椭圆弧处理（与 LibDBIcon minimapShapes 一致）。
 local minimapShapes = {
@@ -421,64 +410,67 @@ local function refreshCoordinateDisplays()
   updateWorldMapCoordsText()
 end
 
---- 与主按钮同 31×31。横向贴靠距离 flyoutLauncherGap；竖直间距 flyoutPad / flyoutGap（设置页可改，重建时读取）。
-local FLYOUT_ROUND_SIZE = 31
---- 存档缺省或非法时的回退（与 DB.lua defaults 一致）
-local DEFAULT_FLYOUT_PAD = 4
-local DEFAULT_FLYOUT_GAP = 0
---- 展开区贴微缩按钮一侧的横向缝（原硬编码 -4；现由 flyoutLauncherGap 存档驱动）
-local DEFAULT_FLYOUT_LAUNCHER_GAP = 0
-
---- 从存档读非负整数；键为 nil 时用 default；0 为合法值（勿用 `not n` 判断）。
----@param raw any
----@param default number
----@param maxV number
----@return number
-local function readStoredUInt(raw, default, maxV)
-  if raw == nil then
-    return default
-  end
-  local n = tonumber(strtrim(tostring(raw)))
-  if n == nil or n < 0 or n > maxV then
-    return default
-  end
-  return math.floor(n + 0.5)
-end
-
----@return number pad
----@return number gap
-local function getFlyoutPadding()
-  local db = Toolbox.Config.GetModule(MODULE_ID)
-  local pad = readStoredUInt(db.flyoutPad, DEFAULT_FLYOUT_PAD, 64)
-  local gap = readStoredUInt(db.flyoutGap, DEFAULT_FLYOUT_GAP, 64)
-  return pad, gap
-end
-
----@return number 展开区右缘与微缩按钮左缘之间的横向像素间距（锚点 SetPoint 使用 -hGap）
-local function getFlyoutLauncherGap()
-  local db = Toolbox.Config.GetModule(MODULE_ID)
-  return readStoredUInt(db.flyoutLauncherGap, DEFAULT_FLYOUT_LAUNCHER_GAP, 32)
-end
-
----@return string "round"|"square"
-local function getButtonShape()
-  local db = Toolbox.Config.GetModule(MODULE_ID)
-  if db.buttonShape == "square" then
-    return "square"
-  end
-  return "round"
-end
-
----@return string "vertical"|"horizontal"
-local function getFlyoutExpand()
-  local db = Toolbox.Config.GetModule(MODULE_ID)
-  if db.flyoutExpand == "horizontal" then
-    return "horizontal"
-  end
-  return "vertical"
-end
+--- 与主按钮同 31×31；悬停菜单固定为横向圆形按钮组。
+local FLYOUT_BUTTON_SIZE = 31
+local FLYOUT_PAD = 4
+local FLYOUT_GAP = 0
+local FLYOUT_LAUNCHER_GAP = 0
 --- 略加长，配合桥接层；仍依赖桥接消除主按钮与面板之间的死区。
 local FLYOUT_HIDE_DELAY_SEC = 0.35
+
+--- 返回按 order / id 固定排序后的悬停菜单模板 id 列表。
+---@return table
+local function getSortedFlyoutEntryIds()
+  local entryIdList = {} -- 已排序的悬停菜单模板 id 列表
+  for entryId in pairs(flyoutCatalog) do
+    entryIdList[#entryIdList + 1] = entryId
+  end
+  table.sort(entryIdList, function(leftId, rightId)
+    local leftDef = flyoutCatalog[leftId] -- 左侧模板定义
+    local rightDef = flyoutCatalog[rightId] -- 右侧模板定义
+    local leftOrder = tonumber(leftDef and leftDef.order) or 100 -- 左侧排序值
+    local rightOrder = tonumber(rightDef and rightDef.order) or 100 -- 右侧排序值
+    if leftOrder ~= rightOrder then
+      return leftOrder < rightOrder
+    end
+    return leftId < rightId
+  end)
+  return entryIdList
+end
+
+--- 检查指定悬停菜单 id 是否已在勾选列表中。
+---@param entryIdList table 已勾选 id 列表
+---@param targetId string 目标 id
+---@return boolean
+local function hasFlyoutEntryId(entryIdList, targetId)
+  for _, entryId in ipairs(entryIdList) do
+    if entryId == targetId then
+      return true
+    end
+  end
+  return false
+end
+
+--- 从勾选列表中移除指定悬停菜单 id。
+---@param entryIdList table 已勾选 id 列表
+---@param targetId string 目标 id
+local function removeFlyoutEntryId(entryIdList, targetId)
+  for index = #entryIdList, 1, -1 do
+    if entryIdList[index] == targetId then
+      table.remove(entryIdList, index)
+    end
+  end
+end
+
+--- 确保模块存档中的悬停菜单勾选列表可用。
+---@param moduleDb table 小地图按钮模块存档
+---@return table
+local function ensureFlyoutSlotIds(moduleDb)
+  if type(moduleDb.flyoutSlotIds) ~= "table" then
+    moduleDb.flyoutSlotIds = { "reload_ui", "tb_flyout_quest" }
+  end
+  return moduleDb.flyoutSlotIds
+end
 
 --- 取消悬停面板的延迟隐藏计时器。
 local function cancelFlyoutHideTimer()
@@ -496,7 +488,7 @@ local function hideFlyoutPanel()
   end
 end
 
---- 离开主按钮/面板后短延迟再隐藏，便于光标移入纵向菜单。
+--- 离开主按钮/面板后短延迟再隐藏，便于光标移入横向菜单。
 local function scheduleFlyoutHide()
   cancelFlyoutHideTimer()
   flyoutHideHandle = C_Timer.NewTimer(FLYOUT_HIDE_DELAY_SEC, function()
@@ -522,105 +514,56 @@ local function applyCircularIconMask(tex)
   return false
 end
 
---- 去掉图标层 mask（方形 / 圆形款式切换时复用同一 Texture；带 mask 时 Retail 禁止 SetTexCoord，会报错并中断 Refresh）。
----@param tex Texture|nil
-local function clearIconMask(tex)
-  if not tex then
-    return
-  end
-  pcall(function()
-    tex:SetMask(nil)
-  end)
-end
-
---- 悬停子按钮：款式与主按钮一致（圆形 / 方形）。
+--- 悬停子按钮：固定使用圆形按钮样式。
 ---@param parent Frame
 ---@param def table
 ---@param L table
----@param shape string round|square
 ---@return Button
-local function createFlyoutItemButton(parent, def, L, shape)
-  local btn
-  if shape == "square" then
-    btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    btn:SetSize(FLYOUT_ROUND_SIZE, FLYOUT_ROUND_SIZE)
-    btn:SetBackdrop({
-      bgFile = "Interface\\Buttons\\WHITE8X8",
-      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-      tile = true,
-      tileSize = 8,
-      edgeSize = 10,
-      insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    btn:SetBackdropColor(0.12, 0.12, 0.14, 0.95)
-    btn:SetBackdropBorderColor(0.45, 0.45, 0.5, 1)
-    if type(def.icon) == "string" and def.icon ~= "" then
-      local icon = btn:CreateTexture(nil, "ARTWORK")
-      icon:SetTexture(def.icon)
-      icon:SetSize(20, 20)
-      icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
-      icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-      pcall(function()
-        icon:SetMask(TEX_MASK_SQUARE_PASS)
-      end)
-    else
-      local txt = (def.titleKey and (L[def.titleKey] or def.titleKey)) or def.title or "?"
-      local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-      fs:SetPoint("CENTER", 0, 0)
-      fs:SetWidth(26)
-      fs:SetMaxLines(2)
-      fs:SetText(txt)
-      fs:SetJustifyH("CENTER")
+local function createFlyoutItemButton(parent, def, L)
+  local btn = CreateFrame("Button", nil, parent) -- 悬停菜单圆形按钮
+  btn:SetSize(FLYOUT_BUTTON_SIZE, FLYOUT_BUTTON_SIZE)
+  local bg = btn:CreateTexture(nil, "BACKGROUND") -- 按钮底图
+  bg:SetTexture(TEX_MINIMAP_BG)
+  bg:SetSize(24, 24)
+  bg:SetPoint("CENTER", btn, "CENTER", 0, 0)
+  local border = btn:CreateTexture(nil, "OVERLAY") -- 按钮边框
+  border:SetTexture(TEX_MINIMAP_BORDER)
+  border:SetSize(50, 50)
+  border:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
+  if type(def.icon) == "string" and def.icon ~= "" then
+    local icon = btn:CreateTexture(nil, "ARTWORK") -- 功能图标
+    icon:SetTexture(def.icon)
+    icon:SetSize(18, 18)
+    icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    if not applyCircularIconMask(icon) then
+      icon:SetTexCoord(0.1, 0.9, 0.1, 0.9)
     end
-    btn:SetHighlightTexture("Interface\\Buttons\\UI-Quickslot-Depress")
   else
-    btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(FLYOUT_ROUND_SIZE, FLYOUT_ROUND_SIZE)
-    local bg = btn:CreateTexture(nil, "BACKGROUND")
-    bg:SetTexture(TEX_MINIMAP_BG)
-    bg:SetSize(24, 24)
-    bg:SetPoint("CENTER", btn, "CENTER", 0, 0)
-    local border = btn:CreateTexture(nil, "OVERLAY")
-    border:SetTexture(TEX_MINIMAP_BORDER)
-    border:SetSize(50, 50)
-    border:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
-    if type(def.icon) == "string" and def.icon ~= "" then
-      local icon = btn:CreateTexture(nil, "ARTWORK")
-      icon:SetTexture(def.icon)
-      icon:SetSize(18, 18)
-      icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
-      icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-      if not applyCircularIconMask(icon) then
-        icon:SetTexCoord(0.1, 0.9, 0.1, 0.9)
-      end
-    else
-      local txt = (def.titleKey and (L[def.titleKey] or def.titleKey)) or def.title or "?"
-      local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-      fs:SetPoint("CENTER", 0, 0)
-      fs:SetWidth(26)
-      fs:SetMaxLines(2)
-      fs:SetText(txt)
-      fs:SetJustifyH("CENTER")
-    end
-    btn:SetHighlightTexture(TEX_MINIMAP_HI)
-    local hi = btn:GetHighlightTexture()
-    if hi then
-      hi:SetBlendMode("ADD")
-    end
+    local labelText = (def.titleKey and (L[def.titleKey] or def.titleKey)) or def.title or "?" -- 无图标时的文本
+    local fontString = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall") -- 无图标时的文本节点
+    fontString:SetPoint("CENTER", 0, 0)
+    fontString:SetWidth(26)
+    fontString:SetMaxLines(2)
+    fontString:SetText(labelText)
+    fontString:SetJustifyH("CENTER")
+  end
+  btn:SetHighlightTexture(TEX_MINIMAP_HI)
+  local highlightTexture = btn:GetHighlightTexture() -- 高亮纹理
+  if highlightTexture then
+    highlightTexture:SetBlendMode("ADD")
   end
   btn:RegisterForClicks("LeftButtonUp")
   return btn
 end
 
---- 桥接层与展开区锚点：主按钮与展开区之间留窄缝，由透明桥接层接收鼠标，避免光标经过缝时触发主按钮 OnLeave 后无法进入展开区。
+--- 桥接层与展开区锚点：主按钮与展开区之间留窄缝，由透明桥接层接收鼠标。
 local function layoutFlyoutAndBridge()
   if not flyoutFrame or not launcher then
     return
   end
-  local hGap = getFlyoutLauncherGap()
   flyoutFrame:ClearAllPoints()
-  flyoutFrame:SetPoint("RIGHT", launcher, "LEFT", -hGap, 0)
-  flyoutFrame._toolbox_appliedLauncherGap = hGap
+  flyoutFrame:SetPoint("RIGHT", launcher, "LEFT", -FLYOUT_LAUNCHER_GAP, 0)
   if flyoutBridge then
     flyoutBridge:ClearAllPoints()
     flyoutBridge:SetPoint("LEFT", flyoutFrame, "RIGHT", 0, 0)
@@ -673,189 +616,105 @@ local function showFlyoutButtonTooltip(owner, def, L)
   GameTooltip:Show()
 end
 
---- 根据 flyoutRegistry 重建悬停面板内按钮（仅当 flyoutFrame 已创建）。
---- 第 i 项：TOPLEFT 相对 flyoutFrame 的 Y 偏移为 -(pad + (i-1)*(FLYOUT_ROUND_SIZE+gap))；pad/gap 来自 getFlyoutPadding()。
+--- 根据 flyoutRegistry 重建悬停面板内按钮（固定为横向圆形菜单）。
 local function rebuildFlyoutButtons()
   if not flyoutFrame then
     return
   end
-  local pad, gap = getFlyoutPadding()
-  local oldBtns = flyoutFrame._buttons or {}
-  for _, b in ipairs(oldBtns) do
-    b:Hide()
-    b:SetParent(nil)
+  local oldButtonList = flyoutFrame._buttons or {} -- 旧按钮列表
+  for _, buttonFrame in ipairs(oldButtonList) do
+    buttonFrame:Hide()
+    buttonFrame:SetParent(nil)
   end
   flyoutFrame._buttons = {}
-  local n = #flyoutRegistry
-  local expand = getFlyoutExpand()
-  if n == 0 then
-    flyoutFrame:SetWidth(FLYOUT_ROUND_SIZE + pad * 2)
-    flyoutFrame:SetHeight(pad * 2)
-    flyoutFrame._toolbox_appliedPad = pad
-    flyoutFrame._toolbox_appliedGap = gap
-    flyoutFrame._toolbox_appliedN = 0
-    flyoutFrame._toolbox_appliedButtonShape = getButtonShape()
-    flyoutFrame._toolbox_appliedExpand = expand
+  local buttonCount = #flyoutRegistry -- 当前选中的悬停按钮数量
+  if buttonCount == 0 then
+    flyoutFrame:SetWidth(FLYOUT_PAD * 2)
+    flyoutFrame:SetHeight(FLYOUT_PAD * 2)
     layoutFlyoutAndBridge()
     return
   end
-  local L = Toolbox.L or {}
-  local shape = getButtonShape()
-  local step = FLYOUT_ROUND_SIZE + gap
-  if expand == "horizontal" then
-    -- 横向：首项靠微缩按钮（面板右侧），向左排列。
-    local innerW
-    if n == 1 then
-      innerW = pad + FLYOUT_ROUND_SIZE + gap + pad
-    else
-      innerW = pad + n * FLYOUT_ROUND_SIZE + (n - 1) * gap + pad
-    end
-    local innerH = pad * 2 + FLYOUT_ROUND_SIZE
-    flyoutFrame:SetWidth(innerW)
-    flyoutFrame:SetHeight(innerH)
-    for i = 1, n do
-      local def = flyoutRegistry[i]
-      local btn = createFlyoutItemButton(flyoutFrame, def, L, shape)
-      btn:ClearAllPoints()
-      btn:SetPoint("TOPRIGHT", flyoutFrame, "TOPRIGHT", -(pad + (i - 1) * step), -pad)
-      btn:SetScript("OnClick", function()
-        if def.onClick then
-          pcall(def.onClick, btn)
-        end
-        hideFlyoutPanel()
-      end)
-      btn:SetScript("OnEnter", function(self)
-        cancelFlyoutHideTimer()
-        showFlyoutButtonTooltip(self, def, L)
-      end)
-      btn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-      end)
-      flyoutFrame._buttons[#flyoutFrame._buttons + 1] = btn
-    end
-  else
-    -- n==1 时 (n-1)*gap 为 0；将 gap 作为单项下方额外留白。
-    local innerH
-    if n == 1 then
-      innerH = pad + FLYOUT_ROUND_SIZE + gap + pad
-    else
-      innerH = pad + n * FLYOUT_ROUND_SIZE + (n - 1) * gap + pad
-    end
-    local flyoutW = pad * 2 + FLYOUT_ROUND_SIZE
-    flyoutFrame:SetWidth(flyoutW)
-    flyoutFrame:SetHeight(innerH)
-    for i = 1, n do
-      local def = flyoutRegistry[i]
-      local btn = createFlyoutItemButton(flyoutFrame, def, L, shape)
-      local yTop = pad + (i - 1) * step
-      btn:ClearAllPoints()
-      btn:SetPoint("TOPLEFT", flyoutFrame, "TOPLEFT", pad, -yTop)
-      btn:SetScript("OnClick", function()
-        if def.onClick then
-          pcall(def.onClick, btn)
-        end
-        hideFlyoutPanel()
-      end)
-      btn:SetScript("OnEnter", function(self)
-        cancelFlyoutHideTimer()
-        showFlyoutButtonTooltip(self, def, L)
-      end)
-      btn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-      end)
-      flyoutFrame._buttons[#flyoutFrame._buttons + 1] = btn
-    end
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local buttonStep = FLYOUT_BUTTON_SIZE + FLYOUT_GAP -- 横向相邻按钮步长
+  local flyoutWidth = FLYOUT_PAD * 2 + buttonCount * FLYOUT_BUTTON_SIZE + math.max(0, buttonCount - 1) * FLYOUT_GAP -- 展开区总宽
+  local flyoutHeight = FLYOUT_PAD * 2 + FLYOUT_BUTTON_SIZE -- 展开区总高
+  flyoutFrame:SetWidth(flyoutWidth)
+  flyoutFrame:SetHeight(flyoutHeight)
+  for index = 1, buttonCount do
+    local entryDef = flyoutRegistry[index] -- 当前按钮定义
+    local buttonFrame = createFlyoutItemButton(flyoutFrame, entryDef, localeTable) -- 当前按钮
+    buttonFrame:ClearAllPoints()
+    buttonFrame:SetPoint("TOPRIGHT", flyoutFrame, "TOPRIGHT", -(FLYOUT_PAD + (index - 1) * buttonStep), -FLYOUT_PAD)
+    buttonFrame:SetScript("OnClick", function()
+      if entryDef.onClick then
+        pcall(entryDef.onClick, buttonFrame)
+      end
+      hideFlyoutPanel()
+    end)
+    buttonFrame:SetScript("OnEnter", function(self)
+      cancelFlyoutHideTimer()
+      showFlyoutButtonTooltip(self, entryDef, localeTable)
+    end)
+    buttonFrame:SetScript("OnLeave", function()
+      GameTooltip:Hide()
+    end)
+    flyoutFrame._buttons[#flyoutFrame._buttons + 1] = buttonFrame
   end
-  flyoutFrame._toolbox_appliedPad = pad
-  flyoutFrame._toolbox_appliedGap = gap
-  flyoutFrame._toolbox_appliedN = n
-  flyoutFrame._toolbox_appliedButtonShape = shape
-  flyoutFrame._toolbox_appliedExpand = expand
   layoutFlyoutAndBridge()
 end
 
---- 根据存档 flyoutSlotIds 从 flyoutCatalog 填充 flyoutRegistry 并重建展开区。
+--- 根据勾选的 flyoutSlotIds 从 flyoutCatalog 填充 flyoutRegistry 并重建展开区。
 local function syncFlyoutRegistryFromDb()
   wipe(flyoutRegistry)
-  local db = Toolbox.Config.GetModule(MODULE_ID)
-  local ids = db.flyoutSlotIds
-  if type(ids) ~= "table" or #ids == 0 then
-    ids = { "reload_ui" }
-  end
-  local seen = {}
-  for _, id in ipairs(ids) do
-    if type(id) == "string" and id ~= "" and not seen[id] and flyoutCatalog[id] then
-      flyoutRegistry[#flyoutRegistry + 1] = flyoutCatalog[id]
-      seen[id] = true
+  local moduleDb = Toolbox.Config.GetModule(MODULE_ID) -- 小地图按钮模块存档
+  local selectedIdList = ensureFlyoutSlotIds(moduleDb) -- 已勾选 id 列表
+  local selectedMap = {} -- 已勾选 id 查找表
+  for _, entryId in ipairs(selectedIdList) do
+    if type(entryId) == "string" and entryId ~= "" then
+      selectedMap[entryId] = true
     end
   end
-  if #flyoutRegistry == 0 and flyoutCatalog["reload_ui"] then
-    flyoutRegistry[1] = flyoutCatalog["reload_ui"]
+  for _, entryId in ipairs(getSortedFlyoutEntryIds()) do
+    if selectedMap[entryId] and flyoutCatalog[entryId] then
+      flyoutRegistry[#flyoutRegistry + 1] = flyoutCatalog[entryId]
+    end
   end
   rebuildFlyoutButtons()
 end
 
---- 主按钮外观（与预览按钮共用）：须先 createLauncherChrome。
+--- 主按钮外观：固定使用圆形小地图按钮样式。
 local function applyLauncherSkin(button)
   if not button or not button._tb_bg or not button._tb_icon or not button._tb_border then
     return
   end
-  local shape = getButtonShape()
-  local bg, icon, border = button._tb_bg, button._tb_icon, button._tb_border
-  clearIconMask(icon)
-  if shape == "square" then
-    border:Hide()
-    bg:ClearAllPoints()
-    bg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    bg:SetVertexColor(0.14, 0.14, 0.16, 0.96)
-    bg:SetAllPoints(button)
-    icon:ClearAllPoints()
-    icon:SetSize(20, 20)
-    icon:SetPoint("CENTER", button, "CENTER", 0, 0)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    pcall(function()
-      icon:SetMask(TEX_MASK_SQUARE_PASS)
-    end)
-    if button.SetBackdrop then
-      button:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true,
-        tileSize = 8,
-        edgeSize = 12,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-      })
-      button:SetBackdropColor(0.14, 0.14, 0.16, 0.96)
-      button:SetBackdropBorderColor(0.45, 0.45, 0.52, 1)
-    end
-    button:SetHighlightTexture("Interface\\Buttons\\UI-Quickslot-Depress")
-  else
-    if button.ClearBackdrop then
-      button:ClearBackdrop()
-    end
-    border:Show()
-    bg:ClearAllPoints()
-    bg:SetTexture(TEX_MINIMAP_BG)
-    bg:SetVertexColor(1, 1, 1, 1)
-    bg:SetSize(24, 24)
-    bg:SetPoint("CENTER", button, "CENTER", 0, 0)
-    icon:ClearAllPoints()
-    icon:SetTexture("Interface\\Icons\\Trade_Engineering")
-    icon:SetSize(18, 18)
-    icon:SetPoint("CENTER", button, "CENTER", 0, 0)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    if not applyCircularIconMask(icon) then
-      icon:SetTexCoord(0.1, 0.9, 0.1, 0.9)
-    end
-    button:SetHighlightTexture(TEX_MINIMAP_HI)
-    local hi = button:GetHighlightTexture()
-    if hi then
-      hi:SetBlendMode("ADD")
-    end
+  local bg = button._tb_bg -- 主按钮底图
+  local icon = button._tb_icon -- 主按钮图标
+  local border = button._tb_border -- 主按钮边框
+  if button.ClearBackdrop then
+    button:ClearBackdrop()
+  end
+  border:Show()
+  bg:ClearAllPoints()
+  bg:SetTexture(TEX_MINIMAP_BG)
+  bg:SetVertexColor(1, 1, 1, 1)
+  bg:SetSize(24, 24)
+  bg:SetPoint("CENTER", button, "CENTER", 0, 0)
+  icon:ClearAllPoints()
+  icon:SetTexture("Interface\\Icons\\Trade_Engineering")
+  icon:SetSize(18, 18)
+  icon:SetPoint("CENTER", button, "CENTER", 0, 0)
+  icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  if not applyCircularIconMask(icon) then
+    icon:SetTexCoord(0.1, 0.9, 0.1, 0.9)
+  end
+  button:SetHighlightTexture(TEX_MINIMAP_HI)
+  local highlightTexture = button:GetHighlightTexture() -- 主按钮高亮纹理
+  if highlightTexture then
+    highlightTexture:SetBlendMode("ADD")
   end
 end
 
---- 创建主按钮底图 / 图标 / 外圈引用并应用当前款式。
+--- 创建主按钮底图 / 图标 / 外圈引用并应用当前圆形样式。
 ---@param button Button
 local function createLauncherChrome(button)
   local bg = button:CreateTexture(nil, "BACKGROUND")
@@ -904,7 +763,7 @@ local function ensureFlyoutFrame()
   rebuildFlyoutButtons()
 end
 
---- 注册悬停时展开的纵向菜单项模板（其它模块可在加载时调用）；是否出现在菜单中由存档 flyoutSlotIds 决定。
+--- 注册悬停时展开的菜单项模板（其它模块可在加载时调用）；是否出现在菜单中由存档 flyoutSlotIds 决定。
 ---@param entry table id: string 唯一；order: number 可选（仅作同批注册时的排序提示）；icon / titleKey / tooltipKey / onClick 等同前
 function Toolbox.MinimapButton.RegisterFlyoutEntry(entry)
   if type(entry) ~= "table" or type(entry.id) ~= "string" or entry.id == "" then
@@ -935,7 +794,7 @@ local function ensureLauncher()
     return false
   end
   launcher = CreateFrame("Button", "ToolboxMinimapLauncherButton", minimap, "BackdropTemplate")
-  -- 与 LibDBIcon 默认 31x31 一致；圆形款用外圈纹理，方形款用 BackdropTemplate
+  -- 与 LibDBIcon 默认 31x31 一致；固定使用圆形小地图按钮观感
   launcher:SetSize(31, 31)
   launcher:SetFrameStrata("MEDIUM")
   if launcher.SetFixedFrameStrata then
@@ -983,21 +842,7 @@ local function ensureLauncher()
     cancelFlyoutHideTimer()
     ensureFlyoutFrame()
     if flyoutFrame and #flyoutRegistry > 0 then
-      -- 与存档对齐：若上次 Refresh 未执行或同帧被覆盖，此处用当前间距与横向缝强制重建/重锚。
-      local pad, gap = getFlyoutPadding()
-      local lg = getFlyoutLauncherGap()
-      local n = #flyoutRegistry
-      local needRebuild = flyoutFrame._toolbox_appliedPad ~= pad
-        or flyoutFrame._toolbox_appliedGap ~= gap
-        or flyoutFrame._toolbox_appliedN ~= n
-        or flyoutFrame._toolbox_appliedLauncherGap ~= lg
-        or flyoutFrame._toolbox_appliedButtonShape ~= getButtonShape()
-        or flyoutFrame._toolbox_appliedExpand ~= getFlyoutExpand()
-      if needRebuild then
-        rebuildFlyoutButtons()
-      else
-        layoutFlyoutAndBridge()
-      end
+      rebuildFlyoutButtons()
       flyoutFrame:Show()
     end
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
@@ -1100,552 +945,9 @@ Toolbox.RegisterModule({
     Toolbox.MinimapButton.Refresh()
   end,
   RegisterSettings = function(box)
-    local L = Toolbox.L or {}
-    local db = Toolbox.Config.GetModule(MODULE_ID)
-    local y = 0
-    --- 预览刷新：在展开方式/款式等控件之前声明，供回调引用。
-    local updateMinimapPreview
-    --- 预览展开区顶部内边距透明命中条布局（在赋值后由 updateMinimapPreview 调用）。
-    local layoutPreviewPadStrip
-
-    local showBtn = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
-    showBtn:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    showBtn.Text:SetText(L.MINIMAP_BUTTON_SETTING_SHOW or "")
-    showBtn:SetChecked(db.showMinimapButton ~= false)
-    showBtn:SetScript("OnClick", function(self)
-      db.showMinimapButton = self:GetChecked() and true or false
-      Toolbox.MinimapButton.Refresh()
-      Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(MODULE_ID))
-    end)
-    y = y - 36
-
-    local hint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    hint:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    hint:SetWidth(580)
-    hint:SetJustifyH("LEFT")
-    hint:SetText(L.MINIMAP_BUTTON_SETTING_HINT or "")
-    y = y - math.max(40, math.ceil((hint:GetStringHeight() or 0) + 12))
-
-    local showCoordsCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
-    showCoordsCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    showCoordsCheck.Text:SetText(L.MINIMAP_COORDS_SETTING_SHOW or "")
-    showCoordsCheck:SetChecked(db.showCoordsOnMinimap ~= false)
-    showCoordsCheck:SetScript("OnClick", function(self)
-      db.showCoordsOnMinimap = self:GetChecked() == true
-      refreshCoordinateDisplays()
-      Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(MODULE_ID))
-    end)
-    y = y - 30
-
-    local coordsAnchorLabel = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    coordsAnchorLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 28, y)
-    coordsAnchorLabel:SetText(L.MINIMAP_COORDS_SETTING_ANCHOR or "")
-    y = y - 20
-
-    local anchorTopCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
-    anchorTopCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 28, y)
-    anchorTopCheck.Text:SetText(L.MINIMAP_COORDS_SETTING_ANCHOR_TOP or "")
-    local anchorBottomCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
-    anchorBottomCheck:SetPoint("LEFT", anchorTopCheck, "RIGHT", 20, 0)
-    anchorBottomCheck.Text:SetText(L.MINIMAP_COORDS_SETTING_ANCHOR_BOTTOM or "")
-
-    local function syncAnchorChecks()
-      local anchor = getMinimapCoordsAnchor()
-      anchorTopCheck:SetChecked(anchor == MINIMAP_COORDS_ANCHOR_TOP)
-      anchorBottomCheck:SetChecked(anchor == MINIMAP_COORDS_ANCHOR_BOTTOM)
-      local enabled = db.showCoordsOnMinimap ~= false
-      anchorTopCheck:SetEnabled(enabled)
-      anchorBottomCheck:SetEnabled(enabled)
-    end
-    syncAnchorChecks()
-    anchorTopCheck:SetScript("OnClick", function()
-      db.minimapCoordsAnchor = MINIMAP_COORDS_ANCHOR_TOP
-      syncAnchorChecks()
-      refreshCoordinateDisplays()
-    end)
-    anchorBottomCheck:SetScript("OnClick", function()
-      db.minimapCoordsAnchor = MINIMAP_COORDS_ANCHOR_BOTTOM
-      syncAnchorChecks()
-      refreshCoordinateDisplays()
-    end)
-    y = y - 34
-
-    if type(db.flyoutSlotIds) ~= "table" or #db.flyoutSlotIds == 0 then
-      db.flyoutSlotIds = { "reload_ui" }
-    end
-    if db.buttonShape ~= "square" and db.buttonShape ~= "round" then
-      db.buttonShape = "round"
-    end
-    if db.flyoutExpand ~= "horizontal" and db.flyoutExpand ~= "vertical" then
-      db.flyoutExpand = "vertical"
-    end
-
-    y = y - 12
-    local previewSec = box:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    previewSec:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    previewSec:SetText(L.MINIMAP_PREVIEW_SECTION or "Preview")
-    y = y - 22
-
-    local previewDragHint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    previewDragHint:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    previewDragHint:SetWidth(580)
-    previewDragHint:SetJustifyH("LEFT")
-    previewDragHint:SetText(L.MINIMAP_PREVIEW_DRAG_HINT or "")
-    y = y - math.max(22, math.ceil((previewDragHint:GetStringHeight() or 18) + 8))
-
-    local expandLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    expandLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    expandLabel:SetText(L.MINIMAP_FLYOUT_EXPAND_LABEL or "")
-    local expandV = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
-    expandV:SetPoint("TOPLEFT", expandLabel, "BOTTOMLEFT", 0, -6)
-    expandV.Text:SetText(L.MINIMAP_FLYOUT_EXPAND_VERTICAL or "")
-    expandV:SetChecked(db.flyoutExpand ~= "horizontal")
-    local expandH = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
-    expandH:SetPoint("LEFT", expandV, "RIGHT", 24, 0)
-    expandH.Text:SetText(L.MINIMAP_FLYOUT_EXPAND_HORIZONTAL or "")
-    expandH:SetChecked(db.flyoutExpand == "horizontal")
-    local function applyExpandChoice(isHorizontal)
-      db.flyoutExpand = isHorizontal and "horizontal" or "vertical"
-      expandV:SetChecked(not isHorizontal)
-      expandH:SetChecked(isHorizontal)
-      Toolbox.MinimapButton.Refresh()
-      updateMinimapPreview()
-    end
-    expandV:SetScript("OnClick", function()
-      applyExpandChoice(false)
-    end)
-    expandH:SetScript("OnClick", function()
-      applyExpandChoice(true)
-    end)
-    y = y - 52
-
-    local PREVIEW_WRAP_W = 580
-    --- 需容纳纵向多枚展开按钮时的预览高度（间距改为预览内拖动后略增高）。
-    local PREVIEW_WRAP_H = 220
-    local previewWrap = CreateFrame("Frame", nil, box, "BackdropTemplate")
-    previewWrap:SetSize(PREVIEW_WRAP_W, PREVIEW_WRAP_H)
-    previewWrap:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    do
-      -- 仅背景、无描边，避免 ChatFrameBorder 类竖横线
-      local bd = {
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        tile = true,
-        tileSize = 16,
-        edgeSize = 0,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 },
-      }
-      previewWrap:SetBackdrop(bd)
-      previewWrap:SetBackdropColor(0.06, 0.06, 0.08, 0.88)
-    end
-    y = y - PREVIEW_WRAP_H - 14
-
-    local previewLauncher = CreateFrame("Button", nil, previewWrap, "BackdropTemplate")
-    previewLauncher:SetSize(31, 31)
-    createLauncherChrome(previewLauncher)
-    previewLauncher:EnableMouse(true)
-    previewLauncher:RegisterForDrag("LeftButton")
-    previewLauncher:SetScript("OnClick", function() end)
-
-    local previewFlyout = CreateFrame("Frame", nil, previewWrap)
-    previewFlyout:SetFrameStrata("DIALOG")
-    local previewFlyoutBtns = {}
-
-    --- 预览内间距拖动：与存档相同的上下限（像素）。
-    local SPACING_DRAG_LAUNCHER_GAP_MAX = 32
-    local SPACING_DRAG_PAD_MAX = 64
-    local SPACING_DRAG_GAP_MAX = 64
-
-    --- 展开区顶部透明命中层（无可见底色），用于拖动内边距；位于子按钮之上以便在留白区接收拖动。
-    local previewPadHit = CreateFrame("Button", nil, previewFlyout, "BackdropTemplate")
-    previewPadHit:SetFrameStrata("DIALOG")
-    previewPadHit:SetFrameLevel((previewFlyout:GetFrameLevel() or 0) + 18)
-    previewPadHit:EnableMouse(true)
-    previewPadHit:RegisterForDrag("LeftButton")
-    if previewPadHit.SetBackdrop then
-      previewPadHit:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        tile = true,
-        tileSize = 8,
-        edgeSize = 0,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 },
-      })
-      previewPadHit:SetBackdropColor(0, 0, 0, 0)
-    end
-    previewPadHit:Hide()
-
-    --- 主按钮叠在展开区之上，避免与左侧拓展区重叠时抢不到点击。
-    previewLauncher:SetFrameLevel((previewFlyout:GetFrameLevel() or 0) + 10)
-
-    local function pushSpacingToGame()
-      Toolbox.MinimapButton.Refresh()
-      updateMinimapPreview()
-      C_Timer.After(0, function()
-        pcall(function()
-          ensureFlyoutFrame()
-          rebuildFlyoutButtons()
-        end)
-      end)
-    end
-
-    --- 仅同步游戏内展开区，不重建设置页预览（避免拖动中销毁当前拓展按钮导致拖不动）。
-    local function pushSpacingToGameWorldOnly()
-      Toolbox.MinimapButton.Refresh()
-      C_Timer.After(0, function()
-        pcall(function()
-          ensureFlyoutFrame()
-          rebuildFlyoutButtons()
-        end)
-      end)
-    end
-
-    --- 预览拓展子按钮：悬停为功能提示；拖动调整项间距（存档 flyoutGap，多段同变）。
-    local function wirePreviewFlyoutItemGapDrag(btn, def, L)
-      btn:EnableMouse(true)
-      btn:RegisterForDrag("LeftButton")
-      btn:SetScript("OnEnter", function(self)
-        showFlyoutButtonTooltip(self, def, L)
-        local hint = L.MINIMAP_PREVIEW_DRAG_TOOLTIP_ENTRY_GAP
-        if type(hint) == "string" and hint ~= "" then
-          GameTooltip:AddLine(hint, 0.55, 0.78, 0.95, true)
-        end
-        GameTooltip:Show()
-      end)
-      btn:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-      end)
-      btn:SetScript("OnDragStart", function(self)
-        GameTooltip:Hide()
-        self._tb_lastX, self._tb_lastY = GetCursorPosition()
-        self._tb_dragActive = true
-        self._tb_gapAccum = 0
-        self:SetScript("OnUpdate", function(s)
-          if not s._tb_dragActive then
-            return
-          end
-          local x, y = GetCursorPosition()
-          local scale = s:GetEffectiveScale() or 1
-          if scale == 0 then
-            scale = 1
-          end
-          local expandMode = getFlyoutExpand()
-          local dx = (x - s._tb_lastX) / scale
-          local dy = (y - s._tb_lastY) / scale
-          s._tb_lastX, s._tb_lastY = x, y
-          --- 累积子像素位移，避免每帧 floor 为 0 时间距几乎不变。
-          local raw = expandMode == "horizontal" and -dx or -dy
-          s._tb_gapAccum = (s._tb_gapAccum or 0) + raw
-          local delta = 0
-          if s._tb_gapAccum >= 1 then
-            delta = math.floor(s._tb_gapAccum)
-            s._tb_gapAccum = s._tb_gapAccum - delta
-          elseif s._tb_gapAccum <= -1 then
-            delta = math.ceil(s._tb_gapAccum)
-            s._tb_gapAccum = s._tb_gapAccum - delta
-          end
-          if delta == 0 then
-            return
-          end
-          local nv = db.flyoutGap + delta
-          nv = max(0, min(SPACING_DRAG_GAP_MAX, nv))
-          if nv ~= db.flyoutGap then
-            db.flyoutGap = nv
-            pushSpacingToGameWorldOnly()
-          end
-        end)
-      end)
-      btn:SetScript("OnDragStop", function(self)
-        self._tb_dragActive = false
-        self:SetScript("OnUpdate", nil)
-        self._tb_gapAccum = nil
-        --- 松手后再重建预览，与存档对齐并恢复拖动命中。
-        updateMinimapPreview()
-      end)
-    end
-
-    --- 仅布局顶部透明命中条（有展开内容时显示）。
-    layoutPreviewPadStrip = function()
-      if not previewFlyout:IsShown() then
-        previewPadHit:Hide()
-        return
-      end
-      local pad = select(1, getFlyoutPadding())
-      previewPadHit:ClearAllPoints()
-      previewPadHit:SetPoint("TOPLEFT", previewFlyout, "TOPLEFT", 0, 0)
-      previewPadHit:SetPoint("TOPRIGHT", previewFlyout, "TOPRIGHT", 0, 0)
-      previewPadHit:SetHeight(math.max(12, pad + 6))
-      previewPadHit:Show()
-      --- 子按钮为后创建的兄弟节点，Raise 保证顶部留白区仍优先接收拖动。
-      previewPadHit:Raise()
-    end
-
-    updateMinimapPreview = function()
-      applyLauncherSkin(previewLauncher)
-      previewLauncher:ClearAllPoints()
-      previewLauncher:SetPoint("CENTER", previewWrap, "CENTER", 0, 0)
-      for _, b in ipairs(previewFlyoutBtns) do
-        b:Hide()
-        b:SetParent(nil)
-      end
-      wipe(previewFlyoutBtns)
-      local pad, gap = getFlyoutPadding()
-      local hGap = getFlyoutLauncherGap()
-      local shape = getButtonShape()
-      local ids = db.flyoutSlotIds
-      if type(ids) ~= "table" then
-        ids = {}
-      end
-      local n = 0
-      for _, id in ipairs(ids) do
-        if flyoutCatalog[id] then
-          n = n + 1
-        end
-      end
-      if n == 0 then
-        previewFlyout:SetSize(8, 8)
-        previewFlyout:Hide()
-        previewPadHit:Hide()
-        return
-      end
-      previewFlyout:Show()
-      local step = FLYOUT_ROUND_SIZE + gap
-      local expandMode = getFlyoutExpand()
-      previewFlyout:ClearAllPoints()
-      previewFlyout:SetPoint("RIGHT", previewLauncher, "LEFT", -hGap, 0)
-      if expandMode == "horizontal" then
-        local innerW
-        if n == 1 then
-          innerW = pad + FLYOUT_ROUND_SIZE + gap + pad
-        else
-          innerW = pad + n * FLYOUT_ROUND_SIZE + (n - 1) * gap + pad
-        end
-        local innerH = pad * 2 + FLYOUT_ROUND_SIZE
-        previewFlyout:SetSize(innerW, innerH)
-        local idx = 0
-        for _, id in ipairs(ids) do
-          local def = flyoutCatalog[id]
-          if def then
-            idx = idx + 1
-            local btn = createFlyoutItemButton(previewFlyout, def, L, shape)
-            btn:SetPoint("TOPRIGHT", previewFlyout, "TOPRIGHT", -(pad + (idx - 1) * step), -pad)
-            wirePreviewFlyoutItemGapDrag(btn, def, L)
-            previewFlyoutBtns[#previewFlyoutBtns + 1] = btn
-          end
-        end
-      else
-        local innerH
-        if n == 1 then
-          innerH = pad + FLYOUT_ROUND_SIZE + gap + pad
-        else
-          innerH = pad + n * FLYOUT_ROUND_SIZE + (n - 1) * gap + pad
-        end
-        local flyoutW = pad * 2 + FLYOUT_ROUND_SIZE
-        previewFlyout:SetSize(flyoutW, innerH)
-        local idx = 0
-        for _, id in ipairs(ids) do
-          local def = flyoutCatalog[id]
-          if def then
-            idx = idx + 1
-            local btn = createFlyoutItemButton(previewFlyout, def, L, shape)
-            btn:SetPoint("TOPLEFT", previewFlyout, "TOPLEFT", pad, -(pad + (idx - 1) * step))
-            wirePreviewFlyoutItemGapDrag(btn, def, L)
-            previewFlyoutBtns[#previewFlyoutBtns + 1] = btn
-          end
-        end
-      end
-      layoutPreviewPadStrip()
-    end
-
-    --- 微缩主按钮：左右拖动调整与展开区的缝宽（预览不再改小地图角度）。
-    previewLauncher:SetScript("OnDragStart", function(self)
-      GameTooltip:Hide()
-      self._tb_lastX, self._tb_lastY = GetCursorPosition()
-      self._tb_dragActive = true
-      self:SetScript("OnUpdate", function(s)
-        if not s._tb_dragActive then
-          return
-        end
-        local x, y = GetCursorPosition()
-        local scale = s:GetEffectiveScale() or 1
-        if scale == 0 then
-          scale = 1
-        end
-        local dx = (x - s._tb_lastX) / scale
-        s._tb_lastX, s._tb_lastY = x, y
-        local delta = -math.floor(dx + 0.5)
-        if delta == 0 then
-          return
-        end
-        local nv = db.flyoutLauncherGap + delta
-        nv = max(0, min(SPACING_DRAG_LAUNCHER_GAP_MAX, nv))
-        if nv ~= db.flyoutLauncherGap then
-          db.flyoutLauncherGap = nv
-          pushSpacingToGame()
-        end
-      end)
-    end)
-    previewLauncher:SetScript("OnDragStop", function(self)
-      self._tb_dragActive = false
-      self:SetScript("OnUpdate", nil)
-    end)
-
-    --- 顶部透明区：上下拖动调整内边距。
-    previewPadHit:SetScript("OnDragStart", function(self)
-      GameTooltip:Hide()
-      self._tb_lastX, self._tb_lastY = GetCursorPosition()
-      self._tb_dragActive = true
-      self:SetScript("OnUpdate", function(s)
-        if not s._tb_dragActive then
-          return
-        end
-        local x, y = GetCursorPosition()
-        local scale = s:GetEffectiveScale() or 1
-        if scale == 0 then
-          scale = 1
-        end
-        local dy = (y - s._tb_lastY) / scale
-        s._tb_lastX, s._tb_lastY = x, y
-        local delta = -math.floor(dy + 0.5)
-        if delta == 0 then
-          return
-        end
-        local nv = db.flyoutPad + delta
-        nv = max(0, min(SPACING_DRAG_PAD_MAX, nv))
-        if nv ~= db.flyoutPad then
-          db.flyoutPad = nv
-          pushSpacingToGame()
-        end
-      end)
-    end)
-    previewPadHit:SetScript("OnDragStop", function(self)
-      self._tb_dragActive = false
-      self:SetScript("OnUpdate", nil)
-    end)
-
-    local function previewDragTooltipEnter(self, key)
-      self:SetScript("OnEnter", function(s)
-        GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
-        GameTooltip:SetText(L[key] or "")
-        GameTooltip:Show()
-      end)
-      self:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-      end)
-    end
-    previewDragTooltipEnter(previewLauncher, "MINIMAP_PREVIEW_DRAG_TOOLTIP_LAUNCHER_GAP")
-    previewDragTooltipEnter(previewPadHit, "MINIMAP_PREVIEW_DRAG_TOOLTIP_PAD")
-
-    local shapeLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    shapeLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    shapeLabel:SetText(L.MINIMAP_SHAPE_LABEL or "")
-    local shapeRound = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
-    shapeRound:SetPoint("TOPLEFT", shapeLabel, "BOTTOMLEFT", 0, -6)
-    shapeRound.Text:SetText(L.MINIMAP_SHAPE_ROUND or "")
-    shapeRound:SetChecked(db.buttonShape ~= "square")
-    local shapeSquare = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
-    shapeSquare:SetPoint("LEFT", shapeRound, "RIGHT", 24, 0)
-    shapeSquare.Text:SetText(L.MINIMAP_SHAPE_SQUARE or "")
-    shapeSquare:SetChecked(db.buttonShape == "square")
-    local function applyShapeChoice(isSquare)
-      db.buttonShape = isSquare and "square" or "round"
-      shapeRound:SetChecked(not isSquare)
-      shapeSquare:SetChecked(isSquare)
-      Toolbox.MinimapButton.Refresh()
-      updateMinimapPreview()
-    end
-    shapeRound:SetScript("OnClick", function()
-      applyShapeChoice(false)
-    end)
-    shapeSquare:SetScript("OnClick", function()
-      applyShapeChoice(true)
-    end)
-
-    local flyoutSec = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    flyoutSec:SetPoint("TOPLEFT", shapeRound, "BOTTOMLEFT", 0, -16)
-    flyoutSec:SetText(L.MINIMAP_FLYOUT_SLOTS_LABEL or "")
-
-    local flyoutAddAllBtn = CreateFrame("Button", nil, box, "UIPanelButtonTemplate")
-    flyoutAddAllBtn:SetSize(132, 22)
-    flyoutAddAllBtn:SetPoint("LEFT", flyoutSec, "RIGHT", 12, 0)
-    flyoutAddAllBtn:SetText(L.MINIMAP_FLYOUT_ADD_ALL or "")
-
-    local flyoutPoolHint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    flyoutPoolHint:SetPoint("TOPLEFT", flyoutSec, "BOTTOMLEFT", 0, -8)
-    flyoutPoolHint:SetWidth(560)
-    flyoutPoolHint:SetJustifyH("LEFT")
-    flyoutPoolHint:SetText(L.MINIMAP_FLYOUT_POOL_HINT or "")
-
-    local flyoutPool = CreateFrame("Frame", nil, box)
-    flyoutPool:SetPoint("TOPLEFT", flyoutPoolHint, "BOTTOMLEFT", 0, -4)
-    flyoutPool:SetSize(520, 2)
-
-    local flyoutDropBar = CreateFrame("Frame", nil, box, "BackdropTemplate")
-    flyoutDropBar:SetSize(520, 34)
-    flyoutDropBar:SetPoint("TOPLEFT", flyoutPool, "BOTTOMLEFT", 0, -8)
-    do
-      local bd = {
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true,
-        tileSize = 8,
-        edgeSize = 12,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
-      }
-      flyoutDropBar:SetBackdrop(bd)
-      flyoutDropBar:SetBackdropColor(0.06, 0.14, 0.08, 0.75)
-      flyoutDropBar:SetBackdropBorderColor(0.25, 0.55, 0.35, 0.9)
-    end
-    flyoutDropBar:EnableMouse(true)
-    local flyoutDropText = flyoutDropBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    flyoutDropText:SetPoint("CENTER", 0, 0)
-    flyoutDropText:SetWidth(500)
-    flyoutDropText:SetJustifyH("CENTER")
-    flyoutDropText:SetText(L.MINIMAP_FLYOUT_DROP_HERE or "")
-
-    local slotListAnchor = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    slotListAnchor:SetPoint("TOPLEFT", flyoutDropBar, "BOTTOMLEFT", 0, -10)
-    slotListAnchor:SetWidth(1)
-    slotListAnchor:SetHeight(1)
-
-    local slotRows = {}
-    local addMenu = CreateFrame("Frame", nil, box, "BackdropTemplate")
-    addMenu:SetSize(220, 1)
-    addMenu:SetBackdrop({
-      bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-      edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-      tile = true,
-      tileSize = 32,
-      edgeSize = 16,
-      insets = { left = 8, right = 8, top = 8, bottom = 8 },
-    })
-    addMenu:SetBackdropColor(0.05, 0.05, 0.07, 0.96)
-    addMenu:Hide()
-
-    local function catalogSorted()
-      local t = {}
-      for id in pairs(flyoutCatalog) do
-        t[#t + 1] = id
-      end
-      table.sort(t, function(leftId, rightId)
-        local leftDef = flyoutCatalog[leftId]
-        local rightDef = flyoutCatalog[rightId]
-        local leftOrder = tonumber(leftDef and leftDef.order) or 100
-        local rightOrder = tonumber(rightDef and rightDef.order) or 100
-        if leftOrder ~= rightOrder then
-          return leftOrder < rightOrder
-        end
-        return leftId < rightId
-      end)
-      return t
-    end
-
-    local function idInList(id, list)
-      for _, x in ipairs(list) do
-        if x == id then
-          return true
-        end
-      end
-      return false
-    end
+    local localeTable = Toolbox.L or {} -- 本地化文案
+    local moduleDb = Toolbox.Config.GetModule(MODULE_ID) -- 小地图按钮模块存档
+    local yOffset = 0 -- 当前纵向游标
 
     local function persistFlyoutSlots()
       syncFlyoutRegistryFromDb()
@@ -1653,247 +955,117 @@ Toolbox.RegisterModule({
       Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(MODULE_ID))
     end
 
-    --- 尚未加入悬停菜单的项：可拖到 flyoutDropBar 或点「+」加入。
-    local function rebuildFlyoutPool()
-      local children = { flyoutPool:GetChildren() }
-      for _, c in ipairs(children) do
-        c:Hide()
-        c:SetParent(nil)
-      end
-      local ids = db.flyoutSlotIds
-      if type(ids) ~= "table" then
-        ids = {}
-      end
-      local py = 0
-      local n = 0
-      for _, cid in ipairs(catalogSorted()) do
-        if not idInList(cid, ids) then
-          n = n + 1
-          local row = CreateFrame("Button", nil, flyoutPool, "BackdropTemplate")
-          row:SetSize(500, 24)
-          row:SetPoint("TOPLEFT", flyoutPool, "TOPLEFT", 0, py)
-          py = py - 26
-          if row.SetBackdrop then
-            row:SetBackdrop({
-              bgFile = "Interface\\Buttons\\WHITE8X8",
-              edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-              tile = true,
-              tileSize = 8,
-              edgeSize = 8,
-              insets = { left = 2, right = 2, top = 2, bottom = 2 },
-            })
-            row:SetBackdropColor(0.1, 0.1, 0.12, 0.55)
-            row:SetBackdropBorderColor(0.3, 0.3, 0.35, 0.5)
-          end
-          local def = flyoutCatalog[cid]
-          local lab = (def and def.titleKey and (L[def.titleKey] or def.titleKey)) or cid
-          local fs = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-          fs:SetPoint("LEFT", 8, 0)
-          fs:SetWidth(400)
-          fs:SetJustifyH("LEFT")
-          fs:SetText(lab)
-          row:RegisterForClicks("LeftButtonUp", "LeftButtonDown")
-          row:SetScript("OnMouseDown", function(self, btn)
-            if btn ~= "LeftButton" then
-              return
-            end
-            self._dragCid = cid
-            self:SetScript("OnUpdate", function(s)
-              if IsMouseButtonDown("LeftButton") then
-                return
-              end
-              s:SetScript("OnUpdate", nil)
-              local cidr = s._dragCid
-              s._dragCid = nil
-              if cidr and flyoutDropBar:IsMouseOver() then
-                local idsl = db.flyoutSlotIds
-                if type(idsl) == "table" and not idInList(cidr, idsl) then
-                  idsl[#idsl + 1] = cidr
-                  persistFlyoutSlots()
-                end
-              end
-            end)
-          end)
-          local quick = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-          quick:SetSize(28, 20)
-          quick:SetPoint("RIGHT", -4, 0)
-          quick:SetText("+")
-          quick:SetScript("OnClick", function()
-            local idsl = db.flyoutSlotIds
-            if type(idsl) ~= "table" then
-              return
-            end
-            if not idInList(cid, idsl) then
-              idsl[#idsl + 1] = cid
-              persistFlyoutSlots()
-            end
-          end)
-        end
-      end
-      flyoutPool:SetHeight(math.max(2, (n > 0 and (n * 26 + 4)) or 2))
+    local showButtonCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 显示小地图按钮开关
+    showButtonCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
+    showButtonCheck.Text:SetText(localeTable.MINIMAP_BUTTON_SETTING_SHOW or "")
+    showButtonCheck:SetChecked(moduleDb.showMinimapButton ~= false)
+    showButtonCheck:SetScript("OnClick", function(self)
+      moduleDb.showMinimapButton = self:GetChecked() and true or false
+      Toolbox.MinimapButton.Refresh()
+      Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(MODULE_ID))
+    end)
+    yOffset = yOffset - 36
+
+    local hintLabel = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 小地图按钮说明
+    hintLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
+    hintLabel:SetWidth(580)
+    hintLabel:SetJustifyH("LEFT")
+    hintLabel:SetText(localeTable.MINIMAP_BUTTON_SETTING_HINT or "")
+    yOffset = yOffset - math.max(40, math.ceil((hintLabel:GetStringHeight() or 0) + 12))
+
+    local showCoordsCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 小地图坐标显示开关
+    showCoordsCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
+    showCoordsCheck.Text:SetText(localeTable.MINIMAP_COORDS_SETTING_SHOW or "")
+    showCoordsCheck:SetChecked(moduleDb.showCoordsOnMinimap ~= false)
+    showCoordsCheck:SetScript("OnClick", function(self)
+      moduleDb.showCoordsOnMinimap = self:GetChecked() == true
+      refreshCoordinateDisplays()
+      Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(MODULE_ID))
+    end)
+    yOffset = yOffset - 30
+
+    local coordsAnchorLabel = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 坐标锚点标题
+    coordsAnchorLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 28, yOffset)
+    coordsAnchorLabel:SetText(localeTable.MINIMAP_COORDS_SETTING_ANCHOR or "")
+    yOffset = yOffset - 20
+
+    local anchorTopCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 上方锚点开关
+    anchorTopCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 28, yOffset)
+    anchorTopCheck.Text:SetText(localeTable.MINIMAP_COORDS_SETTING_ANCHOR_TOP or "")
+    local anchorBottomCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 下方锚点开关
+    anchorBottomCheck:SetPoint("LEFT", anchorTopCheck, "RIGHT", 20, 0)
+    anchorBottomCheck.Text:SetText(localeTable.MINIMAP_COORDS_SETTING_ANCHOR_BOTTOM or "")
+
+    local function syncAnchorChecks()
+      local anchorKey = getMinimapCoordsAnchor() -- 当前坐标锚点
+      local coordsEnabled = moduleDb.showCoordsOnMinimap ~= false -- 坐标显示是否启用
+      anchorTopCheck:SetChecked(anchorKey == MINIMAP_COORDS_ANCHOR_TOP)
+      anchorBottomCheck:SetChecked(anchorKey == MINIMAP_COORDS_ANCHOR_BOTTOM)
+      anchorTopCheck:SetEnabled(coordsEnabled)
+      anchorBottomCheck:SetEnabled(coordsEnabled)
     end
 
-    flyoutAddAllBtn:SetScript("OnClick", function()
-      local ids = db.flyoutSlotIds
-      if type(ids) ~= "table" then
-        db.flyoutSlotIds = {}
-        ids = db.flyoutSlotIds
-      end
-      wipe(ids)
-      for _, cid in ipairs(catalogSorted()) do
-        ids[#ids + 1] = cid
-      end
-      if #ids == 0 then
-        ids[1] = "reload_ui"
-      end
-      persistFlyoutSlots()
+    syncAnchorChecks()
+    anchorTopCheck:SetScript("OnClick", function()
+      moduleDb.minimapCoordsAnchor = MINIMAP_COORDS_ANCHOR_TOP
+      syncAnchorChecks()
+      refreshCoordinateDisplays()
     end)
+    anchorBottomCheck:SetScript("OnClick", function()
+      moduleDb.minimapCoordsAnchor = MINIMAP_COORDS_ANCHOR_BOTTOM
+      syncAnchorChecks()
+      refreshCoordinateDisplays()
+    end)
+    yOffset = yOffset - 34
 
-    local slotAddBtnRef
-    local function rebuildSlotRows()
-      for _, row in ipairs(slotRows) do
-        row:Hide()
-        row:SetParent(nil)
-      end
-      wipe(slotRows)
-      addMenu:Hide()
-      addMenu:SetHeight(1)
-      local ids = db.flyoutSlotIds
-      if type(ids) ~= "table" then
-        ids = {}
-      end
-      local ry = 0
-      for i, id in ipairs(ids) do
-        local def = flyoutCatalog[id]
-        local row = CreateFrame("Frame", nil, box)
-        row:SetSize(520, 26)
-        row:SetPoint("TOPLEFT", slotListAnchor, "BOTTOMLEFT", 0, ry)
-        ry = ry - 28
-        local title = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        title:SetPoint("LEFT", 0, 0)
-        title:SetWidth(220)
-        title:SetJustifyH("LEFT")
-        if def and def.titleKey then
-          title:SetText(L[def.titleKey] or id)
-        else
-          title:SetText(id)
-        end
-        local up = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        up:SetSize(52, 22)
-        up:SetPoint("LEFT", title, "RIGHT", 8, 0)
-        up:SetText(L.MINIMAP_FLYOUT_SLOT_UP or "Up")
-        up:SetScript("OnClick", function()
-          if i > 1 then
-            ids[i], ids[i - 1] = ids[i - 1], ids[i]
-            persistFlyoutSlots()
-          end
-        end)
-        local down = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        down:SetSize(52, 22)
-        down:SetPoint("LEFT", up, "RIGHT", 4, 0)
-        down:SetText(L.MINIMAP_FLYOUT_SLOT_DOWN or "Dn")
-        down:SetScript("OnClick", function()
-          if i < #ids then
-            ids[i], ids[i + 1] = ids[i + 1], ids[i]
-            persistFlyoutSlots()
-          end
-        end)
-        local rm = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        rm:SetSize(52, 22)
-        rm:SetPoint("LEFT", down, "RIGHT", 4, 0)
-        rm:SetText(L.MINIMAP_FLYOUT_SLOT_REMOVE or "X")
-        rm:SetScript("OnClick", function()
-          table.remove(ids, i)
-          if #ids == 0 then
-            ids[1] = "reload_ui"
+    local selectedIdList = ensureFlyoutSlotIds(moduleDb) -- 已勾选的悬停菜单项
+    yOffset = yOffset - 12
+
+    local flyoutSectionLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 悬停菜单分节标题
+    flyoutSectionLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
+    flyoutSectionLabel:SetText(localeTable.MINIMAP_FLYOUT_SLOTS_LABEL or "")
+    yOffset = yOffset - 24
+
+    local flyoutSectionHint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 悬停菜单说明
+    flyoutSectionHint:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
+    flyoutSectionHint:SetWidth(580)
+    flyoutSectionHint:SetJustifyH("LEFT")
+    flyoutSectionHint:SetText(localeTable.MINIMAP_FLYOUT_SLOTS_HINT or "")
+    yOffset = yOffset - math.max(22, math.ceil((flyoutSectionHint:GetStringHeight() or 0) + 8))
+
+    for _, entryId in ipairs(getSortedFlyoutEntryIds()) do
+      local entryDef = flyoutCatalog[entryId] -- 当前悬停菜单定义
+      if entryDef then
+        local entryCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 当前功能勾选框
+        entryCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
+        entryCheck.Text:SetText(getFlyoutEntryDisplayName(entryDef, localeTable))
+        entryCheck:SetChecked(hasFlyoutEntryId(selectedIdList, entryId))
+        entryCheck:SetScript("OnClick", function(self)
+          if self:GetChecked() then
+            if not hasFlyoutEntryId(selectedIdList, entryId) then
+              selectedIdList[#selectedIdList + 1] = entryId
+            end
+          else
+            removeFlyoutEntryId(selectedIdList, entryId)
           end
           persistFlyoutSlots()
         end)
-        slotRows[#slotRows + 1] = row
-      end
-
-      local addBtn = CreateFrame("Button", nil, box, "UIPanelButtonTemplate")
-      addBtn:SetSize(140, 24)
-      addBtn:SetPoint("TOPLEFT", slotListAnchor, "BOTTOMLEFT", 0, ry - 4)
-      addBtn:SetText(L.MINIMAP_FLYOUT_SLOT_ADD or "Add…")
-      addBtn:SetScript("OnClick", function()
-        if addMenu:IsShown() then
-          addMenu:Hide()
-          return
-        end
-        local children = { addMenu:GetChildren() }
-        for _, c in ipairs(children) do
-          c:Hide()
-          c:SetParent(nil)
-        end
-        local ay = -6
-        local any = false
-        for _, cid in ipairs(catalogSorted()) do
-          if not idInList(cid, ids) then
-            any = true
-            local b = CreateFrame("Button", nil, addMenu, "UIPanelButtonTemplate")
-            b:SetSize(200, 22)
-            b:SetPoint("TOPLEFT", addMenu, "TOPLEFT", 10, ay)
-            local lab = flyoutCatalog[cid] and flyoutCatalog[cid].titleKey and (L[flyoutCatalog[cid].titleKey] or cid) or cid
-            b:SetText(lab)
-            b:SetScript("OnClick", function()
-              ids[#ids + 1] = cid
-              addMenu:Hide()
-              persistFlyoutSlots()
-            end)
-            ay = ay - 26
-          end
-        end
-        if not any then
-          addMenu:SetHeight(40)
-          local nx = addMenu:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-          nx:SetPoint("TOPLEFT", 10, -8)
-          nx:SetText(L.MINIMAP_FLYOUT_SLOT_ADD_EMPTY or "")
-        else
-          addMenu:SetHeight(-ay + 16)
-        end
-        addMenu:ClearAllPoints()
-        addMenu:SetPoint("TOPLEFT", addBtn, "BOTTOMLEFT", 0, -4)
-        addMenu:Show()
-      end)
-      slotRows[#slotRows + 1] = addBtn
-      slotAddBtnRef = addBtn
-      rebuildFlyoutPool()
-    end
-
-    rebuildSlotRows()
-    updateMinimapPreview()
-
-    if db.flyoutLauncherGap == nil then
-      db.flyoutLauncherGap = getFlyoutLauncherGap()
-    end
-    do
-      local pEff, gEff = getFlyoutPadding()
-      if db.flyoutPad == nil then
-        db.flyoutPad = pEff
-      end
-      if db.flyoutGap == nil then
-        db.flyoutGap = gEff
+        yOffset = yOffset - 28
       end
     end
 
-    local resetPos = CreateFrame("Button", nil, box, "UIPanelButtonTemplate")
-    resetPos:SetSize(200, 26)
-    resetPos:SetPoint("TOPLEFT", slotAddBtnRef, "BOTTOMLEFT", 0, -16)
-    resetPos:SetText(L.MINIMAP_BUTTON_RESET_POSITION or "")
-    resetPos:SetScript("OnClick", function()
+    yOffset = yOffset - 12
+    local resetPositionButton = CreateFrame("Button", nil, box, "UIPanelButtonTemplate") -- 恢复默认位置按钮
+    resetPositionButton:SetSize(200, 26)
+    resetPositionButton:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
+    resetPositionButton:SetText(localeTable.MINIMAP_BUTTON_RESET_POSITION or "")
+    resetPositionButton:SetScript("OnClick", function()
       Toolbox.MinimapButton.ResetPositionToDefault()
       Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(MODULE_ID))
     end)
+    yOffset = yOffset - 40
 
-    do
-      local bt, rbb = box:GetTop(), resetPos:GetBottom()
-      if type(bt) == "number" and type(rbb) == "number" then
-        box.realHeight = math.max(280, (bt - rbb) + 24)
-      else
-        box.realHeight = 520
-      end
-    end
+    box.realHeight = math.max(280, math.abs(yOffset) + 24)
   end,
 })
 
@@ -1924,7 +1096,7 @@ Toolbox.MinimapButton.RegisterFlyoutEntry({
   end,
 })
 
---- 在 ADDON_LOADED 末尾调用：为每个设置模块、冒险手册、关于页注册悬停项模板（供玩家勾选/拖入菜单）。
+--- 在 ADDON_LOADED 末尾调用：为每个设置模块、冒险手册、关于页注册悬停项模板（供玩家勾选加入菜单）。
 function Toolbox.MinimapButton.RegisterBuiltinFlyoutCatalog()
   if Toolbox.MinimapButton._builtinFlyoutCatalogDone then
     return

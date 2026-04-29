@@ -806,8 +806,21 @@ function Toolbox.EJ.IsRaidOrDungeonInstanceListTab()
   if type(selectedRootTabID) ~= "number" then
     return false
   end
+  if selectedRootTabID ~= dungeonTabID and selectedRootTabID ~= raidTabID then
+    return false
+  end
 
-  return selectedRootTabID == dungeonTabID or selectedRootTabID == raidTabID
+  local instanceSelectFrame = encounterJournalFrame.instanceSelect -- Blizzard 副本列表面板
+  if not instanceSelectFrame or not instanceSelectFrame.IsShown then
+    return false
+  end
+
+  local listShownSuccess, listShown = pcall(function() return instanceSelectFrame:IsShown() end)
+  if not listShownSuccess or listShown ~= true then
+    return false
+  end
+
+  return true
 end
 
 -- ============================================================================

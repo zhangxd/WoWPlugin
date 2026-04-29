@@ -585,7 +585,8 @@ describe("Navigation API", function()
     assert.is_table(routeResult)
     assert.equals(3, routeResult.totalSteps)
     assert.equals("transport", routeResult.segments[2].mode)
-    assert.equals("交通工具，目标", routeResult.segments[2].label)
+    assert.equals("乘坐交通工具前往目标", routeResult.segments[2].label)
+    assert.equals("交通工具，目标", routeResult.segments[2].toName)
 
     local noNodeRoute, noNodeError = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 2,
@@ -603,6 +604,64 @@ describe("Navigation API", function()
 
     assert.is_nil(noNodeRoute)
     assert.equals("NAVIGATION_ERR_NO_ROUTE", noNodeError.code)
+  end)
+
+  it("ignores_legacy_target_rules_from_route_edge_exports", function()
+    setNavigationData({
+      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", Source = "uimap", UiMapID = 1, Name_lang = "起点地图", WalkClusterKey = "uimap_1" },
+      uimap_2 = { NodeID = "uimap_2", Kind = "map_anchor", Source = "uimap", UiMapID = 2, Name_lang = "目标地图", WalkClusterKey = "uimap_2" },
+      relay = { NodeID = "relay", Kind = "portal", Source = "portal", UiMapID = 2, Name_lang = "旧中转点", WalkClusterKey = "relay" },
+    }, {
+      {
+        ID = 9100,
+        FromNodeID = "uimap_1",
+        ToNodeID = "relay",
+        FromUiMapID = 1,
+        ToUiMapID = 2,
+        StepCost = 1,
+        Mode = "class_teleport",
+        Label = "旧中转入口",
+        TraversedUiMapIDs = { 1, 2 },
+        TraversedUiMapNames = { "起点地图", "目标地图" },
+      },
+    }, {
+      [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
+      [2] = { Name_lang = "目标地图", MapType = 3, ParentUiMapID = 0 },
+    }, {})
+    Toolbox.Data.NavigationRouteEdges.targetRules = {
+      [2] = {
+        viaNodes = {
+          {
+            node = "relay",
+            cost = 0,
+            mode = "walk_local",
+            label = "旧目标规则落点",
+            traversedUiMapIDs = { 2 },
+            traversedUiMapNames = { "目标地图" },
+            arrivalUiMapID = 2,
+            arrivalX = 0.55,
+            arrivalY = 0.44,
+          },
+        },
+      },
+    }
+
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 2,
+      x = 0.55,
+      y = 0.44,
+    }, {
+      classFile = "MAGE",
+      faction = "Alliance",
+      currentUiMapID = 1,
+      currentX = 0.20,
+      currentY = 0.20,
+      knownSpellByID = {},
+      knownTaxiNodeByID = {},
+    })
+
+    assert.is_nil(routeResult)
+    assert.equals("NAVIGATION_ERR_NO_ROUTE", errorObject.code)
   end)
 
   it("bridges_same_walk_cluster_nodes_with_a_single_compressed_walk_segment", function()

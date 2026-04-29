@@ -196,7 +196,7 @@
         }
       },
       "trigger_nodes_raw": {
-        "sql": "SELECT CAST(ID AS INTEGER) AS trigger_id, CAST(COALESCE(ContinentID, 0) AS INTEGER) AS map_id, CAST(COALESCE(X, 0) AS REAL) AS pos_x, CAST(COALESCE(Y, 0) AS REAL) AS pos_y, CAST(COALESCE(Z, 0) AS REAL) AS pos_z, CAST(COALESCE(Radius, 0) AS REAL) AS radius FROM areatrigger WHERE CAST(ID AS INTEGER) > 0 ORDER BY CAST(ID AS INTEGER)",
+        "sql": "SELECT CAST(ID AS INTEGER) AS trigger_id, CAST(COALESCE(ContinentID, 0) AS INTEGER) AS map_id, CAST(COALESCE(Pos_0, 0) AS REAL) AS pos_x, CAST(COALESCE(Pos_1, 0) AS REAL) AS pos_y, CAST(COALESCE(Pos_2, 0) AS REAL) AS pos_z, CAST(COALESCE(Radius, 0) AS REAL) AS radius FROM areatrigger WHERE CAST(ID AS INTEGER) > 0 ORDER BY CAST(ID AS INTEGER)",
         "query": {
           "from": "areatrigger",
           "joins": [],

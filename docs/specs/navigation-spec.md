@@ -9,7 +9,7 @@
   - `docs/designs/navigation-design.md`
   - `docs/plans/navigation-plan.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-29（V2 public_portal 方案确认）
+- 最后更新：2026-04-29（实现/导出对齐，统一边表基线同步到 v17）
 
 ## 1. 背景
 
@@ -39,10 +39,11 @@
   - `KnownTaxiNodeIDs`
   - `HearthBindNodeID`
 - 路线主排序规则为“最少路径步数”。
-- 第一版支持以下路线模式：
+- 当前实现支持以下路线模式：
   - `walk_local`
   - `taxi`
   - `transport`
+  - `public_portal`
   - `hearthstone`
   - `class_teleport`
   - `class_portal`
@@ -62,7 +63,7 @@
 - 账号级跨角色能力推断。
 - 战斗状态、沉默状态、技能 CD 是否转好等瞬时条件。
 - 全世界真实地形寻路、避障、逐米路径与碰撞网格。
-- 第一版内的 `public_portal`、`areatrigger` 和完整世界 `WalkComponent`。
+- `areatrigger` 和完整世界 `WalkComponent`。
 - 第一版内的账号共享玩具、节日传送、工程道具和一次性剧情位移。
 - 对“只能飞 / 没有别的公共路径”这类排除法结论的正式判定。
 
@@ -86,19 +87,41 @@
 
 ## 5. 导出与运行时边界
 
-- 统一运行时静态边继续以 `navigation_route_edges` 为唯一静态消费入口。
+- 当前运行时静态数据消费入口为：
+  - `navigation_route_edges`
+  - `navigation_map_nodes`
+  - `navigation_ability_templates`
 - `navigation_taxi_edges` 保留为 Taxi 来源侧追溯数据，不直接参与运行时构图。
 - `navigation_ability_templates` 负责导出 `hearthstone` 和职业旅行能力的模板定义；运行时只按当前角色配置展开，不手写法术目的地表。
+- 当前角色状态与查询点细化允许使用运行时 API，但只限于：
+  - 已开航点：`C_TaxiMap.GetTaxiNodesForMap`
+  - 炉石绑定点：`GetBindLocation`
+  - 当前点 / 目标点命中的更具体地图：`C_Map.GetMapInfoAtPosition`
 - `transport`、`public_portal`、`areatrigger`、`道标石` 只有在目标端点静态闭合后，才允许进入统一运行时静态边表。
+- 旧的 `targetRules` / `WAYPOINT_LINK` 运行时旁路已经移除；路线真值不再依赖它们。
+- 当前仓库默认导出基线已经推进到 `navigation_route_edges` schema v17，统一边表可包含 `taxi / transport / public_portal`；`areatrigger` 仍为占位，不参与实际可达路径。
+- 如果需要“严格 V1-only”导出结果，必须另设冻结契约或独立输出，不能继续和当前统一边表共用同一份 `NavigationRouteEdges.lua`。
 - `walk` 不允许再由地图矩形、`UiMap` 父链或视觉相邻关系推导，必须等待独立连通规则。
+
+### 5.1 当前无路由样例口径
+
+- 对 `银月城 (110) -> 东瘟疫之地 (23)`，当前默认导出基线的期望结果是 `NAVIGATION_ERR_NO_ROUTE`。
+- 该结果表示：现有静态导出图尚未闭合出一条可证明路线；不表示系统已经静态证明“游戏内无法到达”。
+- 运行时不得因为以下事实存在就擅自补全路线：
+  - `uimap_94` 与 `uimap_95` 在视觉上接壤
+  - `portal_118`、`portal_556` 节点已经导出
+  - `taxi_82` 节点已经导出
+- 只有在对应 `walk` 连通规则、portal edge 或 taxi edge 被正式导出进 unified graph 后，这条路线才允许从 `no route` 变为可达。
 
 ## 6. 验收标准
 
 1. 世界地图存在当前用户 waypoint 时，可以基于该 waypoint 生成导航路线；没有 waypoint 时不生成路线。
 2. 查询输入支持当前角色配置，至少包含职业、阵营、已学法术、已开航点和炉石绑定点。
 3. 路线主求解器按最少步数收敛，而不是按预计耗时排序。
-4. 第一版路线可同时消费：
+4. 当前路线可同时消费：
    - `taxi`
+   - `transport`
+   - `public_portal`
    - `hearthstone`
    - `class_teleport`
    - `class_portal`
@@ -116,8 +139,13 @@
 ## 7. 实施状态
 
 - 本规格自 2026-04-29 起，成为 `navigation` 的新需求基线。
+- 当前实现已经完成“统一导出驱动 + 最少步数求解”的主干收敛：
+  - 运行时不再直接消费 `NavigationManualEdges.lua`、`NavigationTaxiEdges.lua`、`NavigationUiMapRelations.lua`、`NavigationWaypointEdges.lua`
+  - 统一边表默认基线已同步到 `navigation_route_edges` schema v17
+  - `public_portal` 已进入统一边表并参与运行时求解
+  - `areatrigger` 仍只有契约骨架与占位节点，不参与实际路径
+  - `targetRules` / `WAYPOINT_LINK` 旧旁路已从运行时判断中移除
 - 2026-04-27 的旧实现计划和旧文档仍保留为历史追溯，但它们基于“预计耗时 + Dijkstra + 旧范围”的口径。
-- 后续正式实现前，需要基于本规格与 `docs/designs/navigation-design.md` 重排实施计划。
 
 ## 8. 修订记录
 
@@ -130,3 +158,5 @@
 | 2026-04-29 | 规格基线重定义：路线改为”当前角色配置 + 最少步数”；V1 先支持 `walk_local / taxi / hearthstone / class_teleport / class_portal`，世界级 `transport / public_portal / areatrigger / walk component` 延后到后续阶段 |
 | 2026-04-29 | V2 推进：`transport`（飞艇/船）正式进入 In Scope，导出脚本增加 transport 检测与 `mode = “transport”` 输出 |
 | 2026-04-29 | V2 推进：`public_portal` 方案确认，waypoint 管道接入统一静态边表 |
+| 2026-04-29 | 文档同步：运行时基线对齐当前实现，明确默认统一边表已推进到 schema v17，`public_portal` 已参与求解，`areatrigger` 仍为占位，旧 `targetRules / WAYPOINT_LINK` 旁路已移除 |
+| 2026-04-29 | 边界样例同步：固定 `银月城 -> 东瘟疫之地` 当前期望为 `NAVIGATION_ERR_NO_ROUTE`，并明确这代表导出图未闭合，而不是静态证明游戏内不可达 |

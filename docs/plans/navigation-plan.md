@@ -529,14 +529,41 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 
 **V2 已闭合：**
 - ✅ `transport`（飞艇/船）：导出脚本根据 node name 含 “Transport” / “交通工具” 识别 transport 节点，对应边输出 `mode = “transport”`；运行时 `isEdgeAvailable` 对 transport 模式与 taxi 同等待遇（两端航点需已开）。
+- ✅ `public_portal`（公共传送门）已进入统一边表并参与运行时求解；当前问题不再是“是否接入”，而是“世界覆盖是否闭合”。
 
-**V2 进行中：**
-- 🔄 `public_portal` — 2026-04-29 方案确认，进入实施：
+**V2 已接入但仍需补覆盖：**
+- `public_portal`
   - 数据来源：复用 `navigation_waypoint_edges` 管道（`waypointedge` + `waypointnode`），筛选 Type=1→Type=2 portal 边
   - 节点映射：新建 `portal_{waypoint_id}` 节点，保留精确坐标；enrichment 走 `walk_cluster_uimap_id_by_uimap_id` 确定 `WalkClusterKey`
   - 接入方式：`WalkClusterKey` 连接同连通域 `map_anchor`，复用 `addDynamicWalkLocalEdges`
   - 可用性：`PlayerConditionID = 0` 无条件纳入；`924`/`923` 标 faction；其余暂不纳入
   - 出口：portal 边汇入 `navigation_route_edges` 统一静态边表
+
+### 6.1 当前导出缺口样例：`银月城 -> 东瘟疫之地`
+
+该样例当前应稳定返回 `NAVIGATION_ERR_NO_ROUTE`。这不是求解器 bug，也不是“游戏内绝对无法到达”的结论，而是当前静态导出图还没有闭合出完整链路。
+
+对这一样例，当前确认需要补的导出能力如下：
+
+- [ ] `walk` 闭环：补出 `uimap_94`（永歌森林/银月城簇）到 `uimap_95`（幽魂之地簇）的稳定连通规则。
+  - 规则要求：不能依赖地图矩形、视觉相邻或 `UiMap` 父链猜测。
+  - 目标结果：运行时可以把银月城簇稳定接入幽魂之地簇。
+
+- [ ] `public_portal` 端点闭环：补出 `portal_556`（萨拉斯小径 -> 东瘟疫之地）的实际 route edge。
+  - 当前状态：portal 节点已存在，但 unified edge 表没有对应边。
+  - 目标结果：幽魂之地公共入口可以静态接入东瘟疫之地图。
+
+- [ ] `public_portal` 端点闭环：补出 `portal_118`（银月城宝珠 -> 幽暗城/洛丹伦一侧）的实际 route edge。
+  - 当前状态：portal 节点已存在，但 unified edge 表没有对应边。
+  - 目标结果：银月城可以通过公共传送接入幽暗城周边交通网。
+
+- [ ] `taxi` 闭环：确认并补齐 `taxi_82`（银月城）与公共 taxi 图的稳定关系。
+  - 当前状态：节点存在，但当前运行时导出图没有把它接进 taxi 网络。
+  - 目标结果：如果 DB/导出能稳定证明银月城飞行点存在公共航线，则路线图可用；如果不能证明，应在来源层明确记录缺口，而不是运行时猜。
+
+- [ ] 主城枢纽并入：补出 `portal_101`（杜隆塔尔探路者大厅）到奥格瑞玛主枢纽 `uimap_85` 的稳定步行并入规则。
+  - 当前状态：`portal_117 -> portal_101` 已闭合，但落点仍停在杜隆塔尔侧步行簇。
+  - 目标结果：银月城到奥格公共传送可继续并入奥格主交通图，而不是停在外层落点。
 
 **V2 待推进（单人导航，不含需多人协助的模态）：**
 - `areatrigger`
@@ -560,3 +587,4 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 | 2026-04-29 | 整体重写：以”当前角色配置 + 最少路径步数 + 枢纽 / 动作图”替换旧计划，V1 收口到 `walk_local / taxi / hearthstone / class_teleport / class_portal` |
 | 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，导出脚本 + 运行时 + 测试全部落地，V2 待推进项更新为其余 4 项 |
 | 2026-04-29 | V2 推进：`public_portal` 方案确认，进入实施；路线图 5 段链路已校验可导出 |
+| 2026-04-29 | 文档同步：把 `silvermoon -> eastern plaguelands` 固定为导出缺口样例，明确当前 `no route` 对应的 `walk / portal / taxi / hub merge` backlog |
