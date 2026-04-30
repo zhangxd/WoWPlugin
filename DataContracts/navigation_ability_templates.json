@@ -1,8 +1,8 @@
 {
   "contract": {
     "contract_id": "navigation_ability_templates",
-    "schema_version": 1,
-    "summary": "navigation V1 能力模板（炉石 + 可静态解析目标的职业旅行法术）",
+    "schema_version": 2,
+    "summary": "navigation V2 能力模板（fixed_node 目标迁移为数字 node ID，炉石仍保留运行时解析）",
     "source_of_truth": "WoWPlugin",
     "status": "active"
   },
@@ -89,7 +89,7 @@
       {
         "name": "metadata",
         "metadata": {
-          "schemaVersion": 1,
+          "schemaVersion": 2,
           "sourceMode": "live",
           "generatedAt": "@generated_at"
         }
@@ -135,11 +135,15 @@
     "sort_rules": []
   },
   "versioning": {
-    "current_schema_version": 1,
+    "current_schema_version": 2,
     "change_log": [
       {
         "schema_version": 1,
         "summary": "初始契约：导出 navigation V1 能力模板（炉石 + 可静态解析目标的职业旅行法术）"
+      },
+      {
+        "schema_version": 2,
+        "summary": "fixed_node 模板目标迁移为不透明数字 node ID，与 navigation_route_edges 共用 map_anchor 分配规则"
       }
     ]
   }

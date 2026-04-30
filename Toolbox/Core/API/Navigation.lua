@@ -34,15 +34,6 @@ local function copyArray(rawList)
   return copiedList
 end
 
---- 归一化导航名称，便于静态名字匹配。
----@param rawValue any
----@return string
-local function normalizeNavigationName(rawValue)
-  local normalizedValue = string.lower(tostring(rawValue or "")) -- 小写化名称
-  normalizedValue = string.gsub(normalizedValue, "%s+", "")
-  return normalizedValue
-end
-
 --- 将来源数组里的值追加到目标数组，保持去重。
 ---@param targetList table 目标数组
 ---@param sourceList table|nil 来源数组
@@ -518,33 +509,28 @@ local function isNormalizedPosition(x, y)
   return type(x) == "number" and type(y) == "number" and x >= 0 and x <= 1 and y >= 0 and y <= 1
 end
 
---- 解析绑定地点名称对应的导航节点 ID。
----@param bindLocationName string|nil 绑定地点名称
----@return string|nil
-local function resolveHearthBindNodeID(bindLocationName)
-  local normalizedTargetName = normalizeNavigationName(bindLocationName) -- 归一化绑定地点名
-  if normalizedTargetName == "" then
-    return nil
-  end
+-- 炉石落点：faction 枚举 → 阵营主城 UiMapID（枚举来自 UnitFactionGroup，不依赖任何字符串字段做映射）
+local FACTION_CAPITAL_UI_MAP_ID = {
+  Horde = 85,       -- 奥格瑞玛
+  Alliance = 84,    -- 暴风城
+}
 
-  local routeNodeTable = Toolbox.Data and Toolbox.Data.NavigationRouteEdges and Toolbox.Data.NavigationRouteEdges.nodes or {} -- 导出的导航节点表
-  local bestNodeId = nil -- 当前最佳节点 ID
-  local bestRank = nil -- 当前最佳节点排序
-  for nodeId, nodeDef in pairs(type(routeNodeTable) == "table" and routeNodeTable or {}) do
-    local nodeName = type(nodeDef) == "table" and (nodeDef.Name_lang or nodeDef.name or nodeId) or nodeId -- 节点显示名
-    if normalizeNavigationName(nodeName) == normalizedTargetName then
-      local nodeKind = tostring(type(nodeDef) == "table" and (nodeDef.Kind or nodeDef.kind) or "") -- 节点类型
-      local uiMapID = tonumber(type(nodeDef) == "table" and (nodeDef.UiMapID or nodeDef.uiMapID) or 0) or 0 -- 节点地图 ID
-      local taxiNodeID = tonumber(type(nodeDef) == "table" and (nodeDef.TaxiNodeID or nodeDef.taxiNodeID) or 0) or 0 -- 节点飞行点 ID
-      local kindRank = (nodeKind == "map_anchor" or nodeKind == "uimap") and 0 or 1 -- 优先选地图锚点
-      local candidateRank = kindRank * 1000000000 + uiMapID * 1000 + taxiNodeID -- 稳定候选排序
-      if bestRank == nil or candidateRank < bestRank or (candidateRank == bestRank and tostring(nodeId) < tostring(bestNodeId or "")) then
-        bestRank = candidateRank
-        bestNodeId = nodeId
-      end
-    end
-  end
-  return bestNodeId
+---@class HearthBindInfo  炉石绑定信息
+---@field areaID number|nil  绑定区 ID；当前数据管线尚未提供稳定数值来源，先保留为 nil
+---@field uiMapID number|nil  绑定落点对应的 UiMapID；当前由 faction 主城降级推导
+---@field nodeID number|nil  解析后的导航节点 ID；当前由 route nodes 的 source lookup 在运行时补解
+
+--- 构建当前角色的炉石绑定信息。
+--- 当前 Retail 公开 API 仍只能稳定拿到本地化绑定地点名（GetBindLocation），
+--- 在未导出显式静态映射前，这里只保留 faction -> 主城的数值降级路径。
+---@param faction string|nil  角色阵营（UnitFactionGroup 枚举）
+---@return HearthBindInfo
+local function buildHearthBindInfo(faction)
+  return {
+    areaID = nil,
+    uiMapID = FACTION_CAPITAL_UI_MAP_ID[faction],
+    nodeID = nil,
+  }
 end
 
 --- 从导出的导航节点表中收集当前角色已开航点集合。
@@ -650,7 +636,7 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
     currentY = nil,
     knownSpellByID = {},
     knownTaxiNodeByID = {},
-    hearthBindNodeID = nil,
+    hearthBindInfo = nil,
   } -- 当前角色可用性快照
 
   if type(UnitClass) == "function" then
@@ -673,12 +659,10 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
   availabilityContext.currentY = locationSnapshot.currentY
 
   availabilityContext.knownTaxiNodeByID = buildKnownTaxiNodeByID()
-  if type(GetBindLocation) == "function" then
-    local success, bindLocationName = pcall(GetBindLocation) -- 炉石绑定地点名称
-    if success then
-      availabilityContext.hearthBindNodeID = resolveHearthBindNodeID(bindLocationName)
-    end
-  end
+
+  -- 炉石绑定信息：当前先保留 faction -> 主城的数值降级路径
+  -- 后续若数据管线补出显式静态映射，只需要继续填充 hearthBindInfo 即可
+  availabilityContext.hearthBindInfo = buildHearthBindInfo(availabilityContext.faction)
 
   local spellBookApi = type(C_SpellBook) == "table" and C_SpellBook or nil -- spellbook API 表
   local spellCheckFn = spellBookApi and (spellBookApi.IsSpellInSpellBook or spellBookApi.IsSpellKnown) or nil -- 技能已学判定
@@ -918,19 +902,126 @@ local function buildRouteEdgeLabel(edge)
   return type(edge) == "table" and edge.label or nil
 end
 
+--- 解析旧版字符串节点键，返回来源与来源侧 ID。
+---@param rawNodeKey any 旧版字符串节点键，例如 "uimap_85"
+---@return string|nil, number|nil
+local function parseLegacyRouteNodeKey(rawNodeKey)
+  local normalizedNodeKey = tostring(rawNodeKey or "") -- 旧版字符串节点键
+  local sourcePrefix, numericSourceID = string.match(normalizedNodeKey, "^(%a+)_([0-9]+)$")
+  if not sourcePrefix or not numericSourceID then
+    return nil, nil
+  end
+
+  local routeSourceByPrefix = {
+    uimap = "uimap",
+    taxi = "taxi",
+    portal = "portal",
+    transport = "waypoint_transport",
+    trigger = "areatrigger",
+    areatrigger = "areatrigger",
+  } -- 旧版节点键前缀到运行时 route source 的映射
+  local routeSource = routeSourceByPrefix[sourcePrefix] -- 归一化后的 route source
+  if routeSource == nil then
+    return nil, nil
+  end
+
+  return routeSource, tonumber(numericSourceID)
+end
+
+--- 从导出的 route nodes 构建 source/sourceID/kind 到运行时 node ID 的查找表。
+---@param nodeTable table|nil 节点定义表
+---@return table
+local function buildRouteNodeLookupBySource(nodeTable)
+  local lookupBySource = {} -- 来源 -> sourceID -> { any = nodeID, [kind] = nodeID }
+  for nodeId, nodeDef in pairs(type(nodeTable) == "table" and nodeTable or {}) do
+    local routeSource = tostring(type(nodeDef) == "table" and (nodeDef.Source or nodeDef.source) or "") -- 节点来源
+    local runtimeNodeID = tonumber(type(nodeDef) == "table" and (nodeDef.id or nodeDef.NodeID or nodeDef.nodeID) or nil) or tonumber(nodeId) or nodeId -- 运行时节点 ID（兼容旧版字符串键）
+    local sourceID = tonumber(type(nodeDef) == "table" and (nodeDef.SourceID or nodeDef.sourceID) or nil) -- 来源侧主键
+    if sourceID == nil and type(nodeDef) == "table" then
+      if routeSource == "uimap" then
+        sourceID = tonumber(nodeDef.UiMapID or nodeDef.uiMapID)
+      elseif routeSource == "taxi" then
+        sourceID = tonumber(nodeDef.TaxiNodeID or nodeDef.taxiNodeID)
+      else
+        local parsedSource, parsedSourceID = parseLegacyRouteNodeKey(nodeDef.NodeID or nodeDef.nodeID or nodeId) -- 从旧版字符串节点键回推来源侧主键
+        if parsedSource == routeSource then
+          sourceID = parsedSourceID
+        end
+      end
+    end
+
+    if routeSource ~= "" and sourceID and sourceID > 0 and runtimeNodeID ~= nil then
+      lookupBySource[routeSource] = lookupBySource[routeSource] or {}
+      local sourceLookup = lookupBySource[routeSource] -- 当前来源查找表
+      sourceLookup[sourceID] = sourceLookup[sourceID] or {}
+      local sourceEntry = sourceLookup[sourceID] -- 当前来源+主键查找项
+      local routeKind = tostring(type(nodeDef) == "table" and (nodeDef.Kind or nodeDef.kind) or "") -- 节点类型
+      local currentBestNodeID = sourceEntry.any -- 当前已登记的最优节点 ID
+      if currentBestNodeID == nil then
+        sourceEntry.any = runtimeNodeID
+      elseif tonumber(runtimeNodeID) and tonumber(currentBestNodeID) and tonumber(runtimeNodeID) < tonumber(currentBestNodeID) then
+        sourceEntry.any = runtimeNodeID
+      elseif tostring(runtimeNodeID) < tostring(currentBestNodeID) then
+        sourceEntry.any = runtimeNodeID
+      end
+      if routeKind ~= "" then
+        local currentBestKindNodeID = sourceEntry[routeKind] -- 当前已登记的最优来源+类型节点 ID
+        if currentBestKindNodeID == nil then
+          sourceEntry[routeKind] = runtimeNodeID
+        elseif tonumber(runtimeNodeID) and tonumber(currentBestKindNodeID) and tonumber(runtimeNodeID) < tonumber(currentBestKindNodeID) then
+          sourceEntry[routeKind] = runtimeNodeID
+        elseif tostring(runtimeNodeID) < tostring(currentBestKindNodeID) then
+          sourceEntry[routeKind] = runtimeNodeID
+        end
+      end
+    end
+  end
+  return lookupBySource
+end
+
+--- 按来源与来源侧 ID 查找 route node ID。
+---@param lookupBySource table|nil 节点来源查找表
+---@param routeSource string|nil 节点来源
+---@param sourceID number|nil 来源侧主键
+---@param routeKind string|nil 可选节点类型
+---@return any
+local function findRouteNodeIDBySourceID(lookupBySource, routeSource, sourceID, routeKind)
+  local normalizedSource = tostring(routeSource or "") -- 节点来源
+  local numericSourceID = tonumber(sourceID) -- 来源侧主键
+  if normalizedSource == "" or not numericSourceID or numericSourceID <= 0 then
+    return nil
+  end
+  local sourceLookup = type(lookupBySource) == "table" and lookupBySource[normalizedSource] or nil -- 来源查找表
+  local sourceEntry = type(sourceLookup) == "table" and sourceLookup[numericSourceID] or nil -- 来源+主键查找项
+  if type(sourceEntry) ~= "table" then
+    return nil
+  end
+  local normalizedKind = tostring(routeKind or "") -- 可选节点类型
+  if normalizedKind ~= "" and sourceEntry[normalizedKind] ~= nil then
+    return sourceEntry[normalizedKind]
+  end
+  return sourceEntry.any
+end
+
 --- 向路径图写入一组节点定义。
 ---@param routeGraph table 正在构建的路径图
 ---@param nodeTable table|nil 节点定义表
 local function addRouteGraphNodes(routeGraph, nodeTable)
   for nodeId, nodeDef in pairs(type(nodeTable) == "table" and nodeTable or {}) do
     if type(nodeDef) == "table" then
-      routeGraph.nodes[nodeId] = {
-        id = nodeId,
-        name = nodeDef.Name_lang or tostring(nodeId),
+      local numericNodeID = tonumber(nodeDef.NodeID or nodeDef.nodeID) or tonumber(nodeId) -- 数字节点 ID
+      local runtimeNodeID = numericNodeID or nodeId -- 运行时节点 ID
+      local walkClusterNodeID = tonumber(nodeDef.WalkClusterNodeID or nodeDef.walkClusterNodeID) -- 新版本地步行锚点数字节点 ID
+      local walkClusterKey = nodeDef.WalkClusterKey or nodeDef.walkClusterKey -- 旧版本地步行锚点字符串键
+      routeGraph.nodes[runtimeNodeID] = {
+        id = runtimeNodeID,
+        name = nodeDef.Name_lang or tostring(runtimeNodeID),
         uiMapID = tonumber(nodeDef.UiMapID),
-        source = nodeDef.Source,
-        kind = nodeDef.Kind,
-        walkClusterKey = tostring(nodeDef.WalkClusterKey or nodeDef.walkClusterKey or nodeId),
+        source = nodeDef.Source or nodeDef.source,
+        sourceID = tonumber(nodeDef.SourceID or nodeDef.sourceID),
+        kind = nodeDef.Kind or nodeDef.kind,
+        walkClusterNodeID = walkClusterNodeID,
+        walkClusterKey = type(walkClusterKey) == "string" and walkClusterKey or nil,
         taxiNodeID = tonumber(nodeDef.TaxiNodeID or nodeDef.taxiNodeID),
       }
     end
@@ -957,9 +1048,9 @@ end
 
 --- 若当前角色已在某个路径节点对应地图，添加零成本起点边。
 ---@param routeGraph table 正在构建的路径图
----@param nodeTable table|nil 节点定义表
 ---@param availabilityContext table|nil 当前角色可用性快照
-local function addCurrentLocationEdges(routeGraph, nodeTable, availabilityContext)
+---@param routeNodeLookupBySource table|nil route node 来源查找表
+local function addCurrentLocationEdges(routeGraph, availabilityContext, routeNodeLookupBySource)
   local currentMapID = tonumber(availabilityContext and availabilityContext.currentUiMapID) -- 当前角色所在地图
   if not currentMapID then
     return
@@ -980,21 +1071,19 @@ local function addCurrentLocationEdges(routeGraph, nodeTable, availabilityContex
   local edgeDegreeByUiMapID = buildEdgeDegreeByUiMapID(routeEdgeData.edges) -- 地图边数量
   local resolvedCurrentMapID = resolveRouteMapID(currentMapID, resolvedAtPositionMapID, mapNodes, edgeDegreeByUiMapID) -- 可参与导航的当前地图 ID
 
-  for nodeId, nodeDef in pairs(type(nodeTable) == "table" and nodeTable or {}) do
-    local nodeSource = nodeDef and nodeDef.Source -- 导出节点来源
-    local nodeMapID = tonumber(nodeDef and nodeDef.UiMapID) -- 导出节点对应地图
-    if nodeSource == "uimap" and nodeMapID == resolvedCurrentMapID then
-      routeGraph.edges[#routeGraph.edges + 1] = {
-        from = "current",
-        to = nodeId,
-        cost = 0,
-        stepCost = 1,
-        label = "当前位置：" .. tostring(nodeDef.Name_lang or nodeId),
-        mode = WALK_LOCAL_MODE,
-        traversedUiMapIDs = { resolvedCurrentMapID },
-        traversedUiMapNames = { tostring(nodeDef.Name_lang or nodeId) },
-      }
-    end
+  local currentNodeID = findRouteNodeIDBySourceID(routeNodeLookupBySource, "uimap", resolvedCurrentMapID, "map_anchor") -- 当前地图对应的 route node ID
+  local currentNode = currentNodeID and routeGraph.nodes[currentNodeID] or nil -- 当前地图 route node
+  if currentNodeID and currentNode then
+    routeGraph.edges[#routeGraph.edges + 1] = {
+      from = "current",
+      to = currentNodeID,
+      cost = 0,
+      stepCost = 1,
+      label = "当前位置：" .. tostring(currentNode.name or currentNodeID),
+      mode = WALK_LOCAL_MODE,
+      traversedUiMapIDs = { resolvedCurrentMapID },
+      traversedUiMapNames = { tostring(currentNode.name or currentNodeID) },
+    }
   end
 end
 
@@ -1026,21 +1115,28 @@ local function addWalkLocalEdge(routeGraph, fromNodeId, toNodeId, traversedUiMap
   }
 end
 
---- 基于 WalkClusterKey 为本地可步行节点补动态接线。
+--- 基于 WalkClusterNodeID 为本地可步行节点补动态接线。
 ---@param routeGraph table 正在构建的路径图
 local function addDynamicWalkLocalEdges(routeGraph)
   for nodeId, nodeDef in pairs(routeGraph.nodes or {}) do
-    local walkClusterKey = tostring(nodeDef and nodeDef.walkClusterKey or "") -- 节点所属本地步行连通域
-    local clusterNode = routeGraph.nodes[walkClusterKey] -- 连通域锚点节点
-    if walkClusterKey ~= "" and clusterNode ~= nil and walkClusterKey ~= nodeId then
+    local walkClusterTargetID = tonumber(nodeDef and nodeDef.walkClusterNodeID) -- 新版节点所属本地步行连通域锚点
+    if walkClusterTargetID == nil then
+      local legacyWalkClusterKey = type(nodeDef) == "table" and nodeDef.walkClusterKey or nil -- 旧版字符串锚点键
+      if type(legacyWalkClusterKey) == "string" and legacyWalkClusterKey ~= "" then
+        walkClusterTargetID = legacyWalkClusterKey
+      end
+    end
+
+    local clusterNode = walkClusterTargetID and routeGraph.nodes[walkClusterTargetID] or nil -- 连通域锚点节点
+    if walkClusterTargetID ~= nil and clusterNode ~= nil and walkClusterTargetID ~= nodeId then
       local traversedUiMapIDs = {} -- 本地步行段经过地图 ID
       local traversedUiMapNames = {} -- 本地步行段经过地图名
       appendUniqueArray(traversedUiMapIDs, { tonumber(nodeDef.uiMapID) })
       appendUniqueArray(traversedUiMapIDs, { tonumber(clusterNode.uiMapID) })
       appendUniqueArray(traversedUiMapNames, { tostring(nodeDef.name or nodeId) })
-      appendUniqueArray(traversedUiMapNames, { tostring(clusterNode.name or walkClusterKey) })
-      addWalkLocalEdge(routeGraph, nodeId, walkClusterKey, traversedUiMapIDs, traversedUiMapNames)
-      addWalkLocalEdge(routeGraph, walkClusterKey, nodeId, traversedUiMapIDs, traversedUiMapNames)
+      appendUniqueArray(traversedUiMapNames, { tostring(clusterNode.name or walkClusterTargetID) })
+      addWalkLocalEdge(routeGraph, nodeId, walkClusterTargetID, traversedUiMapIDs, traversedUiMapNames)
+      addWalkLocalEdge(routeGraph, walkClusterTargetID, nodeId, traversedUiMapIDs, traversedUiMapNames)
     end
   end
 end
@@ -1075,14 +1171,26 @@ end
 --- 解析能力模板本次查询的目标节点。
 ---@param templateDef table|nil 能力模板
 ---@param availabilityContext table|nil 当前角色可用性快照
----@return string|nil
-local function resolveAbilityTemplateTargetNodeID(templateDef, availabilityContext)
+---@param routeNodeLookupBySource table|nil route node 来源查找表
+---@return any
+local function resolveAbilityTemplateTargetNodeID(templateDef, availabilityContext, routeNodeLookupBySource)
   local targetRuleKind = tostring(type(templateDef) == "table" and (templateDef.TargetRuleKind or templateDef.targetRuleKind) or "") -- 目标规则
   if targetRuleKind == "fixed_node" then
-    return type(templateDef) == "table" and (templateDef.ToNodeID or templateDef.toNodeID) or nil
+    local rawToNodeID = type(templateDef) == "table" and (templateDef.ToNodeID or templateDef.toNodeID) or nil -- 模板原始目标节点
+    local numericToNodeID = tonumber(rawToNodeID) -- 新版数字节点 ID
+    if numericToNodeID then
+      return numericToNodeID
+    end
+    local routeSource, sourceID = parseLegacyRouteNodeKey(rawToNodeID) -- 旧版字符串节点键
+    return findRouteNodeIDBySourceID(routeNodeLookupBySource, routeSource, sourceID)
   end
   if targetRuleKind == "hearth_bind" then
-    return availabilityContext and availabilityContext.hearthBindNodeID or nil
+    local info = availabilityContext and availabilityContext.hearthBindInfo
+    local resolvedNodeID = tonumber(info and info.nodeID) -- 直接解析出的目标节点
+    if resolvedNodeID then
+      return resolvedNodeID
+    end
+    return findRouteNodeIDBySourceID(routeNodeLookupBySource, "uimap", info and info.uiMapID, "map_anchor")
   end
   return nil
 end
@@ -1090,7 +1198,8 @@ end
 --- 按当前角色配置从能力模板展开边。
 ---@param routeGraph table 正在构建的路径图
 ---@param availabilityContext table|nil 当前角色可用性快照
-local function addAbilityTemplateEdges(routeGraph, availabilityContext)
+---@param routeNodeLookupBySource table|nil route node 来源查找表
+local function addAbilityTemplateEdges(routeGraph, availabilityContext, routeNodeLookupBySource)
   local abilityTemplateData = Toolbox.Data and Toolbox.Data.NavigationAbilityTemplates or {} -- 契约导出的能力模板
   local templateTable = type(abilityTemplateData.templates) == "table" and abilityTemplateData.templates or {} -- 模板表
   local templateIDList = {} -- 稳定模板键列表
@@ -1102,7 +1211,7 @@ local function addAbilityTemplateEdges(routeGraph, availabilityContext)
   for _, templateID in ipairs(templateIDList) do
     local templateDef = templateTable[templateID] -- 模板定义
     if isAbilityTemplateAvailable(templateDef, availabilityContext) then
-      local toNodeId = resolveAbilityTemplateTargetNodeID(templateDef, availabilityContext) -- 模板展开后的目标节点
+      local toNodeId = resolveAbilityTemplateTargetNodeID(templateDef, availabilityContext, routeNodeLookupBySource) -- 模板展开后的目标节点
       local targetNode = toNodeId and routeGraph.nodes[toNodeId] or nil -- 目标节点定义
       if toNodeId and targetNode then
         routeGraph.edges[#routeGraph.edges + 1] = {
@@ -1149,7 +1258,6 @@ local function buildMapTargetRouteGraph(target, availabilityContext)
   local mapNodes = Toolbox.Data and Toolbox.Data.NavigationMapNodes and Toolbox.Data.NavigationMapNodes.nodes or {} -- 地图基础节点
   local routeEdgeData = Toolbox.Data and Toolbox.Data.NavigationRouteEdges or {} -- 契约导出的统一路线边数据
   local targetNodeId = "target" -- 目标节点 ID
-  local targetMapNodeId = "uimap_" .. tostring(targetMapID) -- 目标 UiMap 节点 ID
   local targetNode = mapNodes[targetMapID] -- 目标地图节点
   local targetName = tostring((target and target.name) or (targetNode and targetNode.Name_lang) or ("Map #" .. tostring(targetMapID))) -- 目标显示名
   local targetPointLabel = buildTargetPointLabel(target, targetName) -- 目标坐标点步骤文案
@@ -1169,12 +1277,14 @@ local function buildMapTargetRouteGraph(target, availabilityContext)
   end
 
   addRouteGraphNodes(routeGraph, mergedNodes)
+  local routeNodeLookupBySource = buildRouteNodeLookupBySource(routeGraph.nodes) -- 统一 route node 来源查找表
+  local targetMapNodeId = findRouteNodeIDBySourceID(routeNodeLookupBySource, "uimap", targetMapID, "map_anchor") -- 目标 UiMap 对应的 route node ID
   addRouteGraphEdges(routeGraph, routeEdgeData.edges)
   addDynamicWalkLocalEdges(routeGraph)
-  addCurrentLocationEdges(routeGraph, mergedNodes, availabilityContext)
-  addAbilityTemplateEdges(routeGraph, availabilityContext)
+  addCurrentLocationEdges(routeGraph, availabilityContext, routeNodeLookupBySource)
+  addAbilityTemplateEdges(routeGraph, availabilityContext, routeNodeLookupBySource)
 
-  if routeGraph.nodes[targetMapNodeId] ~= nil then
+  if targetMapNodeId and routeGraph.nodes[targetMapNodeId] ~= nil then
     routeGraph.edges[#routeGraph.edges + 1] = {
       from = targetMapNodeId,
       to = targetNodeId,

@@ -1,8 +1,8 @@
 {
   "contract": {
     "contract_id": "navigation_route_edges",
-    "schema_version": 18,
-    "summary": "navigation V2 统一静态路线骨架（map_anchor + taxi + waypoint transport + portal + areatrigger 占位）",
+    "schema_version": 19,
+    "summary": "navigation V2 统一静态路线骨架（数字 node ID：map_anchor + taxi + waypoint transport + portal + areatrigger 占位）",
     "source_of_truth": "WoWPlugin",
     "status": "active"
   },
@@ -307,7 +307,7 @@
       {
         "name": "metadata",
         "metadata": {
-          "schemaVersion": 18,
+          "schemaVersion": 19,
           "sourceMode": "live",
           "generatedAt": "@generated_at"
         }
@@ -323,9 +323,10 @@
         "required_fields": [
           "node_id",
           "node_kind",
+          "source_id",
           "ui_map_id",
           "node_name",
-          "walk_cluster_key"
+          "walk_cluster_node_id"
         ],
         "sort_by": [
           "node_id"
@@ -334,10 +335,11 @@
           "NodeID": "node_id",
           "Kind": "node_kind",
           "Source": "route_source",
+          "SourceID": "source_id",
           "UiMapID": "ui_map_id",
           "MapID": "map_id",
           "Name_lang": "node_name",
-          "WalkClusterKey": "walk_cluster_key",
+          "WalkClusterNodeID": "walk_cluster_node_id",
           "TaxiNodeID": "taxi_node_id",
           "PosX": "pos_x",
           "PosY": "pos_y",
@@ -391,7 +393,7 @@
     "sort_rules": []
   },
   "versioning": {
-    "current_schema_version": 18,
+    "current_schema_version": 19,
     "change_log": [
       {
         "schema_version": 14,
@@ -412,6 +414,10 @@
       {
         "schema_version": 18,
         "summary": "V2 waypoint transport：新增 Type=0 公共交通节点/边导出，补齐飞艇/船/地铁等静态 transport 边"
+      },
+      {
+        "schema_version": 19,
+        "summary": "V2 数字 node ID：统一把 NodeID/FromNodeID/ToNodeID 迁移为不透明数字，并新增 SourceID 与 WalkClusterNodeID"
       }
     ]
   }
