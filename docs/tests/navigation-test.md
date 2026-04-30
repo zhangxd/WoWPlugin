@@ -10,7 +10,7 @@
   - `docs/specs/navigation-spec.md`
   - `docs/designs/navigation-design.md`
   - `docs/plans/navigation-plan.md`
-- 最后更新：2026-04-29（V2 transport 已闭合）
+- 最后更新：2026-04-30（数字 node ID 回归已收口）
 
 ## 1. 测试背景
 
@@ -25,6 +25,7 @@
 - 多枢纽路径验收：统一消费契约导出的静态骨架与能力模板；手工维护 ID 的传送门与职业位移样例已废弃。
 - `NavigationMapNodes` / `NavigationTaxiEdges` / `NavigationRouteEdges` / `NavigationAbilityTemplates` 数据契约与文件头。
 - `NavigationManualEdges` 不得被 TOC 加载，`Toolbox.Navigation` 不得消费该文件。
+- `NavigationRouteEdges` / `NavigationAbilityTemplates` 的 opaque numeric node ID 口径：测试必须通过 `Source / SourceID / Kind` 或数字 `NodeID` 解析节点，不能再依赖旧字符串节点键。
 - `navigation` 模块注册、设置页契约、TOC 与本地化键。
 - `RouteBar` 顶部路径条显示 / 清除。
 - `WorldMap` 世界地图按钮创建与点击规划链路。
@@ -77,7 +78,7 @@
 - `busted tests/logic/spec/navigation_*_spec.lua`
   - 结果：通过，覆盖最少步数、`walk_local` 压缩、`taxi` 可用性、`hearthstone / class travel` 模板展开、世界地图入口与顶部路径条。
 - `python tests/run_all.py --ci`
-  - 结果：通过，`123 successes / 0 failures / 0 errors / 0 pending`。
+  - 结果：通过，`144 successes / 0 failures / 0 errors / 0 pending`。
 
 ## 6. 问题与阻塞
 
@@ -91,6 +92,7 @@
 - 本轮 `navigation_route_edges` 与 `navigation_ability_templates` 已成为运行时 V1 的两条正式数据入口；`Toolbox.Navigation` 不再直接消费来源侧候选边，也不消费手工路径数据。
 - 当前代码链路满足”世界地图目标 / 副本入口目标 -> 导出数据消费 -> 最少步数求解 -> 顶部路径 UI”的 V1 验收。
 - 自 2026-04-30 起，`银月城 -> 东瘟疫之地` 已成为正向回归样例：`portal_118/556`、`taxi_82`、奥格传送门房并入与 `edges` 连续序列约束均由测试锁定。
+- 自 2026-04-30 起，`navigation_api_spec.lua` 与 `navigation_data_spec.lua` 已完成数字 node ID 迁移；回归断言统一通过 `Source / SourceID / Kind` 或数字 `NodeID` 解析节点，不再依赖 `portal_118`、`taxi_3131` 这类旧字符串键。
 - 后续重点转向 `areatrigger / 道标石 / walk component` 等未闭合模态，以及更强的“唯一公共路径 / 只能飞”判定能力。
 
 ## 8. 修订记录
@@ -107,3 +109,4 @@
 | 2026-04-29 | V1 口径切换为”当前角色配置 + 最少路径步数”，新增 `navigation_ability_templates` 与 `KnownTaxiNodeIDs / HearthBindNodeID` 回归验证 |
 | 2026-04-30 | 导出闭环回归：`银月城 -> 东瘟疫之地` 由 `NO_ROUTE` 缺口样例升级为正向样例；新增 `edges` 连续序列与东部王国公共交通链路回归 |
 | 2026-04-29 | V2 推进：`transport`（飞艇/船）闭合，新增 NAV-016 验证 transport 模式边的可用性过滤与路线输出 |
+| 2026-04-30 | 数字 node ID 收口：导航 API / Data 逻辑测试迁移到 `Source / SourceID / Kind` 与数字 `NodeID` 口径；`run_all.py --ci` 更新为 `144 successes` |

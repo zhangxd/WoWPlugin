@@ -98,6 +98,14 @@ describe("Navigation RouteBar", function()
           end,
         },
       },
+      Data = {
+        NavigationMapNodes = {
+          nodes = {
+            [85] = { Name_lang = "奥格瑞玛" },
+            [114] = { Name_lang = "北风苔原" },
+          },
+        },
+      },
       L = {
         NAVIGATION_ROUTE_EMPTY = "暂无路线",
         NAVIGATION_ROUTE_WIDGET_STEP_FMT = "第%d/%d步",
@@ -241,6 +249,53 @@ describe("Navigation RouteBar", function()
     }
     Toolbox.NavigationModule.RouteBar.RefreshLiveState()
     assert.is_true(string.find(routeBarFrame._capsuleStatus:GetText(), "已到达终点", 1, true) ~= nil)
+  end)
+
+  it("shows_same_map_start_current_and_target_with_real_map_coordinates", function()
+    locationSnapshot = {
+      currentUiMapID = 114,
+      currentX = 0.41,
+      currentY = 0.51,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute({
+      totalSteps = 1,
+      segments = {
+        {
+          mode = "walk_local",
+          label = "目标位置：北风苔原 52.0, 43.0",
+          fromName = "当前位置",
+          toName = "北风苔原目标点",
+          fromUiMapID = 114,
+          toUiMapID = 114,
+          traversedUiMapIDs = { 114 },
+          traversedUiMapNames = { "北风苔原" },
+        },
+      },
+    }, {
+      uiMapID = 114,
+      x = 0.52,
+      y = 0.43,
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    routeBarFrame._capsuleButton:RunScript("OnClick")
+
+    local timelineText = routeBarFrame._timelineText:GetText() -- 展开态时间线文本
+    assert.is_true(string.find(timelineText, "起始位置：北风苔原 41.0, 51.0", 1, true) ~= nil)
+    assert.is_true(string.find(timelineText, "终点位置：北风苔原 52.0, 43.0", 1, true) ~= nil)
+    assert.is_true(string.find(timelineText, "当前位置：北风苔原 41.0, 51.0", 1, true) ~= nil)
+
+    locationSnapshot = {
+      currentUiMapID = 114,
+      currentX = 0.45,
+      currentY = 0.55,
+    }
+    Toolbox.NavigationModule.RouteBar.RefreshLiveState()
+
+    timelineText = routeBarFrame._timelineText:GetText()
+    assert.is_true(string.find(timelineText, "起始位置：北风苔原 41.0, 51.0", 1, true) ~= nil)
+    assert.is_true(string.find(timelineText, "当前位置：北风苔原 45.0, 55.0", 1, true) ~= nil)
   end)
 
   it("prefers_cleaned_segment_labels_for_player_facing_route_text", function()

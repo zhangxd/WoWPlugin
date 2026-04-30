@@ -533,6 +533,36 @@ local function buildHearthBindInfo(faction)
   }
 end
 
+--- 按 UiMapID 从导出的 route nodes 中解析炉石绑定的 map_anchor 节点。
+--- 数字 node ID 迁移后优先返回数字节点；旧版字符串键数据仍兼容返回原字符串键。
+---@param uiMapID number|nil 绑定落点 UiMapID
+---@return any
+local function resolveHearthBindRouteNodeIDByUiMapID(uiMapID)
+  local numericUiMapID = tonumber(uiMapID) -- 绑定落点地图 ID
+  if not numericUiMapID or numericUiMapID <= 0 then
+    return nil
+  end
+
+  local routeNodeTable = Toolbox.Data and Toolbox.Data.NavigationRouteEdges and Toolbox.Data.NavigationRouteEdges.nodes or nil -- 统一路线边导出的节点表
+  local bestNodeID = nil -- 当前命中的最优 route node ID
+  for nodeId, nodeDef in pairs(type(routeNodeTable) == "table" and routeNodeTable or {}) do
+    if type(nodeDef) == "table"
+      and tostring(nodeDef.Source or nodeDef.source) == "uimap"
+      and tostring(nodeDef.Kind or nodeDef.kind) == "map_anchor"
+      and tonumber(nodeDef.UiMapID or nodeDef.uiMapID) == numericUiMapID then
+      local runtimeNodeID = tonumber(nodeDef.NodeID or nodeDef.nodeID) or tonumber(nodeId) or nodeId -- 兼容新旧节点 ID 口径
+      if bestNodeID == nil then
+        bestNodeID = runtimeNodeID
+      elseif tonumber(runtimeNodeID) and tonumber(bestNodeID) and tonumber(runtimeNodeID) < tonumber(bestNodeID) then
+        bestNodeID = runtimeNodeID
+      elseif tostring(runtimeNodeID) < tostring(bestNodeID) then
+        bestNodeID = runtimeNodeID
+      end
+    end
+  end
+  return bestNodeID
+end
+
 --- 从导出的导航节点表中收集当前角色已开航点集合。
 ---@return table
 local function buildKnownTaxiNodeByID()
@@ -636,6 +666,7 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
     currentY = nil,
     knownSpellByID = {},
     knownTaxiNodeByID = {},
+    hearthBindNodeID = nil,
     hearthBindInfo = nil,
   } -- 当前角色可用性快照
 
@@ -661,8 +692,14 @@ function Toolbox.Navigation.BuildCurrentCharacterAvailability(spellIDList)
   availabilityContext.knownTaxiNodeByID = buildKnownTaxiNodeByID()
 
   -- 炉石绑定信息：当前先保留 faction -> 主城的数值降级路径
-  -- 后续若数据管线补出显式静态映射，只需要继续填充 hearthBindInfo 即可
+  -- 兼容层继续回填 hearthBindNodeID；数字 node ID 迁移后优先返回数字节点 ID
   availabilityContext.hearthBindInfo = buildHearthBindInfo(availabilityContext.faction)
+  availabilityContext.hearthBindNodeID = resolveHearthBindRouteNodeIDByUiMapID(
+    availabilityContext.hearthBindInfo and availabilityContext.hearthBindInfo.uiMapID
+  )
+  if type(availabilityContext.hearthBindInfo) == "table" and tonumber(availabilityContext.hearthBindNodeID) then
+    availabilityContext.hearthBindInfo.nodeID = tonumber(availabilityContext.hearthBindNodeID)
+  end
 
   local spellBookApi = type(C_SpellBook) == "table" and C_SpellBook or nil -- spellbook API 表
   local spellCheckFn = spellBookApi and (spellBookApi.IsSpellInSpellBook or spellBookApi.IsSpellKnown) or nil -- 技能已学判定
@@ -1185,6 +1222,17 @@ local function resolveAbilityTemplateTargetNodeID(templateDef, availabilityConte
     return findRouteNodeIDBySourceID(routeNodeLookupBySource, routeSource, sourceID)
   end
   if targetRuleKind == "hearth_bind" then
+    local explicitNodeID = availabilityContext and availabilityContext.hearthBindNodeID -- 兼容旧输入字段的炉石落点节点
+    local numericExplicitNodeID = tonumber(explicitNodeID) -- 数字节点 ID 优先
+    if numericExplicitNodeID then
+      return numericExplicitNodeID
+    end
+    local explicitRouteSource, explicitSourceID = parseLegacyRouteNodeKey(explicitNodeID) -- 旧版字符串节点键
+    local compatibilityNodeID = findRouteNodeIDBySourceID(routeNodeLookupBySource, explicitRouteSource, explicitSourceID)
+    if compatibilityNodeID ~= nil then
+      return compatibilityNodeID
+    end
+
     local info = availabilityContext and availabilityContext.hearthBindInfo
     local resolvedNodeID = tonumber(info and info.nodeID) -- 直接解析出的目标节点
     if resolvedNodeID then

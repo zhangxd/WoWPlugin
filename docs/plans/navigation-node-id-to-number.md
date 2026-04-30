@@ -1,7 +1,7 @@
 # 导航节点不透明数字 ID 迁移计划
 
 - 文档类型：计划
-- 状态：草稿
+- 状态：已完成
 - 主题：navigation-node-id-to-number
 - 适用范围：`navigation` 模块运行时节点 ID；`navigation_route_edges` / `navigation_ability_templates` 导出链路；导航相关逻辑测试
 - 关联模块：`navigation`
@@ -75,12 +75,12 @@
 
 ## 6. 执行步骤
 
-- [ ] 步骤 1：调整 `navigation_route_edges` 补全逻辑，生成统一的数字 `node_id` 分配结果，并同步产出 `sourceIndex` 与 `walkCluster` 关联字段。
-- [ ] 步骤 2：调整 `navigation_ability_templates` 导出逻辑，让 `fixed_node` 模板目标在同一次导出流程中解析为数字 node ID，而不是独立拼接 `uimap_*`。
-- [ ] 步骤 3：扩展 `DataContracts/navigation_route_edges.json` 与 `DataContracts/navigation_ability_templates.json`，并补齐 writer / validator 对新增结构和 number node ref 的支持。
-- [ ] 步骤 4：修改 `Toolbox/Core/API/Navigation.lua` 与 `Toolbox/Modules/Navigation/WorldMap.lua`，把运行时 lookup 从字符串拼接改为显式索引查表。
-- [ ] 步骤 5：更新逻辑测试 fixture 与断言，覆盖 `sourceIndex`、`walkCluster` 接线、目标地图解析、炉石 / 传送 / 传送门模板展开。
-- [ ] 步骤 6：重跑导出、校验与逻辑测试，并回写设计 / 测试 / 总设计文档。
+- [x] 步骤 1：调整 `navigation_route_edges` 补全逻辑，生成统一的数字 `node_id` 分配结果，并同步产出 `sourceIndex` 与 `walkCluster` 关联字段。
+- [x] 步骤 2：调整 `navigation_ability_templates` 导出逻辑，让 `fixed_node` 模板目标在同一次导出流程中解析为数字 node ID，而不是独立拼接 `uimap_*`。
+- [x] 步骤 3：扩展 `DataContracts/navigation_route_edges.json` 与 `DataContracts/navigation_ability_templates.json`，并补齐 writer / validator 对新增结构和 number node ref 的支持。
+- [x] 步骤 4：修改 `Toolbox/Core/API/Navigation.lua` 与 `Toolbox/Modules/Navigation/WorldMap.lua`，把运行时 lookup 从字符串拼接改为显式索引查表。
+- [x] 步骤 5：更新逻辑测试 fixture 与断言，覆盖 `sourceIndex`、`walkCluster` 接线、目标地图解析、炉石 / 传送 / 传送门模板展开。
+- [x] 步骤 6：重跑导出、校验与逻辑测试，并回写设计 / 测试 / 总设计文档。
 
 ## 7. 验证
 
@@ -110,10 +110,15 @@
 
 ## 9. 执行记录
 
-- 2026-04-30：需求方确认采用“不透明数字 ID”方案；当前仅完成计划文档收口，尚未开动代码实现。
+- 2026-04-30：需求方确认采用“不透明数字 ID”方案。
+- 2026-04-30：需求方已明确继续推进；本计划自即刻起转入可执行状态，可开始修改导航业务代码、导出产物与逻辑测试。
+- 2026-04-30：已完成 `navigation_route_edges` / `navigation_ability_templates` 正式重导出，并通过导出链路 Python 单元测试；当前阻塞点收口为 navigation 逻辑测试仍存在旧字符串 node ID / `WalkClusterKey` 断言，需继续对齐数字 node ID 新口径。
+- 2026-04-30：已完成 `Navigation.lua` 炉石绑定兼容层、`navigation_api_spec` / `navigation_data_spec` 新口径迁移，并通过 `python tests/run_all.py --ci`（`144 successes / 0 failures / 0 errors / 0 pending`）。
 
 ## 10. 修订记录
 
 | 日期 | 内容 |
 |------|------|
 | 2026-04-30 | 将“采用不透明数字 ID”写入计划，并补齐共享映射、`walkCluster`、合成节点与 writer 能力等开工前前置项 |
+| 2026-04-30 | 按需求方“继续”确认把计划状态切为可执行，并补记已完成的重导出与当前测试阻塞点 |
+| 2026-04-30 | 数字 node ID 迁移收尾：计划状态改为已完成，并补记 runtime 兼容层、逻辑测试迁移与全量验证结果 |

@@ -31,6 +31,63 @@ describe("Navigation API", function()
     return knownTaxiNodeByID
   end
 
+  local function resolveExportedRouteNodeID(routeSource, sourceID, routeKind)
+    local routeNodeTable = Toolbox.Data and Toolbox.Data.NavigationRouteEdges and Toolbox.Data.NavigationRouteEdges.nodes or {} -- 导出的导航节点表
+    local normalizedSource = tostring(routeSource or "") -- 节点来源
+    local numericSourceID = tonumber(sourceID) -- 来源侧主键
+    local normalizedKind = tostring(routeKind or "") -- 节点类型
+    local bestNodeID = nil -- 当前命中的最优节点 ID
+    if normalizedSource == "" or not numericSourceID or numericSourceID <= 0 then
+      return nil
+    end
+
+    for nodeKey, nodeDef in pairs(routeNodeTable) do
+      local runtimeNodeID = tonumber(type(nodeDef) == "table" and (nodeDef.NodeID or nodeDef.nodeID)) or tonumber(nodeKey) or nodeKey -- 运行时节点 ID
+      local nodeSource = tostring(type(nodeDef) == "table" and (nodeDef.Source or nodeDef.source) or "") -- 节点来源
+      local nodeSourceID = tonumber(type(nodeDef) == "table" and (nodeDef.SourceID or nodeDef.sourceID)) -- 节点来源侧主键
+      local nodeKind = tostring(type(nodeDef) == "table" and (nodeDef.Kind or nodeDef.kind) or "") -- 节点类型
+      if nodeSource == normalizedSource and nodeSourceID == numericSourceID and (normalizedKind == "" or nodeKind == normalizedKind) then
+        if bestNodeID == nil then
+          bestNodeID = runtimeNodeID
+        elseif tonumber(runtimeNodeID) and tonumber(bestNodeID) and tonumber(runtimeNodeID) < tonumber(bestNodeID) then
+          bestNodeID = runtimeNodeID
+        elseif tostring(runtimeNodeID) < tostring(bestNodeID) then
+          bestNodeID = runtimeNodeID
+        end
+      end
+    end
+
+    return bestNodeID
+  end
+
+  local function buildResolvedNodeIDSet(nodeSpecList)
+    local nodeIDSet = {} -- 已解析的节点集合
+    for _, nodeSpec in ipairs(nodeSpecList or {}) do
+      local runtimeNodeID = resolveExportedRouteNodeID(nodeSpec.source, nodeSpec.sourceID, nodeSpec.kind) -- 解析后的运行时节点 ID
+      assert.is_not_nil(runtimeNodeID)
+      nodeIDSet[runtimeNodeID] = true
+    end
+    return nodeIDSet
+  end
+
+  local function rawPathUsesResolvedEdge(rawEdgePath, fromNodeSpec, toNodeSpec, expectedMode)
+    local fromNodeID = resolveExportedRouteNodeID(fromNodeSpec.source, fromNodeSpec.sourceID, fromNodeSpec.kind) -- 解析后的起点节点 ID
+    local toNodeID = resolveExportedRouteNodeID(toNodeSpec.source, toNodeSpec.sourceID, toNodeSpec.kind) -- 解析后的终点节点 ID
+    assert.is_not_nil(fromNodeID)
+    assert.is_not_nil(toNodeID)
+
+    for _, edgeDef in ipairs(rawEdgePath or {}) do
+      local edgeFromNodeID = tonumber(edgeDef.FromNodeID or edgeDef.from or edgeDef.From) or (edgeDef.FromNodeID or edgeDef.from or edgeDef.From) -- 原始路径边起点
+      local edgeToNodeID = tonumber(edgeDef.ToNodeID or edgeDef.to or edgeDef.To) or (edgeDef.ToNodeID or edgeDef.to or edgeDef.To) -- 原始路径边终点
+      local edgeMode = tostring(edgeDef.Mode or edgeDef.mode or "") -- 原始路径边模式
+      if edgeFromNodeID == fromNodeID and edgeToNodeID == toNodeID and (expectedMode == nil or edgeMode == expectedMode) then
+        return true
+      end
+    end
+
+    return false
+  end
+
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
     originalUnitClass = rawget(_G, "UnitClass")
@@ -254,14 +311,16 @@ describe("Navigation API", function()
   it("builds_current_character_availability_from_runtime_spellbook_taxi_map_and_bind_location", function()
     local checkedSpellIDList = {} -- 被查询的技能 ID
     setNavigationData({
-      taxi_start = { NodeID = "taxi_start", Kind = "taxi", UiMapID = 1, Name_lang = "起点飞行点", WalkClusterKey = "uimap_1", TaxiNodeID = 100 },
-      taxi_hidden = { NodeID = "taxi_hidden", Kind = "taxi", UiMapID = 1, Name_lang = "未开飞行点", WalkClusterKey = "uimap_1", TaxiNodeID = 101 },
-      taxi_target = { NodeID = "taxi_target", Kind = "taxi", UiMapID = 2, Name_lang = "目标飞行点", WalkClusterKey = "uimap_2", TaxiNodeID = 200 },
-      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", UiMapID = 1, Name_lang = "起点地图", WalkClusterKey = "uimap_1" },
-      uimap_2 = { NodeID = "uimap_2", Kind = "map_anchor", UiMapID = 2, Name_lang = "绑定地图", WalkClusterKey = "uimap_2" },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
+      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "绑定地图", WalkClusterNodeID = 2 },
+      [85] = { NodeID = 85, Kind = "map_anchor", Source = "uimap", SourceID = 85, UiMapID = 85, Name_lang = "奥格瑞玛", WalkClusterNodeID = 85 },
+      [100] = { NodeID = 100, Kind = "taxi", Source = "taxi", SourceID = 100, UiMapID = 1, Name_lang = "起点飞行点", WalkClusterNodeID = 1, TaxiNodeID = 100 },
+      [101] = { NodeID = 101, Kind = "taxi", Source = "taxi", SourceID = 101, UiMapID = 1, Name_lang = "未开飞行点", WalkClusterNodeID = 1, TaxiNodeID = 101 },
+      [200] = { NodeID = 200, Kind = "taxi", Source = "taxi", SourceID = 200, UiMapID = 2, Name_lang = "目标飞行点", WalkClusterNodeID = 2, TaxiNodeID = 200 },
     }, {}, {
       [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
       [2] = { Name_lang = "绑定地图", MapType = 3, ParentUiMapID = 0 },
+      [85] = { Name_lang = "奥格瑞玛", MapType = 3, ParentUiMapID = 0 },
     }, {})
     rawset(_G, "UnitClass", function()
       return "法师", "MAGE", 8
@@ -314,7 +373,8 @@ describe("Navigation API", function()
     assert.is_true(availabilityContext.knownTaxiNodeByID[100])
     assert.is_nil(availabilityContext.knownTaxiNodeByID[101])
     assert.is_true(availabilityContext.knownTaxiNodeByID[200])
-    assert.equals("uimap_2", availabilityContext.hearthBindNodeID)
+    assert.equals(85, availabilityContext.hearthBindNodeID)
+    assert.same({ areaID = nil, uiMapID = 85, nodeID = 85 }, availabilityContext.hearthBindInfo)
     assert.same({ 3567, 999999 }, checkedSpellIDList)
   end)
 
@@ -358,8 +418,8 @@ describe("Navigation API", function()
 
   it("expands_hearthstone_template_only_when_spell_and_bind_node_are_available", function()
     setNavigationData({
-      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", Source = "uimap", UiMapID = 1, Name_lang = "起点地图", WalkClusterKey = "uimap_1" },
-      uimap_2 = { NodeID = "uimap_2", Kind = "map_anchor", Source = "uimap", UiMapID = 2, Name_lang = "炉石绑定地", WalkClusterKey = "uimap_2" },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
+      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "炉石绑定地", WalkClusterNodeID = 2 },
     }, {}, {
       [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
       [2] = { Name_lang = "炉石绑定地", MapType = 3, ParentUiMapID = 0 },
@@ -388,7 +448,10 @@ describe("Navigation API", function()
         [8690] = true,
       },
       knownTaxiNodeByID = {},
-      hearthBindNodeID = "uimap_2",
+      hearthBindInfo = {
+        uiMapID = 2,
+        nodeID = 2,
+      },
     })
 
     assert.is_table(routeResult)
@@ -405,7 +468,10 @@ describe("Navigation API", function()
       currentUiMapID = 1,
       knownSpellByID = {},
       knownTaxiNodeByID = {},
-      hearthBindNodeID = "uimap_2",
+      hearthBindInfo = {
+        uiMapID = 2,
+        nodeID = 2,
+      },
     })
 
     assert.is_nil(noSpellRoute)
@@ -431,8 +497,8 @@ describe("Navigation API", function()
 
   it("expands_class_templates_only_when_class_faction_and_spell_match", function()
     setNavigationData({
-      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", Source = "uimap", UiMapID = 1, Name_lang = "起点地图", WalkClusterKey = "uimap_1" },
-      uimap_85 = { NodeID = "uimap_85", Kind = "map_anchor", Source = "uimap", UiMapID = 85, Name_lang = "奥格瑞玛", WalkClusterKey = "uimap_85" },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
+      [85] = { NodeID = 85, Kind = "map_anchor", Source = "uimap", SourceID = 85, UiMapID = 85, Name_lang = "奥格瑞玛", WalkClusterNodeID = 85 },
     }, {}, {
       [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
       [85] = { Name_lang = "奥格瑞玛", MapType = 3, ParentUiMapID = 0 },
@@ -444,7 +510,7 @@ describe("Navigation API", function()
         ClassFile = "MAGE",
         FactionGroup = "Horde",
         TargetRuleKind = "fixed_node",
-        ToNodeID = "uimap_85",
+        ToNodeID = 85,
         Label = "传送：奥格瑞玛",
         SelfUseOnly = true,
       },
@@ -487,15 +553,15 @@ describe("Navigation API", function()
 
   it("allows_taxi_routes_only_when_both_endpoint_nodes_are_known", function()
     setNavigationData({
-      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", Source = "uimap", UiMapID = 1, Name_lang = "起点地图", WalkClusterKey = "uimap_1" },
-      uimap_2 = { NodeID = "uimap_2", Kind = "map_anchor", Source = "uimap", UiMapID = 2, Name_lang = "目标地图", WalkClusterKey = "uimap_2" },
-      taxi_100 = { NodeID = "taxi_100", Kind = "taxi", Source = "taxi", UiMapID = 1, Name_lang = "起点飞行点", WalkClusterKey = "uimap_1", TaxiNodeID = 100 },
-      taxi_200 = { NodeID = "taxi_200", Kind = "taxi", Source = "taxi", UiMapID = 2, Name_lang = "目标飞行点", WalkClusterKey = "uimap_2", TaxiNodeID = 200 },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
+      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "目标地图", WalkClusterNodeID = 2 },
+      [100] = { NodeID = 100, Kind = "taxi", Source = "taxi", SourceID = 100, UiMapID = 1, Name_lang = "起点飞行点", WalkClusterNodeID = 1, TaxiNodeID = 100 },
+      [200] = { NodeID = 200, Kind = "taxi", Source = "taxi", SourceID = 200, UiMapID = 2, Name_lang = "目标飞行点", WalkClusterNodeID = 2, TaxiNodeID = 200 },
     }, {
       {
         ID = 9001,
-        FromNodeID = "taxi_100",
-        ToNodeID = "taxi_200",
+        FromNodeID = 100,
+        ToNodeID = 200,
         FromTaxiNodeID = 100,
         ToTaxiNodeID = 200,
         FromUiMapID = 1,
@@ -552,15 +618,15 @@ describe("Navigation API", function()
 
   it("routes_transport_edges_when_both_endpoint_nodes_are_known", function()
     setNavigationData({
-      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", Source = "uimap", UiMapID = 1, Name_lang = "起点地图", WalkClusterKey = "uimap_1" },
-      uimap_2 = { NodeID = "uimap_2", Kind = "map_anchor", Source = "uimap", UiMapID = 2, Name_lang = "目标地图", WalkClusterKey = "uimap_2" },
-      taxi_35 = { NodeID = "taxi_35", Kind = "taxi", Source = "taxi", UiMapID = 1, Name_lang = "交通工具，起点", WalkClusterKey = "uimap_1", TaxiNodeID = 35 },
-      taxi_90 = { NodeID = "taxi_90", Kind = "taxi", Source = "taxi", UiMapID = 2, Name_lang = "交通工具，目标", WalkClusterKey = "uimap_2", TaxiNodeID = 90 },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
+      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "目标地图", WalkClusterNodeID = 2 },
+      [35] = { NodeID = 35, Kind = "taxi", Source = "taxi", SourceID = 35, UiMapID = 1, Name_lang = "交通工具，起点", WalkClusterNodeID = 1, TaxiNodeID = 35 },
+      [90] = { NodeID = 90, Kind = "taxi", Source = "taxi", SourceID = 90, UiMapID = 2, Name_lang = "交通工具，目标", WalkClusterNodeID = 2, TaxiNodeID = 90 },
     }, {
       {
         ID = 9002,
-        FromNodeID = "taxi_35",
-        ToNodeID = "taxi_90",
+        FromNodeID = 35,
+        ToNodeID = 90,
         FromTaxiNodeID = 35,
         ToTaxiNodeID = 90,
         FromUiMapID = 1,
@@ -619,14 +685,14 @@ describe("Navigation API", function()
 
   it("ignores_legacy_target_rules_from_route_edge_exports", function()
     setNavigationData({
-      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", Source = "uimap", UiMapID = 1, Name_lang = "起点地图", WalkClusterKey = "uimap_1" },
-      uimap_2 = { NodeID = "uimap_2", Kind = "map_anchor", Source = "uimap", UiMapID = 2, Name_lang = "目标地图", WalkClusterKey = "uimap_2" },
-      relay = { NodeID = "relay", Kind = "portal", Source = "portal", UiMapID = 2, Name_lang = "旧中转点", WalkClusterKey = "relay" },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
+      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "目标地图", WalkClusterNodeID = 2 },
+      [300] = { NodeID = 300, Kind = "portal", Source = "portal", SourceID = 300, UiMapID = 2, Name_lang = "旧中转点", WalkClusterNodeID = 300 },
     }, {
       {
         ID = 9100,
-        FromNodeID = "uimap_1",
-        ToNodeID = "relay",
+        FromNodeID = 1,
+        ToNodeID = 300,
         FromUiMapID = 1,
         ToUiMapID = 2,
         StepCost = 1,
@@ -643,7 +709,7 @@ describe("Navigation API", function()
       [2] = {
         viaNodes = {
           {
-            node = "relay",
+            node = 300,
             cost = 0,
             mode = "walk_local",
             label = "旧目标规则落点",
@@ -677,8 +743,8 @@ describe("Navigation API", function()
 
   it("bridges_same_walk_cluster_nodes_with_a_single_compressed_walk_segment", function()
     setNavigationData({
-      uimap_18 = { NodeID = "uimap_18", Kind = "map_anchor", Source = "uimap", UiMapID = 18, Name_lang = "提瑞斯法林地", WalkClusterKey = "uimap_18" },
-      uimap_90 = { NodeID = "uimap_90", Kind = "map_anchor", Source = "uimap", UiMapID = 90, Name_lang = "幽暗城", WalkClusterKey = "uimap_18" },
+      [18] = { NodeID = 18, Kind = "map_anchor", Source = "uimap", SourceID = 18, UiMapID = 18, Name_lang = "提瑞斯法林地", WalkClusterNodeID = 18 },
+      [90] = { NodeID = 90, Kind = "map_anchor", Source = "uimap", SourceID = 90, UiMapID = 90, Name_lang = "幽暗城", WalkClusterNodeID = 18 },
     }, {}, {
       [18] = { Name_lang = "提瑞斯法林地", MapType = 3, ParentUiMapID = 0 },
       [90] = { Name_lang = "幽暗城", MapType = 3, ParentUiMapID = 18 },
@@ -707,15 +773,15 @@ describe("Navigation API", function()
 
   it("allows_public_portal_edges_for_all_characters_regardless_of_taxi_nodes", function()
     setNavigationData({
-      uimap_1 = { NodeID = "uimap_1", Kind = "map_anchor", Source = "uimap", UiMapID = 1, Name_lang = "暴风城", WalkClusterKey = "uimap_1" },
-      uimap_12 = { NodeID = "uimap_12", Kind = "map_anchor", Source = "uimap", UiMapID = 12, Name_lang = "卡利姆多", WalkClusterKey = "uimap_12" },
-      portal_100 = { NodeID = "portal_100", Kind = "portal", Source = "portal", UiMapID = 1, Name_lang = "使用巫师圣殿的传送门前往海加尔山", WalkClusterKey = "uimap_1" },
-      portal_200 = { NodeID = "portal_200", Kind = "portal", Source = "portal", UiMapID = 12, Name_lang = "海加尔山", WalkClusterKey = "uimap_12" },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "暴风城", WalkClusterNodeID = 1 },
+      [12] = { NodeID = 12, Kind = "map_anchor", Source = "uimap", SourceID = 12, UiMapID = 12, Name_lang = "卡利姆多", WalkClusterNodeID = 12 },
+      [100] = { NodeID = 100, Kind = "portal", Source = "portal", SourceID = 100, UiMapID = 1, Name_lang = "使用巫师圣殿的传送门前往海加尔山", WalkClusterNodeID = 1 },
+      [200] = { NodeID = 200, Kind = "portal", Source = "portal", SourceID = 200, UiMapID = 12, Name_lang = "海加尔山", WalkClusterNodeID = 12 },
     }, {
       {
         ID = 0,
-        FromNodeID = "portal_100",
-        ToNodeID = "portal_200",
+        FromNodeID = 100,
+        ToNodeID = 200,
         FromUiMapID = 1,
         ToUiMapID = 12,
         StepCost = 1,
@@ -877,12 +943,15 @@ describe("Navigation API", function()
     assert.is_nil(errorObject)
     assert.is_table(routeResult)
 
-    local usedSilvermoonTirisfalPortal = false -- 是否使用了银月城宝珠到提瑞斯法出口
-    for _, edgeDef in ipairs(routeResult.rawEdgePath or {}) do
-      if edgeDef.FromNodeID == "portal_118" and edgeDef.ToNodeID == "portal_119" then
-        usedSilvermoonTirisfalPortal = true
-      end
-    end
+    local usedSilvermoonTirisfalPortal = rawPathUsesResolvedEdge(routeResult.rawEdgePath, {
+      source = "portal",
+      sourceID = 118,
+      kind = "portal",
+    }, {
+      source = "portal",
+      sourceID = 119,
+      kind = "portal",
+    }, "public_portal") -- 是否使用了银月城宝珠到提瑞斯法出口
 
     assert.is_true(usedSilvermoonTirisfalPortal)
   end)
@@ -903,12 +972,15 @@ describe("Navigation API", function()
     assert.is_nil(errorObject)
     assert.is_table(routeResult)
 
-    local usedSilvermoonOrgrimmarPortal = false -- 是否使用了银月城到奥格的公共传送门
-    for _, edgeDef in ipairs(routeResult.rawEdgePath or {}) do
-      if edgeDef.FromNodeID == "portal_117" and edgeDef.ToNodeID == "portal_101" then
-        usedSilvermoonOrgrimmarPortal = true
-      end
-    end
+    local usedSilvermoonOrgrimmarPortal = rawPathUsesResolvedEdge(routeResult.rawEdgePath, {
+      source = "portal",
+      sourceID = 117,
+      kind = "portal",
+    }, {
+      source = "portal",
+      sourceID = 101,
+      kind = "portal",
+    }, "public_portal") -- 是否使用了银月城到奥格的公共传送门
 
     assert.is_true(usedSilvermoonOrgrimmarPortal)
   end)
@@ -948,16 +1020,24 @@ describe("Navigation API", function()
     assert.is_table(routeResult)
     assert.equals(3, routeResult.totalSteps)
 
-    local usedDirectTransport = false -- 是否使用了奥格到北风苔原的公共交通
-    local usedDalaranTaxiFallback = false -- 是否错误地回退到达拉然飞行点
-    for _, edgeDef in ipairs(routeResult.rawEdgePath or {}) do
-      if tostring(edgeDef.Mode or edgeDef.mode) == "transport" and string.find(tostring(edgeDef.Label or edgeDef.label or ""), "北风苔原", 1, true) ~= nil then
-        usedDirectTransport = true
-      end
-      if tostring(edgeDef.FromNodeID or edgeDef.from or "") == "taxi_310" and tostring(edgeDef.ToNodeID or edgeDef.to or "") == "taxi_257" then
-        usedDalaranTaxiFallback = true
-      end
-    end
+    local usedDirectTransport = rawPathUsesResolvedEdge(routeResult.rawEdgePath, {
+      source = "waypoint_transport",
+      sourceID = 150,
+      kind = "transport",
+    }, {
+      source = "waypoint_transport",
+      sourceID = 151,
+      kind = "transport",
+    }, "transport") -- 是否使用了奥格到北风苔原的公共交通
+    local usedDalaranTaxiFallback = rawPathUsesResolvedEdge(routeResult.rawEdgePath, {
+      source = "taxi",
+      sourceID = 310,
+      kind = "taxi",
+    }, {
+      source = "taxi",
+      sourceID = 257,
+      kind = "taxi",
+    }, "taxi") -- 是否错误地回退到达拉然飞行点
 
     assert.is_true(usedDirectTransport)
     assert.is_false(usedDalaranTaxiFallback)
@@ -980,28 +1060,47 @@ describe("Navigation API", function()
     assert.is_table(routeResult)
     assert.is_true((routeResult.totalSteps or 0) > 0)
 
+    local newSilvermoonNodeIDSet = buildResolvedNodeIDSet({ -- 新版银月城 / 永歌森林链节点集合
+      { source = "uimap", sourceID = 2393, kind = "map_anchor" },
+      { source = "uimap", sourceID = 2395, kind = "map_anchor" },
+      { source = "taxi", sourceID = 3131, kind = "taxi" },
+      { source = "taxi", sourceID = 3132, kind = "taxi" },
+    })
+    local newSilvermoonTaxiNodeIDSet = buildResolvedNodeIDSet({ -- 新版银月城 / 永歌森林 taxi 集合
+      { source = "taxi", sourceID = 3131, kind = "taxi" },
+      { source = "taxi", sourceID = 3132, kind = "taxi" },
+      { source = "taxi", sourceID = 3133, kind = "taxi" },
+      { source = "taxi", sourceID = 3134, kind = "taxi" },
+    })
+    local zulamanTaxiNodeIDSet = buildResolvedNodeIDSet({ -- 祖阿曼 taxi 集合
+      { source = "taxi", sourceID = 3106, kind = "taxi" },
+      { source = "taxi", sourceID = 3126, kind = "taxi" },
+      { source = "taxi", sourceID = 3127, kind = "taxi" },
+      { source = "taxi", sourceID = 3128, kind = "taxi" },
+      { source = "taxi", sourceID = 3129, kind = "taxi" },
+      { source = "taxi", sourceID = 3130, kind = "taxi" },
+    })
+    local legacySilvermoonNodeIDSet = buildResolvedNodeIDSet({ -- 旧版银月城链节点集合
+      { source = "uimap", sourceID = 110, kind = "map_anchor" },
+      { source = "taxi", sourceID = 82, kind = "taxi" },
+      { source = "taxi", sourceID = 625, kind = "taxi" },
+      { source = "taxi", sourceID = 631, kind = "taxi" },
+      { source = "taxi", sourceID = 83, kind = "taxi" },
+      { source = "taxi", sourceID = 205, kind = "taxi" },
+    })
     local usedNewSilvermoonChain = false -- 是否保留了新版银月城 / 永歌森林链
     local usedNewZulamanTaxiChain = false -- 是否接入了新版祖阿曼 taxi
     local usedLegacySilvermoonTaxi = false -- 是否错误回退到了旧版 82/625/83/205 链
     for _, edgeDef in ipairs(routeResult.rawEdgePath or {}) do
-      local fromNodeID = tostring(edgeDef.FromNodeID or "")
-      local toNodeID = tostring(edgeDef.ToNodeID or "")
-      if fromNodeID == "uimap_2393" or toNodeID == "uimap_2393"
-        or fromNodeID == "uimap_2395" or toNodeID == "uimap_2395"
-        or fromNodeID == "taxi_3131" or toNodeID == "taxi_3131"
-        or fromNodeID == "taxi_3132" or toNodeID == "taxi_3132" then
+      local fromNodeID = tonumber(edgeDef.FromNodeID or edgeDef.from or edgeDef.From) or (edgeDef.FromNodeID or edgeDef.from or edgeDef.From) -- 原始路径边起点
+      local toNodeID = tonumber(edgeDef.ToNodeID or edgeDef.to or edgeDef.To) or (edgeDef.ToNodeID or edgeDef.to or edgeDef.To) -- 原始路径边终点
+      if newSilvermoonNodeIDSet[fromNodeID] or newSilvermoonNodeIDSet[toNodeID] then
         usedNewSilvermoonChain = true
       end
-      if (fromNodeID == "taxi_3131" or fromNodeID == "taxi_3132" or fromNodeID == "taxi_3133" or fromNodeID == "taxi_3134")
-        and (toNodeID == "taxi_3106" or toNodeID == "taxi_3126" or toNodeID == "taxi_3127" or toNodeID == "taxi_3128" or toNodeID == "taxi_3129" or toNodeID == "taxi_3130") then
+      if newSilvermoonTaxiNodeIDSet[fromNodeID] and zulamanTaxiNodeIDSet[toNodeID] then
         usedNewZulamanTaxiChain = true
       end
-      if fromNodeID == "uimap_110" or toNodeID == "uimap_110"
-        or fromNodeID == "taxi_82" or toNodeID == "taxi_82"
-        or fromNodeID == "taxi_625" or toNodeID == "taxi_625"
-        or fromNodeID == "taxi_631" or toNodeID == "taxi_631"
-        or fromNodeID == "taxi_83" or toNodeID == "taxi_83"
-        or fromNodeID == "taxi_205" or toNodeID == "taxi_205" then
+      if legacySilvermoonNodeIDSet[fromNodeID] or legacySilvermoonNodeIDSet[toNodeID] then
         usedLegacySilvermoonTaxi = true
       end
     end

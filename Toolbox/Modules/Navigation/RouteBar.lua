@@ -88,6 +88,76 @@ local function isNormalizedPosition(pointX, pointY)
   return type(pointX) == "number" and type(pointY) == "number" and pointX >= 0 and pointX <= 1 and pointY >= 0 and pointY <= 1
 end
 
+--- 复制一份位置快照，避免后续刷新复用同一引用。
+---@param locationSnapshot table|nil 原始位置快照
+---@return table|nil
+local function copyLocationSnapshot(locationSnapshot)
+  if type(locationSnapshot) ~= "table" then
+    return nil
+  end
+  local snapshotMapID = tonumber(locationSnapshot.currentUiMapID or locationSnapshot.uiMapID) -- 快照地图 ID
+  local snapshotX = tonumber(locationSnapshot.currentX or locationSnapshot.x) -- 快照 X
+  local snapshotY = tonumber(locationSnapshot.currentY or locationSnapshot.y) -- 快照 Y
+  if snapshotMapID == nil and snapshotX == nil and snapshotY == nil then
+    return nil
+  end
+  return {
+    currentUiMapID = snapshotMapID,
+    currentX = snapshotX,
+    currentY = snapshotY,
+  }
+end
+
+--- 读取当前角色位置快照，兼容测试注入。
+---@return table|nil
+local function getCurrentLocationSnapshot()
+  if Toolbox.Navigation and type(Toolbox.Navigation.GetCurrentLocationSnapshot) == "function" then
+    return copyLocationSnapshot(Toolbox.Navigation.GetCurrentLocationSnapshot())
+  end
+  return nil
+end
+
+--- 读取地图玩家可见名称；优先使用导出的 NavigationMapNodes。
+---@param uiMapID any 地图 ID
+---@param fallbackText any 兜底名称
+---@return string
+local function buildMapDisplayName(uiMapID, fallbackText)
+  local numericMapID = tonumber(uiMapID) -- 地图 ID
+  local nodeTable = Toolbox.Data and Toolbox.Data.NavigationMapNodes and Toolbox.Data.NavigationMapNodes.nodes or nil -- 地图节点表
+  local mapNode = type(nodeTable) == "table" and nodeTable[numericMapID] or nil -- 当前地图节点
+  local mapName = trimText(type(mapNode) == "table" and (mapNode.Name_lang or mapNode.name) or nil) -- 导出地图名称
+  if mapName ~= "" then
+    return mapName
+  end
+  local fallbackName = trimText(fallbackText) -- 兜底地图名称
+  if fallbackName ~= "" then
+    return fallbackName
+  end
+  if numericMapID and numericMapID > 0 then
+    return string.format("UiMap %d", numericMapID)
+  end
+  return ""
+end
+
+--- 将地图与坐标格式化为玩家可见文本。
+---@param uiMapID any 地图 ID
+---@param pointX any 坐标 X
+---@param pointY any 坐标 Y
+---@param fallbackText any 兜底名称
+---@return string
+local function buildPositionDisplayText(uiMapID, pointX, pointY, fallbackText)
+  local mapText = buildMapDisplayName(uiMapID, fallbackText) -- 地图显示名
+  local numericX = tonumber(pointX) -- 坐标 X
+  local numericY = tonumber(pointY) -- 坐标 Y
+  if mapText == "" then
+    return ""
+  end
+  if isNormalizedPosition(numericX, numericY) then
+    return string.format("%s %.1f, %.1f", mapText, numericX * 100, numericY * 100)
+  end
+  return mapText
+end
+
 --- 将存档中的锚点位置归一化为可直接使用的结构。
 ---@param rawPosition table|nil 原始位置存档
 ---@return table
@@ -153,14 +223,17 @@ local function buildPrimarySegmentText(segment)
   local modeText = tostring(segment.mode or "unknown") -- 路线方式
   local fromName = tostring(segment.fromName or segment.from or "?") -- 起点显示名
   local toName = tostring(segment.toName or segment.to or "?") -- 终点显示名
+  local cleanedLabel = cleanPlayerFacingLabel(segment.label) -- 统一动作标签
   if modeText == "walk_local" then
+    if string.find(cleanedLabel, "目标位置：", 1, true) == 1 or string.find(cleanedLabel, "当前位置：", 1, true) == 1 then
+      return cleanedLabel
+    end
     return string.format("步行：%s -> %s", fromName, toName)
   end
   if modeText == "hearthstone" then
     return string.format("炉石：%s", toName)
   end
 
-  local cleanedLabel = cleanPlayerFacingLabel(segment.label) -- 统一动作标签
   if cleanedLabel ~= "" then
     return cleanedLabel
   end
@@ -422,20 +495,47 @@ local function refreshTimelineText(frame, routeState, locationSnapshot)
   local firstSegment = segmentList[1] or nil -- 第一段
   local startName = trimText(firstSegment and firstSegment.fromName) -- 起始位置名
   local targetName = buildTargetDisplayName(routeState.routeTarget, routeState.routeResult) -- 目标位置名
-  local currentPositionText = targetName -- 当前所处位置文案
-  if routeState.deviated then
+  local startLocationSnapshot = type(routeState.startLocationSnapshot) == "table" and routeState.startLocationSnapshot or nil -- 规划起点快照
+  local startPositionText = buildPositionDisplayText(
+    startLocationSnapshot and startLocationSnapshot.currentUiMapID,
+    startLocationSnapshot and startLocationSnapshot.currentX,
+    startLocationSnapshot and startLocationSnapshot.currentY,
+    startName
+  ) -- 起始位置文案
+  local targetPositionText = buildPositionDisplayText(
+    routeState.routeTarget and routeState.routeTarget.uiMapID,
+    routeState.routeTarget and routeState.routeTarget.x,
+    routeState.routeTarget and routeState.routeTarget.y,
+    targetName
+  ) -- 终点位置文案
+  local currentPositionText = targetPositionText ~= "" and targetPositionText or targetName -- 当前所处位置文案
+  local livePositionText = buildPositionDisplayText(
+    locationSnapshot and locationSnapshot.currentUiMapID,
+    locationSnapshot and locationSnapshot.currentX,
+    locationSnapshot and locationSnapshot.currentY,
+    trimText(currentSegment and currentSegment.fromName)
+  ) -- 实时位置文案
+  if livePositionText ~= "" then
+    currentPositionText = livePositionText
+  elseif routeState.deviated then
     currentPositionText = string.format("UiMap %s", tostring(tonumber(locationSnapshot and locationSnapshot.currentUiMapID) or "?"))
   elseif routeState.arrived then
-    currentPositionText = targetName
+    currentPositionText = targetPositionText ~= "" and targetPositionText or targetName
   elseif trimText(currentSegment and currentSegment.fromName) ~= "" then
     currentPositionText = trimText(currentSegment.fromName)
   end
+  if startPositionText == "" then
+    startPositionText = startName ~= "" and startName or "当前位置"
+  end
+  if targetPositionText == "" then
+    targetPositionText = targetName
+  end
 
   local lineList = {
-    string.format(getLocaleText("NAVIGATION_ROUTE_WIDGET_HEADER_FMT", "%s -> %s"), startName ~= "" and startName or "当前位置", targetName),
-    string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_START", "起始位置"), startName ~= "" and startName or "当前位置"),
+    string.format(getLocaleText("NAVIGATION_ROUTE_WIDGET_HEADER_FMT", "%s -> %s"), startPositionText, targetPositionText),
+    string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_START", "起始位置"), startPositionText),
     string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_NEXT", "下一步"), buildSegmentText(currentSegment)),
-    string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_END", "终点位置"), targetName),
+    string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_END", "终点位置"), targetPositionText),
     string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_CURRENT", "当前位置"), currentPositionText),
     string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_STATUS_LABEL", "路线状态"), buildStatusText(routeState)),
     getLocaleText("NAVIGATION_ROUTE_WIDGET_CHAIN", "路线链路") .. "：",
@@ -757,6 +857,7 @@ end
 function RouteBar.ShowRoute(routeResult, routeTarget)
   local frame = ensureRouteBarFrame() -- 路线图根 Frame
   local segmentList = type(routeResult) == "table" and routeResult.segments or nil -- 路线分段列表
+  local startLocationSnapshot = getCurrentLocationSnapshot() -- 规划起点快照
   if not frame or type(segmentList) ~= "table" or #segmentList == 0 then
     return
   end
@@ -767,6 +868,7 @@ function RouteBar.ShowRoute(routeResult, routeTarget)
     currentStepIndex = 1,
     deviated = false,
     arrived = false,
+    startLocationSnapshot = startLocationSnapshot,
   }
   ensureWidgetDbFields(getModuleDb())
   applyWidgetPosition(frame)
@@ -781,9 +883,9 @@ function RouteBar.RefreshLiveState()
   if not activeRouteState then
     return
   end
-  local locationSnapshot = nil -- 当前角色位置快照
-  if Toolbox.Navigation and type(Toolbox.Navigation.GetCurrentLocationSnapshot) == "function" then
-    locationSnapshot = Toolbox.Navigation.GetCurrentLocationSnapshot()
+  local locationSnapshot = getCurrentLocationSnapshot() -- 当前角色位置快照
+  if type(activeRouteState.startLocationSnapshot) ~= "table" and type(locationSnapshot) == "table" then
+    activeRouteState.startLocationSnapshot = copyLocationSnapshot(locationSnapshot)
   end
   local stepIndex, arrived, deviated = resolveLiveProgress(activeRouteState.routeResult, activeRouteState.routeTarget, locationSnapshot) -- 当前步骤状态
   activeRouteState.currentStepIndex = stepIndex

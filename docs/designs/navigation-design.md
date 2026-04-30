@@ -136,7 +136,7 @@
 
 **public_portal 当前实现口径：**
 - 数据来源：复用 `navigation_waypoint_edges` 的 `waypointedge` + `waypointnode` 管道，筛选 Type=1→Type=2 portal 边
-- 节点类型：新建 `portal_{waypoint_id}` 节点，保留 waypoint 精确坐标（`PosX`/`PosY`），通过 `WalkClusterKey` 接入本地步行网
+- 节点类型：运行时导出为不透明数字 `NodeID`，portal 来源定位统一走 `Source = "portal"` + `SourceID = waypoint_id`；保留 waypoint 精确坐标（`PosX`/`PosY`），并通过 `WalkClusterNodeID` 接入本地步行网
 - 边模式：`mode = "public_portal"`，`stepCost = 1`
 - 可用性：`PlayerConditionID = 0` 的边无条件纳入；`924`（Alliance）/ `923`（Horde）标注 `faction`；其余 V2 暂不纳入
 - 出口：portal 边通过 enrichment 汇入 `navigation_route_edges` 统一静态边表，不新增运行时数据文件
@@ -188,6 +188,8 @@
 - `KnownSpellIDs`
 - `KnownTaxiNodeIDs`
 - `HearthBindNodeID`
+  - 当前稳定兼容字段；数字 node ID 迁移后优先传入不透明数字节点 ID
+  - 运行时内部同时保留 `hearthBindInfo`，在只掌握 `UiMapID` 时允许按 route source lookup 回填节点
 
 运行时过滤规则：
 
@@ -196,7 +198,7 @@
 - 当前角色配置是运行时输入，不回写静态导出。
 - 当前角色可用性快照允许使用运行时 API，但仅限于：
   - `C_TaxiMap.GetTaxiNodesForMap`：收集已开航点
-  - `GetBindLocation`：解析炉石绑定点
+  - `GetBindLocation`：未来可作为炉石绑定点补源；当前若无稳定静态映射，则先保留 `faction -> 主城 UiMapID -> route node` 的降级路径
   - `C_Map.GetMapInfoAtPosition`：把当前点 / 目标点细化到更具体的地图节点
 
 ### 5.6 世界关系表达
@@ -226,7 +228,7 @@
 
 能力边规则：
 
-- `hearthstone` 最适合做查询时模板边：法术固定，可用性来自角色输入，落点来自 `HearthBindNodeID`。
+- `hearthstone` 最适合做查询时模板边：法术固定，可用性来自角色输入，落点来自 `HearthBindNodeID`（不透明数字节点 ID；兼容层同时接受 `hearthBindInfo`）。
 - `class_teleport` / `class_portal` 也适合做模板边：法术来源可从 `spell / spelleffect` 族表识别，落点是固定主城 / 固定节点。
 - 模板边定义本身由 `navigation_ability_templates` 导出；`Navigation.lua` 不再手写“法术 -> 目的地”表。
 
@@ -238,7 +240,7 @@
 当前已确认的静态来源边界（2026-04-30）：
 
 - `areatrigger`：`wow.db` 当前只能稳定给出 source 点位；`areatriggeractionset` 只有 `ID / Flags`，不能恢复目标地图与目标坐标，因此不能导出完整运行时边。
-- `walk component`：当前仓库与 `wow.db` 没有现成、稳定、可直接当作“开放世界步行连通真值”的来源；现有 `WalkClusterKey` 只是本地归并启发式。
+- `walk component`：当前仓库与 `wow.db` 没有现成、稳定、可直接当作“开放世界步行连通真值”的来源；现有 `WalkClusterNodeID` 只是本地归并启发式，旧 `WalkClusterKey` 仅保留为兼容字段。
 - 下一步最现实的方向不是继续猜地图邻接，而是：
   1. 继续把显式连接器静态化；
   2. 另起离线几何 / 导航资产管线生成真正的 `WalkComponent` 契约。
@@ -249,10 +251,10 @@
 
 当前以测试锁定的关键事实包括：
 
-- `portal_117 -> portal_101` 已导出，且 `portal_101 / 115 / 120 / 122 / 129 / 132 / 140 / 144 / 203 / 218 / 285` 均稳定落到 `UiMapID = 85`、`WalkClusterKey = "uimap_85"`。
-- `portal_118 -> portal_119` 已导出，可把银月城宝珠稳定接入提瑞斯法 / 幽暗城周边交通网。
-- `portal_556 -> portal_557` 已导出，可把东部王国北部 portal 入口稳定接入东瘟疫之地。
-- `taxi_82` 已并入统一 taxi 图。
+- `Source = "portal"`、`SourceID = 117 -> 101` 的公共传送门边已导出，且 `SourceID = 101 / 115 / 120 / 122 / 129 / 132 / 140 / 144 / 203 / 218 / 285` 这些 portal 节点都稳定落到 `UiMapID = 85`、`WalkClusterNodeID = 奥格主城锚点`。
+- `Source = "portal"`、`SourceID = 118 -> 119` 的公共传送门边已导出，可把银月城宝珠稳定接入提瑞斯法 / 幽暗城周边交通网。
+- `Source = "portal"`、`SourceID = 556 -> 557` 的公共传送门边已导出，可把东部王国北部 portal 入口稳定接入东瘟疫之地。
+- `Source = "taxi"`、`SourceID = 82` 已并入统一 taxi 图。
 - `NavigationRouteEdges.edges` 必须保持 1-based 连续序列，保证运行时与测试侧使用 `ipairs()` 遍历时不会在中途截断。
 
 因此，按当前默认导出基线，`银月城 -> 东瘟疫之地` 不应再返回 `NAVIGATION_ERR_NO_ROUTE`；逻辑测试要求它在统一静态图下可求解。
@@ -411,4 +413,5 @@
 | 2026-04-29 | 文档同步：明确 runtime 当前实际消费 `NavigationRouteEdges + NavigationMapNodes + NavigationAbilityTemplates`，默认统一边表已推进到 schema v17，`public_portal` 已参与求解，旧 `targetRules / WAYPOINT_LINK` 旁路已移除 |
 | 2026-04-29 | 边界样例同步：固定 `银月城 -> 东瘟疫之地` 当前应返回 `NAVIGATION_ERR_NO_ROUTE`，其含义是“导出图未闭合”，不是“游戏内不可达” |
 | 2026-04-30 | 回归样例升级：`银月城 -> 东瘟疫之地` 改为静态闭环正向样例；`portal_118/556`、`taxi_82`、奥格传送门房并入与 `edges` 连续序列约束由测试锁定 |
+| 2026-04-30 | 数字 node ID 收尾：`NavigationRouteEdges` / `NavigationAbilityTemplates` 切到不透明数字 `NodeID` / `ToNodeID`，`WalkClusterNodeID` 成为主字段；运行时与逻辑测试改为按 `Source + SourceID + Kind` 解析节点 |
 | 2026-04-30 | 路线图交互确认：顶部路线 UI 改为可折叠胶囊 + 完整时间线，可拖动、记忆位置与展开状态，并维护最近 10 条“旧终点重规划”历史 |

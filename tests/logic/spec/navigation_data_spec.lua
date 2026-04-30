@@ -1,6 +1,38 @@
 describe("Navigation data", function()
   local originalToolbox = nil -- 原始 Toolbox 全局
 
+  -- 按 Kind + Source + SourceID 查找运行时导出的节点，避免依赖旧字符串节点键。
+  local function findNodeByOrigin(exportedData, expectedKind, expectedSource, expectedSourceID)
+    local matchedNode = nil -- 命中的节点定义
+    local matchedCount = 0 -- 命中的节点数量
+
+    for nodeID, nodeDef in pairs(exportedData.nodes or {}) do
+      if type(nodeDef) == "table"
+        and nodeDef.Kind == expectedKind
+        and nodeDef.Source == expectedSource
+        and tonumber(nodeDef.SourceID) == tonumber(expectedSourceID) then
+        matchedCount = matchedCount + 1
+        matchedNode = nodeDef
+        assert.equals(tonumber(nodeID), tonumber(nodeDef.NodeID))
+      end
+    end
+
+    assert.equals(1, matchedCount)
+    return matchedNode
+  end
+
+  -- 按数字 NodeID 查找运行时边，适配导出节点键迁移后的口径。
+  local function findEdgeByNodeIDs(exportedData, fromNodeID, toNodeID)
+    for _, edgeDef in ipairs(exportedData.edges or {}) do
+      if tonumber(edgeDef.FromNodeID) == tonumber(fromNodeID)
+        and tonumber(edgeDef.ToNodeID) == tonumber(toNodeID) then
+        return edgeDef
+      end
+    end
+
+    return nil
+  end
+
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
     rawset(_G, "Toolbox", {
@@ -27,21 +59,26 @@ describe("Navigation data", function()
 
     for nodeId, nodeDef in pairs(exportedData.nodes or {}) do
       checkedNodeCount = checkedNodeCount + 1
-      nodeExistsById[nodeId] = true
+      nodeExistsById[tonumber(nodeId)] = true
+      assert.equals(tonumber(nodeId), tonumber(nodeDef.NodeID))
       assert.is_string(nodeDef.Kind)
       assert.is_number(tonumber(nodeDef.UiMapID))
       assert.is_string(nodeDef.Name_lang)
-      assert.is_string(nodeDef.WalkClusterKey)
+      assert.is_number(tonumber(nodeDef.WalkClusterNodeID))
       assert.is_table(generatedNodes[tonumber(nodeDef.UiMapID)])
       if nodeDef.Kind == "taxi" then
         assert.is_number(tonumber(nodeDef.TaxiNodeID))
       end
     end
 
+    for _, nodeDef in pairs(exportedData.nodes or {}) do
+      assert.is_true(nodeExistsById[tonumber(nodeDef.WalkClusterNodeID)] == true)
+    end
+
     for _, edgeDef in ipairs(exportedData.edges or {}) do
       checkedEdgeCount = checkedEdgeCount + 1
-      assert.is_true(nodeExistsById[edgeDef.FromNodeID] == true)
-      assert.is_true(nodeExistsById[edgeDef.ToNodeID] == true)
+      assert.is_true(nodeExistsById[tonumber(edgeDef.FromNodeID)] == true)
+      assert.is_true(nodeExistsById[tonumber(edgeDef.ToNodeID)] == true)
       assert.equals(1, tonumber(edgeDef.StepCost))
       assert.is_string(edgeDef.Mode)
       assert.is_table(edgeDef.TraversedUiMapIDs)
@@ -62,8 +99,8 @@ describe("Navigation data", function()
       assert.is_string(templateDef.Label)
       assert.is_true(templateDef.SelfUseOnly == true)
       if templateDef.TargetRuleKind == "fixed_node" then
-        assert.is_string(templateDef.ToNodeID)
-        assert.is_true(nodeExistsById[templateDef.ToNodeID] == true)
+        assert.is_number(tonumber(templateDef.ToNodeID))
+        assert.is_true(nodeExistsById[tonumber(templateDef.ToNodeID)] == true)
       end
     end
 
@@ -134,47 +171,65 @@ describe("Navigation data", function()
     dofile("Toolbox/Data/NavigationRouteEdges.lua")
 
     local exportedData = Toolbox.Data.NavigationRouteEdges -- 契约导出的统一路径边数据
-    local portal119 = exportedData.nodes["portal_119"] -- 银月城宝珠的提瑞斯法出口
-    local portal557 = exportedData.nodes["portal_557"] -- 幽魂之地前往东瘟疫之地的出口
-    local portalRoomNodeIDList = { "portal_101", "portal_115", "portal_120", "portal_122", "portal_129", "portal_132", "portal_140", "portal_144", "portal_203", "portal_218", "portal_285" } -- 奥格探路者大厅及同房间落点
+    local portal101 = findNodeByOrigin(exportedData, "portal", "portal", 101) -- 奥格探路者大厅落点
+    local portal115 = findNodeByOrigin(exportedData, "portal", "portal", 115) -- 奥格至银月城传送门
+    local portal117 = findNodeByOrigin(exportedData, "portal", "portal", 117) -- 银月城传送回奥格的入口
+    local portal118 = findNodeByOrigin(exportedData, "portal", "portal", 118) -- 银月城前往提瑞斯法的宝珠入口
+    local portal119 = findNodeByOrigin(exportedData, "portal", "portal", 119) -- 银月城宝珠的提瑞斯法出口
+    local portal120 = findNodeByOrigin(exportedData, "portal", "portal", 120) -- 奥格至沙塔斯传送门
+    local portal122 = findNodeByOrigin(exportedData, "portal", "portal", 122) -- 奥格至阿什兰传送门
+    local portal129 = findNodeByOrigin(exportedData, "portal", "portal", 129) -- 奥格至阿苏纳传送门
+    local portal132 = findNodeByOrigin(exportedData, "portal", "portal", 132) -- 奥格至祖达萨传送门
+    local portal140 = findNodeByOrigin(exportedData, "portal", "portal", 140) -- 奥格至翡翠林传送门
+    local portal144 = findNodeByOrigin(exportedData, "portal", "portal", 144) -- 奥格至晶歌森林传送门
+    local portal203 = findNodeByOrigin(exportedData, "portal", "portal", 203) -- 奥格至时光之穴传送门
+    local portal218 = findNodeByOrigin(exportedData, "portal", "portal", 218) -- 奥格至奥利波斯传送门
+    local portal285 = findNodeByOrigin(exportedData, "portal", "portal", 285) -- 奥利波斯同房间出口
+    local portal556 = findNodeByOrigin(exportedData, "portal", "portal", 556) -- 幽魂之地前往东瘟疫之地的入口
+    local portal557 = findNodeByOrigin(exportedData, "portal", "portal", 557) -- 幽魂之地前往东瘟疫之地的出口
+    local orgrimmarClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 85) -- 奥格主城簇锚点
+    local tirisfalClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 18) -- 提瑞斯法簇锚点
+    local easternPlaguelandsClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 23) -- 东瘟疫之地簇锚点
+    local ghostlandsClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 95) -- 幽魂之地簇锚点
     local hasSilvermoonTaxiEdge = false -- 银月城飞行点是否接入公共 taxi 图
-    local hasSilvermoonOrgrimmarPortalEdge = false -- 银月城到奥格入口边是否导出
-    local hasSilvermoonTirisfalPortalEdge = false -- 银月城宝珠边是否导出
-    local hasGhostlandsEplPortalEdge = false -- 幽魂之地到东瘟疫之地边是否导出
 
     assert.is_table(portal119)
     assert.equals(18, tonumber(portal119.UiMapID))
-    assert.equals("uimap_18", portal119.WalkClusterKey)
+    assert.equals(tonumber(tirisfalClusterNode.NodeID), tonumber(portal119.WalkClusterNodeID))
 
     assert.is_table(portal557)
     assert.equals(23, tonumber(portal557.UiMapID))
-    assert.equals("uimap_23", portal557.WalkClusterKey)
+    assert.equals(tonumber(easternPlaguelandsClusterNode.NodeID), tonumber(portal557.WalkClusterNodeID))
 
-    for _, nodeID in ipairs(portalRoomNodeIDList) do
-      local portalRoomNode = exportedData.nodes[nodeID] -- 奥格探路者大厅内应并入奥格主城簇的节点
+    for _, portalRoomNode in ipairs({
+      portal101,
+      portal115,
+      portal120,
+      portal122,
+      portal129,
+      portal132,
+      portal140,
+      portal144,
+      portal203,
+      portal218,
+      portal285,
+    }) do
       assert.is_table(portalRoomNode)
       assert.equals(85, tonumber(portalRoomNode.UiMapID))
-      assert.equals("uimap_85", portalRoomNode.WalkClusterKey)
+      assert.equals(tonumber(orgrimmarClusterNode.NodeID), tonumber(portalRoomNode.WalkClusterNodeID))
     end
 
+    assert.equals(tonumber(ghostlandsClusterNode.NodeID), tonumber(portal556.WalkClusterNodeID))
+
     for _, edgeDef in ipairs(exportedData.edges or {}) do
-      if edgeDef.FromNodeID == "portal_117" and edgeDef.ToNodeID == "portal_101" then
-        hasSilvermoonOrgrimmarPortalEdge = true
-      end
-      if edgeDef.FromNodeID == "portal_118" and edgeDef.ToNodeID == "portal_119" then
-        hasSilvermoonTirisfalPortalEdge = true
-      end
-      if edgeDef.FromNodeID == "portal_556" and edgeDef.ToNodeID == "portal_557" then
-        hasGhostlandsEplPortalEdge = true
-      end
       if tonumber(edgeDef.FromTaxiNodeID) == 82 or tonumber(edgeDef.ToTaxiNodeID) == 82 then
         hasSilvermoonTaxiEdge = true
       end
     end
 
-    assert.is_true(hasSilvermoonOrgrimmarPortalEdge)
-    assert.is_true(hasSilvermoonTirisfalPortalEdge)
-    assert.is_true(hasGhostlandsEplPortalEdge)
+    assert.is_table(findEdgeByNodeIDs(exportedData, portal117.NodeID, portal101.NodeID))
+    assert.is_table(findEdgeByNodeIDs(exportedData, portal118.NodeID, portal119.NodeID))
+    assert.is_table(findEdgeByNodeIDs(exportedData, portal556.NodeID, portal557.NodeID))
     assert.is_true(hasSilvermoonTaxiEdge)
   end)
 
@@ -182,24 +237,19 @@ describe("Navigation data", function()
     dofile("Toolbox/Data/NavigationRouteEdges.lua")
 
     local exportedData = Toolbox.Data.NavigationRouteEdges -- 契约导出的统一路径边数据
-    local orgrimmarZeppelinNode = exportedData.nodes["transport_150"] -- 奥格瑞玛去北风苔原的飞艇起点
-    local boreanZeppelinNode = exportedData.nodes["transport_151"] -- 战歌要塞回奥格的飞艇起点
-    local zeppelinEdge = nil -- 奥格瑞玛 -> 北风苔原的公共交通边
+    local orgrimmarZeppelinNode = findNodeByOrigin(exportedData, "transport", "waypoint_transport", 150) -- 奥格瑞玛去北风苔原的飞艇起点
+    local boreanZeppelinNode = findNodeByOrigin(exportedData, "transport", "waypoint_transport", 151) -- 战歌要塞回奥格的飞艇起点
+    local orgrimmarClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 85) -- 奥格主城簇锚点
+    local boreanClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 114) -- 北风苔原簇锚点
+    local zeppelinEdge = findEdgeByNodeIDs(exportedData, orgrimmarZeppelinNode.NodeID, boreanZeppelinNode.NodeID) -- 奥格瑞玛 -> 北风苔原的公共交通边
 
     assert.is_table(orgrimmarZeppelinNode)
     assert.equals(85, tonumber(orgrimmarZeppelinNode.UiMapID))
-    assert.equals("uimap_85", orgrimmarZeppelinNode.WalkClusterKey)
+    assert.equals(tonumber(orgrimmarClusterNode.NodeID), tonumber(orgrimmarZeppelinNode.WalkClusterNodeID))
 
     assert.is_table(boreanZeppelinNode)
     assert.equals(114, tonumber(boreanZeppelinNode.UiMapID))
-    assert.equals("uimap_114", boreanZeppelinNode.WalkClusterKey)
-
-    for _, edgeDef in ipairs(exportedData.edges or {}) do
-      if edgeDef.FromNodeID == "transport_150" and edgeDef.ToNodeID == "transport_151" then
-        zeppelinEdge = edgeDef
-        break
-      end
-    end
+    assert.equals(tonumber(boreanClusterNode.NodeID), tonumber(boreanZeppelinNode.WalkClusterNodeID))
 
     assert.is_table(zeppelinEdge)
     assert.equals("waypoint_transport", zeppelinEdge.Source)
@@ -214,45 +264,33 @@ describe("Navigation data", function()
     dofile("Toolbox/Data/NavigationRouteEdges.lua")
 
     local exportedData = Toolbox.Data.NavigationRouteEdges -- 统一静态路由图
-    local silvermoonTaxi = exportedData.nodes["taxi_3131"] -- 圣光秘殿，银月城
-    local eversongTaxi = exportedData.nodes["taxi_3133"] -- 晴风村，永歌森林
-    local ghostlandsTaxi = exportedData.nodes["taxi_3134"] -- 塔奎林，永歌森林（12.0）
-    local zulamanTaxi = exportedData.nodes["taxi_3106"] -- 石洗营地，祖阿曼
-    local hasSilvermoonToEversongEdge = false -- 银月城 -> 永歌森林
-    local hasEversongToGhostlandsEdge = false -- 永歌森林 -> 塔奎林
-    local hasGhostlandsToZulamanEdge = false -- 塔奎林 -> 祖阿曼
+    local silvermoonTaxi = findNodeByOrigin(exportedData, "taxi", "taxi", 3131) -- 圣光秘殿，银月城
+    local eversongTaxi = findNodeByOrigin(exportedData, "taxi", "taxi", 3133) -- 晴风村，永歌森林
+    local ghostlandsTaxi = findNodeByOrigin(exportedData, "taxi", "taxi", 3134) -- 塔奎林，永歌森林（12.0）
+    local zulamanHubTaxi = findNodeByOrigin(exportedData, "taxi", "taxi", 3129) -- 影盆岗哨，祖阿曼
+    local zulamanTaxi = findNodeByOrigin(exportedData, "taxi", "taxi", 3106) -- 石洗营地，祖阿曼
+    local quelthalasClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 2395) -- 奎尔萨拉斯簇锚点
+    local zulamanClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 2437) -- 祖阿曼簇锚点
 
     assert.is_table(silvermoonTaxi)
     assert.equals(2393, tonumber(silvermoonTaxi.UiMapID))
-    assert.equals("uimap_2395", silvermoonTaxi.WalkClusterKey)
+    assert.equals(tonumber(quelthalasClusterNode.NodeID), tonumber(silvermoonTaxi.WalkClusterNodeID))
 
     assert.is_table(eversongTaxi)
     assert.equals(2395, tonumber(eversongTaxi.UiMapID))
-    assert.equals("uimap_2395", eversongTaxi.WalkClusterKey)
+    assert.equals(tonumber(quelthalasClusterNode.NodeID), tonumber(eversongTaxi.WalkClusterNodeID))
 
     assert.is_table(ghostlandsTaxi)
     assert.equals(2395, tonumber(ghostlandsTaxi.UiMapID))
-    assert.equals("uimap_2395", ghostlandsTaxi.WalkClusterKey)
+    assert.equals(tonumber(quelthalasClusterNode.NodeID), tonumber(ghostlandsTaxi.WalkClusterNodeID))
 
     assert.is_table(zulamanTaxi)
     assert.equals(2437, tonumber(zulamanTaxi.UiMapID))
-    assert.equals("uimap_2437", zulamanTaxi.WalkClusterKey)
+    assert.equals(tonumber(zulamanClusterNode.NodeID), tonumber(zulamanTaxi.WalkClusterNodeID))
 
-    for _, edgeDef in ipairs(exportedData.edges or {}) do
-      if edgeDef.FromNodeID == "taxi_3131" and edgeDef.ToNodeID == "taxi_3133" then
-        hasSilvermoonToEversongEdge = true
-      end
-      if edgeDef.FromNodeID == "taxi_3133" and edgeDef.ToNodeID == "taxi_3134" then
-        hasEversongToGhostlandsEdge = true
-      end
-      if edgeDef.FromNodeID == "taxi_3129" and edgeDef.ToNodeID == "taxi_3106" then
-        hasGhostlandsToZulamanEdge = true
-      end
-    end
-
-    assert.is_true(hasSilvermoonToEversongEdge)
-    assert.is_true(hasEversongToGhostlandsEdge)
-    assert.is_true(hasGhostlandsToZulamanEdge)
+    assert.is_table(findEdgeByNodeIDs(exportedData, silvermoonTaxi.NodeID, eversongTaxi.NodeID))
+    assert.is_table(findEdgeByNodeIDs(exportedData, eversongTaxi.NodeID, ghostlandsTaxi.NodeID))
+    assert.is_table(findEdgeByNodeIDs(exportedData, zulamanHubTaxi.NodeID, zulamanTaxi.NodeID))
   end)
 
   it("exports_navigation_map_assignments_without_region_coordinate_fields", function()
