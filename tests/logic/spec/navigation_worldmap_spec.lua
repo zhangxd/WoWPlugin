@@ -25,6 +25,13 @@ describe("Navigation WorldMap integration", function()
     assert.equals("第4段 | mode=walk_local | from=恶齿村，辛特兰 | to=辛特兰 | traversedUiMapNames=恶齿村，辛特兰 -> 辛特兰", messageList[5])
   end
 
+  local function assertTransportArrivalPlanningDiagnostics(messageList)
+    assert.equals("规划成功 | 起点：奥格瑞玛 50.0, 60.0 | 终点：北风苔原 51.9, 41.6 | 总步数：3 | 节点：奥格瑞玛 -> 乘坐奥格瑞玛的飞艇前往北风苔原 -> 北风苔原", messageList[1])
+    assert.equals("第1段 | mode=walk_local | from=当前位置 | to=奥格瑞玛飞艇塔 | traversedUiMapNames=奥格瑞玛", messageList[2])
+    assert.equals("第2段 | mode=transport | from=乘坐奥格瑞玛的飞艇前往北风苔原 | to=北风苔原 | traversedUiMapNames=奥格瑞玛 -> 北风苔原", messageList[3])
+    assert.equals("第3段 | mode=walk_local | from=战歌要塞 | to=北风苔原 | traversedUiMapNames=北风苔原", messageList[4])
+  end
+
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
     originalWorldMapFrame = rawget(_G, "WorldMapFrame")
@@ -290,6 +297,138 @@ describe("Navigation WorldMap integration", function()
 
     assert.equals(5, #chatMessages)
     assertTaxiHubPlanningDiagnostics(chatMessages)
+  end)
+
+  it("uses_arrival_semantics_in_planning_diagnostics_instead_of_return_transport_node_names", function()
+    Toolbox.Navigation.BuildCurrentCharacterAvailability = function()
+      return {
+        classFile = "WARRIOR",
+        faction = "Horde",
+        currentUiMapID = 85,
+        currentX = 0.5,
+        currentY = 0.6,
+        knownSpellByID = {},
+      }
+    end
+    Toolbox.Navigation.PlanRouteToMapTarget = function()
+      return {
+        totalSteps = 3,
+        semanticNodes = {
+          { kind = "map", text = "奥格瑞玛" },
+          { kind = "transport", text = "乘坐奥格瑞玛的飞艇前往北风苔原" },
+          { kind = "map", text = "北风苔原" },
+        },
+        segments = {
+          {
+            mode = "walk_local",
+            fromName = "当前位置",
+            toName = "奥格瑞玛飞艇塔",
+            traversedUiMapNames = { "奥格瑞玛" },
+          },
+          {
+            mode = "transport",
+            fromName = "乘坐奥格瑞玛的飞艇前往北风苔原",
+            toName = "乘坐战歌要塞的飞艇前往奥格瑞玛",
+            traversedUiMapNames = { "奥格瑞玛", "北风苔原" },
+          },
+          {
+            mode = "walk_local",
+            fromName = "战歌要塞",
+            toName = "北风苔原",
+            traversedUiMapNames = { "北风苔原" },
+          },
+        },
+      }, nil
+    end
+    Toolbox.NavigationModule.RouteBar.BuildPositionDisplayText = function(uiMapID, pointX, pointY, fallbackText)
+      local mapNameByID = {
+        [85] = "奥格瑞玛",
+        [114] = "北风苔原",
+      }
+      local mapName = mapNameByID[tonumber(uiMapID)] or tostring(fallbackText or "")
+      if type(pointX) == "number" and type(pointY) == "number" then
+        return string.format("%s %.1f, %.1f", mapName, pointX * 100, pointY * 100)
+      end
+      return mapName
+    end
+    Toolbox.NavigationModule.RouteBar.BuildRouteNodePathText = function()
+      return "奥格瑞玛 -> 乘坐奥格瑞玛的飞艇前往北风苔原 -> 北风苔原"
+    end
+
+    Toolbox.NavigationModule.WorldMap.PlanRouteToTarget({
+      uiMapID = 114,
+      x = 0.519,
+      y = 0.416,
+      name = "北风苔原",
+    })
+
+    assert.equals(4, #chatMessages)
+    assertTransportArrivalPlanningDiagnostics(chatMessages)
+  end)
+
+  it("falls_back_to_segment_summary_when_semantic_nodes_are_incomplete", function()
+    Toolbox.Navigation.BuildCurrentCharacterAvailability = function()
+      return {
+        classFile = "WARRIOR",
+        faction = "Horde",
+        currentUiMapID = 85,
+        currentX = 0.5,
+        currentY = 0.6,
+        knownSpellByID = {},
+      }
+    end
+    Toolbox.Navigation.PlanRouteToMapTarget = function()
+      return {
+        totalSteps = 3,
+        semanticNodes = {
+          { kind = "transport", text = "乘坐奥格瑞玛的飞艇前往北风苔原" },
+        },
+        segments = {
+          {
+            mode = "walk_local",
+            fromName = "当前位置",
+            toName = "奥格瑞玛飞艇塔",
+            traversedUiMapNames = { "奥格瑞玛" },
+          },
+          {
+            mode = "transport",
+            fromName = "乘坐奥格瑞玛的飞艇前往北风苔原",
+            toName = "乘坐战歌要塞的飞艇前往奥格瑞玛",
+            traversedUiMapNames = { "奥格瑞玛", "北风苔原" },
+          },
+          {
+            mode = "walk_local",
+            fromName = "战歌要塞",
+            toName = "北风苔原",
+            traversedUiMapNames = { "北风苔原" },
+          },
+        },
+      }, nil
+    end
+    Toolbox.NavigationModule.RouteBar.BuildPositionDisplayText = function(uiMapID, pointX, pointY, fallbackText)
+      local mapNameByID = {
+        [85] = "奥格瑞玛",
+        [114] = "北风苔原",
+      }
+      local mapName = mapNameByID[tonumber(uiMapID)] or tostring(fallbackText or "")
+      if type(pointX) == "number" and type(pointY) == "number" then
+        return string.format("%s %.1f, %.1f", mapName, pointX * 100, pointY * 100)
+      end
+      return mapName
+    end
+    Toolbox.NavigationModule.RouteBar.BuildRouteNodePathText = function()
+      return "奥格瑞玛 -> 奥格瑞玛飞艇塔 -> 北风苔原"
+    end
+
+    Toolbox.NavigationModule.WorldMap.PlanRouteToTarget({
+      uiMapID = 114,
+      x = 0.519,
+      y = 0.416,
+      name = "北风苔原",
+    })
+
+    assert.equals(4, #chatMessages)
+    assert.equals("规划成功 | 起点：奥格瑞玛 50.0, 60.0 | 终点：北风苔原 51.9, 41.6 | 总步数：3 | 节点：奥格瑞玛 -> 奥格瑞玛飞艇塔 -> 北风苔原", chatMessages[1])
   end)
 
   it("shows_disabled_button_and_chat_hint_when_user_waypoint_is_missing", function()

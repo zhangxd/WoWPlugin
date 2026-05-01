@@ -51,13 +51,18 @@
 - 胶囊标题只显示 `状态 + 步骤进度`，不显示路线摘要。
 - 胶囊主体固定为 `起始位置 / 当前位置 / 终点位置` 三段，其中 `当前位置` 需要实时刷新。
 - 胶囊三段之间需要有明确分隔线，能清楚区分左 / 中 / 右信息区。
+- 胶囊整体宽度需要根据标题和三段文本的实际长度自适应扩展，并保留最小宽度 / 最大宽度 / 内边距护栏。
 - 展开后的导航信息页主视图只显示 WoW 可落地约束下的竖向导航节点链，不显示完整步骤列表与路线摘要。
-- 节点链只保留地图级节点与显式交通枢纽节点；飞行点详情不进入玩家可见链路。
-- 节点链左侧节点标记需要使用可区分 `地图 / 传送门 / 飞艇等交通节点` 的通用图标。
+- 节点链必须由 `semantic path` 驱动，默认按 `地图节点 -> 动作节点 -> 地图节点` 组织；`taxi` 不单独生成飞行点动作节点。
+- `walk_local` 只负责同一 `WalkComponent` 内接入，不直接显示成玩家节点；返程方向名和技术节点名不得泄漏到玩家链路或规划摘要。
+- 节点链左侧节点标记需要至少区分 `地图 / 动作` 两类，并支持 `传送门 / 飞艇 / 炉石 / 职业技能` 等动作细分。
 - 节点链每行需要有固定宽度的 WoW 风格容器，避免退化成纯文本列表。
 - 节点链需要有明显的竖向串行连线与节点标记，并对当前步骤节点做高亮。
 - 起点节点与终点节点改为单行位置文本，格式固定为 `地址 x,y`，分别对应规划起点坐标与目标坐标；不再拆第二行坐标明细，中间节点仍不显示坐标。
+- 展开态节点区底框 / 背景框需要按实际节点范围自适应撑高，覆盖尾部节点、连线与外边距，不能再出现后半段节点超框。
 - 最近路线列表独立侧贴展开，不放到导航内容下方。
+- 本轮同时建立 `walk component` 正式契约框架，但首批覆盖只落：主城、传送门房、飞艇塔 / 港口、常用交通落点。
+- `walk component` 数据来源固定为“`wow.db` 自动候选 + 源侧少量 override + 正式导出”，不允许在 runtime Lua 手写补边。
 
 ## 3. 文件布局
 
@@ -76,10 +81,13 @@
 - 修改：`DataContracts/navigation_route_edges.json`
 - 修改：`DataContracts/navigation_taxi_edges.json`
 - 新增：`DataContracts/navigation_ability_templates.json`
+- 新增：`DataContracts/navigation_walk_components.json`
 - 修改：`Toolbox/Data/NavigationRouteEdges.lua`（生成）
 - 修改：`Toolbox/Data/NavigationTaxiEdges.lua`（生成）
 - 新增：`Toolbox/Data/NavigationAbilityTemplates.lua`（生成）
+- 新增：`Toolbox/Data/NavigationWalkComponents.lua`（生成）
 - 修改：`Toolbox/Toolbox.toc`
+- 修改：`scripts/export/toolbox_db_export.py`
 
 ### 3.3 测试与验证
 
@@ -115,6 +123,8 @@
 - 能力类动作不写死在 `Navigation.lua`；用 `navigation_ability_templates` 导出模板，再按当前角色配置展开。
 - 如果某个职业技能无法稳定导出“法术 -> 目标节点 / 目标规则”，就不进入 V1。
 - 如果 `navigation_ability_templates` 或 `navigation_route_edges` 需要输出数组字段（如 `TraversedUiMapIDs`），导出链路必须保留 Lua 数组，不允许退化成逗号字符串。
+- `RouteBar.lua`、`WorldMap.lua` 和规划摘要不能再直接把 `TraversedUiMapNames` 或技术节点名当玩家显示文本，必须先走 semantic 层。
+- `walk_local` 不做 UI 过滤式修补；必须在 `Toolbox.Navigation` 内部被吸收到 `semantic path` 和 `WalkComponent` 语义里。
 
 ## 5. 执行步骤
 
@@ -652,6 +662,63 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 - 不影响 `navigation` 之外的模块。
 - 若发现当前未提交的导航改动与路线图组件直接冲突，先局部避让，不主动回退别人的未提交修改。
 
+## 6.4 语义路线链与 `WalkComponent` 根治（已确认，待执行）
+
+这部分的目标不是“再加一层 UI 过滤”，而是把技术路径、语义路径和展示消费正式拆开，并为后续 `walk component` 真值导出建立固定出口。
+
+**目标：**
+
+- 从根上切断 `transport / portal / walk_local` 技术节点名泄漏到玩家链路的问题。
+- 让 `RouteBar`、规划期节点摘要和逐段诊断统一消费 `semantic path`。
+- 为 `walk component` 增加正式契约与 runtime 数据出口，先落首批高价值覆盖范围。
+
+**本轮优先文件：**
+
+- `Toolbox/Core/API/Navigation.lua`
+- `Toolbox/Modules/Navigation/RouteBar.lua`
+- `Toolbox/Modules/Navigation/WorldMap.lua`
+- `tests/logic/spec/navigation_api_spec.lua`
+- `tests/logic/spec/navigation_routebar_spec.lua`
+- `tests/logic/spec/navigation_worldmap_spec.lua`
+- `tests/logic/spec/navigation_data_spec.lua`
+- `tests/validate_data_contracts.py`
+- `DataContracts/navigation_walk_components.json`
+- `Toolbox/Data/NavigationWalkComponents.lua`
+- `scripts/export/toolbox_db_export.py`
+- `Toolbox/Toolbox.toc`
+
+**本轮拆分顺序：**
+
+1. 先补失败测试，锁定以下语义：
+   - `transport / public_portal / class_portal` 到站后，显示链和规划摘要必须使用到站地图或动作代理名，不能泄漏返程技术节点名。
+   - `taxi` 不生成独立动作节点，但仍保留正确 segment 和记步结果。
+   - 精简胶囊宽度会随文本长度扩展，不再因为固定宽度裁切内容。
+   - 展开态节点区底框会覆盖完整节点范围，不再出现尾部节点超框。
+2. 在 `Toolbox.Navigation` 中拆出 `raw path -> semantic path -> display`：
+   - `buildRouteSegments()` 继续负责 segment；
+   - 新增 semantic builder，专门产出地图节点 / 动作节点链。
+3. 让 `RouteBar.lua` 与 `WorldMap.lua` 改为只消费 semantic 结果：
+   - 不再直接拿 `TraversedUiMapNames` 生成玩家文案；
+   - 逐段日志中的 `from / to` 也要先过 semantic 代理。
+   - RouteBar 布局同步改成“胶囊宽度自适应 + 节点区底框按内容高度撑开”。
+4. 新增 `navigation_walk_components` 契约与导出文件：
+   - 先导出首批覆盖的组件、节点归属和显示代理；
+   - 再把 runtime 接入点从纯启发式 `WalkClusterNodeID` 迁到正式数据。
+5. 用源侧 override 锁定以下人工修正类型：
+   - `merge`
+   - `split`
+   - `hidden / proxy`
+   - `preferred_anchor`
+   - `uimap / visible_name`
+6. 最后跑导出、逻辑测试、文档回写与游戏内回归。
+
+**实现护栏：**
+
+- 不接受只在 `RouteBar.lua` 或 `WorldMap.lua` 里做字符串过滤的表面修复。
+- 不把 `WalkClusterNodeID / WalkClusterKey` 直接升级成 world walk truth。
+- 少量人工修正只允许存在于源侧 override / 契约导出，不允许回流成 runtime 手写导航数据。
+- `areatrigger` 仍然不伪造目标端；该模态继续等正式来源闭合。
+
 ## 7. 风险与处置
 
 - 风险：已开飞行点和炉石绑定点的 Retail API 口径可能不直接返回最终 `NodeID`
@@ -675,3 +742,6 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 | 2026-04-30 | 来源评估：确认当前 `wow.db` 只能提供 `areatrigger` source 点位，不能提供目标端点；确认 world `WalkComponent` 不存在现成静态真值，后续需独立离线管线 |
 | 2026-04-30 | 路线图改造确认：顶部文本条升级为可折叠路线图组件；交互、存档、实时刷新与最近 10 条历史记录的执行边界写入本计划 |
 | 2026-05-01 | 路线图节点文本补充确认：展开态起点/终点节点改为单行 `地址 x,y`，胶囊与聊天诊断输出不在本轮调整范围 |
+| 2026-05-01 | 根治方向确认：路线显示改为 `raw path -> semantic path -> display` 三层；玩家链路显式区分地图节点与动作节点，`taxi` 不单独生成动作节点 |
+| 2026-05-01 | `walk component` 计划补充：新增正式契约 / 导出 / runtime 出口方向，首批覆盖主城、传送门房、飞艇塔 / 港口与常用交通落点，人工修正只允许留在源侧 override |
+| 2026-05-02 | 路线图布局修复补充：实现范围新增胶囊宽度自适应与展开态节点区底框按节点范围自动撑开两项回归要求 |

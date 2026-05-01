@@ -15,6 +15,10 @@ local DEFAULT_HISTORY_DRAWER_WIDTH = 248 -- 历史抽屉宽度
 local DEFAULT_HISTORY_LIMIT = 10 -- 最近历史记录上限
 local DEFAULT_REFRESH_INTERVAL = 0.5 -- 实时刷新节流秒数
 local DEFAULT_NODE_ROW_HEIGHT = 44 -- 节点行高度
+local MAX_WIDGET_WIDTH = 960 -- 路线图允许扩展到的最大宽度
+local DEFAULT_COLUMN_MIN_WIDTH = 120 -- 胶囊三列的最小宽度
+local DEFAULT_NODE_ROW_GAP = 6 -- 节点行之间的间距
+local DEFAULT_NODE_CONTAINER_PADDING = 8 -- 节点容器上下内边距
 local HISTORY_CONFIRM_DIALOG_KEY = "TOOLBOX_NAVIGATION_ROUTE_HISTORY_CONFIRM" -- 历史重规划确认弹框键
 local DEFAULT_POSITION = {
   point = "TOP",
@@ -359,12 +363,97 @@ local function appendIntermediateTraversedMapNodes(nodeList, segment)
   end
 end
 
+--- 将 semantic node 的模式映射到 RouteBar 现有图标类型。
+---@param nodeInfo table|nil 语义节点
+---@return string
+local function buildSemanticDisplayKind(nodeInfo)
+  local nodeKind = trimText(type(nodeInfo) == "table" and nodeInfo.kind or nil) -- 语义节点类型
+  local modeText = trimText(type(nodeInfo) == "table" and nodeInfo.mode or nil) -- 动作方式
+  if nodeKind ~= "action" then
+    return nodeKind ~= "" and nodeKind or "map"
+  end
+  if modeText == "public_portal" or modeText == "class_portal" then
+    return "portal"
+  end
+  if modeText == "transport" then
+    return "transport"
+  end
+  if modeText == "hearthstone" then
+    return "hearthstone"
+  end
+  if modeText == "class_teleport" then
+    return "teleport"
+  end
+  return "action"
+end
+
+--- 判断 RouteBar 当前能否直接消费一条完整 semantic path。
+---@param nodeList table|nil RouteBar 显示节点链
+---@return boolean
+local function isSemanticDisplayNodeListUsable(nodeList)
+  if type(nodeList) ~= "table" or #nodeList < 2 then
+    return false
+  end
+  local firstNode = nodeList[1] -- 第一条显示节点
+  local lastNode = nodeList[#nodeList] -- 最后一条显示节点
+  return trimText(type(firstNode) == "table" and firstNode.kind or nil) == "map"
+    and trimText(type(lastNode) == "table" and lastNode.kind or nil) == "map"
+end
+
+--- 基于 API 已生成的 semantic nodes 构建 RouteBar 显示节点链。
+---@param routeResult table|nil 路线结果
+---@param routeTarget table|nil 路线目标
+---@param startLocationSnapshot table|nil 规划起点快照
+---@return table|nil
+local function buildDisplayNodesFromSemanticPath(routeResult, routeTarget, startLocationSnapshot)
+  local semanticNodeList = type(routeResult) == "table" and routeResult.semanticNodes or nil -- API 生成的语义节点链
+  if type(semanticNodeList) ~= "table" or #semanticNodeList == 0 then
+    return nil
+  end
+
+  local nodeList = {} -- RouteBar 显示节点链
+  for nodeIndex, nodeInfo in ipairs(semanticNodeList) do
+    local displayText = trimText(type(nodeInfo) == "table" and nodeInfo.text or nil) -- 当前节点文案
+    local nodeKind = buildSemanticDisplayKind(nodeInfo) -- 当前节点图标类型
+    local uiMapID = tonumber(type(nodeInfo) == "table" and nodeInfo.uiMapID) -- 当前节点地图 ID
+    if nodeIndex == 1 and nodeKind == "map" then
+      displayText = buildPositionDisplayText(
+        startLocationSnapshot and startLocationSnapshot.currentUiMapID or uiMapID,
+        startLocationSnapshot and startLocationSnapshot.currentX,
+        startLocationSnapshot and startLocationSnapshot.currentY,
+        displayText
+      )
+      uiMapID = tonumber(startLocationSnapshot and startLocationSnapshot.currentUiMapID) or uiMapID
+    elseif nodeIndex == #semanticNodeList and nodeKind == "map" then
+      displayText = buildPositionDisplayText(
+        type(routeTarget) == "table" and routeTarget.uiMapID or uiMapID,
+        type(routeTarget) == "table" and routeTarget.x,
+        type(routeTarget) == "table" and routeTarget.y,
+        extractMapLevelName(buildTargetDisplayName(routeTarget, routeResult))
+      )
+      uiMapID = tonumber(type(routeTarget) == "table" and routeTarget.uiMapID) or uiMapID
+    end
+    appendDisplayNode(nodeList, displayText, nodeKind, {
+      uiMapID = uiMapID,
+    })
+  end
+  if not isSemanticDisplayNodeListUsable(nodeList) then
+    return nil
+  end
+  return nodeList
+end
+
 --- 基于路线段构建玩家可见的地图 / 枢纽节点链。
 ---@param routeResult table|nil 路线结果
 ---@param routeTarget table|nil 路线目标
 ---@param startLocationSnapshot table|nil 规划起点快照
 ---@return table
 local function buildRouteDisplayNodes(routeResult, routeTarget, startLocationSnapshot)
+  local semanticDisplayNodeList = buildDisplayNodesFromSemanticPath(routeResult, routeTarget, startLocationSnapshot) -- API 级语义节点链
+  if type(semanticDisplayNodeList) == "table" then
+    return semanticDisplayNodeList
+  end
+
   local segmentList = type(routeResult) == "table" and routeResult.segments or nil -- 路线分段列表
   if type(segmentList) ~= "table" or #segmentList == 0 then
     return {}
@@ -845,6 +934,103 @@ local function refreshCapsuleText(frame, routeState, locationSnapshot)
   end
 end
 
+--- 读取 FontString 的近似宽度。
+---@param fontString table|nil 文本对象
+---@return number
+local function readFontStringWidth(fontString)
+  if type(fontString) ~= "table" then
+    return 0
+  end
+  if type(fontString.GetStringWidth) == "function" then
+    return tonumber(fontString:GetStringWidth()) or 0
+  end
+  if type(fontString.GetTextWidth) == "function" then
+    return tonumber(fontString:GetTextWidth()) or 0
+  end
+  return 0
+end
+
+--- 将数值限制在给定区间内。
+---@param value number 原始值
+---@param minValue number 下限
+---@param maxValue number 上限
+---@return number
+local function clampNumber(value, minValue, maxValue)
+  local clampedValue = tonumber(value) or tonumber(minValue) or 0 -- 待限制的值
+  if clampedValue < minValue then
+    return minValue
+  end
+  if clampedValue > maxValue then
+    return maxValue
+  end
+  return clampedValue
+end
+
+--- 根据当前胶囊文本测量所需宽度。
+---@param frame table 路线图根 Frame
+---@return number
+local function resolveCapsuleWidth(frame)
+  local historyButtonWidth = type(frame._historyToggleButton) == "table" and type(frame._historyToggleButton.GetWidth) == "function"
+    and (tonumber(frame._historyToggleButton:GetWidth()) or 76)
+    or 76 -- 历史按钮宽度
+  local headerWidth = readFontStringWidth(frame._capsuleHeaderStatus)
+    + readFontStringWidth(frame._capsuleHeaderProgress)
+    + historyButtonWidth
+    + 56 -- 标题区总宽度
+  local startColumnWidth = math.max(
+    DEFAULT_COLUMN_MIN_WIDTH,
+    readFontStringWidth(frame._capsuleStartLabel),
+    readFontStringWidth(frame._capsuleStartValue)
+  ) -- 左列宽度
+  local currentColumnWidth = math.max(
+    DEFAULT_COLUMN_MIN_WIDTH,
+    readFontStringWidth(frame._capsuleCurrentLabel),
+    readFontStringWidth(frame._capsuleCurrentValue)
+  ) -- 中列宽度
+  local targetColumnWidth = math.max(
+    DEFAULT_COLUMN_MIN_WIDTH,
+    readFontStringWidth(frame._capsuleTargetLabel),
+    readFontStringWidth(frame._capsuleTargetValue)
+  ) -- 右列宽度
+  local bodyWidth = startColumnWidth + currentColumnWidth + targetColumnWidth + 96 -- 三列主体总宽度
+  return clampNumber(math.ceil(math.max(DEFAULT_WIDGET_WIDTH, headerWidth, bodyWidth)), DEFAULT_WIDGET_WIDTH, MAX_WIDGET_WIDTH)
+end
+
+--- 把胶囊三列与分隔线重新对齐到当前宽度。
+---@param frame table 路线图根 Frame
+---@param resolvedWidth number 当前路线图宽度
+local function applyCapsuleColumnLayout(frame, resolvedWidth)
+  local capsuleButton = frame._capsuleButton -- 胶囊按钮
+  if type(capsuleButton) ~= "table" then
+    return
+  end
+  local edgeOffset = math.max(48, math.floor((tonumber(resolvedWidth) or DEFAULT_WIDGET_WIDTH) / 6)) -- 左右列偏移
+  local dividerOffset = math.max(70, math.floor((tonumber(resolvedWidth) or DEFAULT_WIDGET_WIDTH) / 6)) -- 分隔线偏移
+
+  frame._capsuleStartLabel:ClearAllPoints()
+  frame._capsuleStartLabel:SetPoint("TOPLEFT", capsuleButton, "TOPLEFT", edgeOffset, -38)
+  frame._capsuleCurrentLabel:ClearAllPoints()
+  frame._capsuleCurrentLabel:SetPoint("TOP", capsuleButton, "TOP", 0, -38)
+  frame._capsuleTargetLabel:ClearAllPoints()
+  frame._capsuleTargetLabel:SetPoint("TOPRIGHT", capsuleButton, "TOPRIGHT", -edgeOffset, -38)
+
+  frame._capsuleDividerLeft:ClearAllPoints()
+  frame._capsuleDividerLeft:SetPoint("TOP", capsuleButton, "TOP", -dividerOffset, -34)
+  frame._capsuleDividerRight:ClearAllPoints()
+  frame._capsuleDividerRight:SetPoint("TOP", capsuleButton, "TOP", dividerOffset, -34)
+end
+
+--- 按显示节点数计算节点容器所需高度。
+---@param displayNodeCount number 可见节点数
+---@return number
+local function calculateNodeContainerHeight(displayNodeCount)
+  local visibleNodeCount = math.max(tonumber(displayNodeCount) or 0, 0) -- 可见节点数
+  local requiredHeight = (DEFAULT_NODE_CONTAINER_PADDING * 2)
+    + (visibleNodeCount * DEFAULT_NODE_ROW_HEIGHT)
+    + (math.max(visibleNodeCount - 1, 0) * DEFAULT_NODE_ROW_GAP) -- 节点区所需高度
+  return math.max(requiredHeight, DEFAULT_EXPANDED_HEIGHT - DEFAULT_CAPSULE_HEIGHT - 6)
+end
+
 --- 按节点类型选择一个可落地的通用图标。
 ---@param nodeKind string|nil 节点类型
 ---@return string
@@ -860,6 +1046,9 @@ local function getNodeIconTexture(nodeKind)
   end
   if nodeKind == "teleport" then
     return "Interface\\Icons\\Spell_Arcane_TeleportOrgrimmar"
+  end
+  if nodeKind == "action" then
+    return "Interface\\Icons\\INV_Misc_Note_01"
   end
   return "Interface\\Icons\\INV_Misc_Map_01"
 end
@@ -900,7 +1089,7 @@ end
 local function createNodeRow(parentFrame, nodeIndex)
   local rowFrame = CreateFrame("Frame", nil, parentFrame, "BackdropTemplate") -- 节点行容器
   rowFrame:SetSize(DEFAULT_WIDGET_WIDTH - 28, DEFAULT_NODE_ROW_HEIGHT)
-  rowFrame:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 8, -8 - ((nodeIndex - 1) * (DEFAULT_NODE_ROW_HEIGHT + 6)))
+  rowFrame:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 8, -DEFAULT_NODE_CONTAINER_PADDING - ((nodeIndex - 1) * (DEFAULT_NODE_ROW_HEIGHT + DEFAULT_NODE_ROW_GAP)))
   if type(rowFrame.SetBackdrop) == "function" then
     rowFrame:SetBackdrop({
       bgFile = "Interface\\Buttons\\WHITE8x8",
@@ -972,6 +1161,7 @@ local function refreshTimelineText(frame, routeState, locationSnapshot)
   local activeNodeIndex = resolveActiveDisplayNodeIndex(displayNodeList, routeState, locationSnapshot) -- 当前高亮节点
   frame._timelineText:SetText("")
   frame._nodeRows = frame._nodeRows or {}
+  frame._resolvedNodeContainerHeight = calculateNodeContainerHeight(#displayNodeList)
 
   for nodeIndex, nodeInfo in ipairs(displayNodeList) do
     local rowFrame = frame._nodeRows[nodeIndex] -- 当前节点行
@@ -979,6 +1169,7 @@ local function refreshTimelineText(frame, routeState, locationSnapshot)
       rowFrame = createNodeRow(frame._nodeListContainer, nodeIndex)
       frame._nodeRows[nodeIndex] = rowFrame
     end
+    rowFrame:SetWidth(math.max((tonumber(frame._resolvedWidgetWidth) or DEFAULT_WIDGET_WIDTH) - 28, DEFAULT_WIDGET_WIDTH - 28))
     local isActiveNode = nodeIndex == activeNodeIndex -- 当前节点是否为高亮节点
     local detailText = trimText(nodeInfo.detailText) -- 当前节点明细
     rowFrame._iconTexture:SetTexture(getNodeIconTexture(nodeInfo.kind))
@@ -1078,13 +1269,21 @@ end
 local function applyExpandedState(frame, isExpanded)
   local moduleDb = ensureWidgetDbFields(getModuleDb()) -- navigation 模块存档
   local shouldExpand = isExpanded == true -- 当前是否展开
+  local resolvedWidth = tonumber(frame._resolvedWidgetWidth) or DEFAULT_WIDGET_WIDTH -- 当前路线图宽度
+  local nodeContainerHeight = tonumber(frame._resolvedNodeContainerHeight) or (DEFAULT_EXPANDED_HEIGHT - DEFAULT_CAPSULE_HEIGHT - 6) -- 节点容器高度
+  local expandedHeight = DEFAULT_CAPSULE_HEIGHT + 6 + nodeContainerHeight -- 展开态总高度
   moduleDb.routeWidgetExpanded = shouldExpand
+  frame._expandedContent:SetHeight(nodeContainerHeight)
+  frame._nodeListContainer:SetHeight(nodeContainerHeight)
+  if frame._historyDrawer then
+    frame._historyDrawer:SetHeight(math.max(420, expandedHeight))
+  end
 
   if shouldExpand then
-    frame:SetSize(DEFAULT_WIDGET_WIDTH, DEFAULT_EXPANDED_HEIGHT)
+    frame:SetSize(resolvedWidth, expandedHeight)
     frame._expandedContent:Show()
   else
-    frame:SetSize(DEFAULT_WIDGET_WIDTH, DEFAULT_CAPSULE_HEIGHT)
+    frame:SetSize(resolvedWidth, DEFAULT_CAPSULE_HEIGHT)
     frame._expandedContent:Hide()
   end
 end
@@ -1096,6 +1295,8 @@ local function refreshRouteBar(locationSnapshot)
     return
   end
   refreshCapsuleText(routeBarFrame, activeRouteState, locationSnapshot)
+  routeBarFrame._resolvedWidgetWidth = resolveCapsuleWidth(routeBarFrame)
+  applyCapsuleColumnLayout(routeBarFrame, routeBarFrame._resolvedWidgetWidth)
   refreshTimelineText(routeBarFrame, activeRouteState, locationSnapshot)
   refreshHistoryButtons(routeBarFrame)
   applyExpandedState(routeBarFrame, ensureWidgetDbFields(getModuleDb()).routeWidgetExpanded)

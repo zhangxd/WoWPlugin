@@ -31,6 +31,12 @@ describe("Navigation RouteBar", function()
     return {
       totalSteps = 4,
       rawNodePath = { "current", 8500, 8501, 6261, 6262, 1201, "target" },
+      semanticNodes = {
+        { kind = "map", text = "奥格瑞玛", uiMapID = 85 },
+        { kind = "action", mode = "public_portal", text = "使用奥格瑞玛的传送门前往达拉然" },
+        { kind = "map", text = "达拉然", uiMapID = 626 },
+        { kind = "map", text = "风暴峭壁", uiMapID = 120 },
+      },
       segments = {
         {
           mode = "walk_local",
@@ -99,6 +105,12 @@ describe("Navigation RouteBar", function()
     return {
       totalSteps = 4,
       rawNodePath = { "current", 9400, 2200, 2600, "target" },
+      semanticNodes = {
+        { kind = "map", text = "银月城", uiMapID = 94 },
+        { kind = "map", text = "永歌森林", uiMapID = 95 },
+        { kind = "map", text = "东瘟疫之地", uiMapID = 22 },
+        { kind = "map", text = "辛特兰", uiMapID = 26 },
+      },
       segments = {
         {
           mode = "walk_local",
@@ -139,6 +151,142 @@ describe("Navigation RouteBar", function()
           toUiMapID = 26,
           traversedUiMapIDs = { 26 },
           traversedUiMapNames = { "恶齿村，辛特兰", "辛特兰" },
+        },
+      },
+    }
+  end
+
+  local function buildLongCapsuleRouteResult()
+    return {
+      totalSteps = 1,
+      rawNodePath = { "current", 9991, "target" },
+      semanticNodes = {
+        { kind = "map", text = "这是一段非常非常长的起始位置说明文本", uiMapID = 991 },
+        { kind = "map", text = "这是一段非常非常长的终点说明文本", uiMapID = 992 },
+      },
+      segments = {
+        {
+          mode = "walk_local",
+          label = "目标位置：这是一段非常非常长的终点说明文本 45.6, 78.9",
+          fromName = "这是一段非常非常长的起始位置说明文本",
+          toName = "这是一段非常非常长的终点说明文本",
+          fromUiMapID = 991,
+          toUiMapID = 992,
+          traversedUiMapIDs = { 991, 992 },
+          traversedUiMapNames = {
+            "这是一段非常非常长的起始位置说明文本",
+            "这是一段非常非常长的终点说明文本",
+          },
+        },
+      },
+    }
+  end
+
+  local function buildOverflowTimelineRouteResult()
+    return {
+      totalSteps = 5,
+      rawNodePath = { "current", 3100, 3101, 3200, 3201, 3300, "target" },
+      semanticNodes = {
+        { kind = "map", text = "暴风城", uiMapID = 84 },
+        { kind = "action", mode = "public_portal", text = "使用暴风城的传送门前往达拉然" },
+        { kind = "map", text = "达拉然", uiMapID = 626 },
+        { kind = "action", mode = "public_portal", text = "使用达拉然的传送门前往风暴峭壁" },
+        { kind = "map", text = "风暴峭壁", uiMapID = 120 },
+      },
+      segments = {
+        {
+          mode = "walk_local",
+          label = "步行：暴风城 -> 暴风城传送门",
+          fromName = "当前位置",
+          toName = "暴风城传送门",
+          fromUiMapID = 84,
+          toUiMapID = 84,
+          traversedUiMapIDs = { 84 },
+          traversedUiMapNames = { "暴风城" },
+        },
+        {
+          mode = "public_portal",
+          label = "使用暴风城的传送门前往达拉然",
+          fromName = "暴风城传送门",
+          toName = "达拉然",
+          fromUiMapID = 84,
+          toUiMapID = 626,
+          traversedUiMapIDs = { 84, 626 },
+          traversedUiMapNames = { "暴风城", "达拉然" },
+        },
+        {
+          mode = "walk_local",
+          label = "步行：达拉然 -> 达拉然传送门",
+          fromName = "达拉然",
+          toName = "达拉然传送门",
+          fromUiMapID = 626,
+          toUiMapID = 626,
+          traversedUiMapIDs = { 626 },
+          traversedUiMapNames = { "达拉然" },
+        },
+        {
+          mode = "public_portal",
+          label = "使用达拉然的传送门前往风暴峭壁",
+          fromName = "达拉然传送门",
+          toName = "风暴峭壁",
+          fromUiMapID = 626,
+          toUiMapID = 120,
+          traversedUiMapIDs = { 626, 120 },
+          traversedUiMapNames = { "达拉然", "风暴峭壁" },
+        },
+        {
+          mode = "walk_local",
+          label = "目标位置：风暴峭壁 41.8, 84.7",
+          fromName = "风暴峭壁",
+          toName = "风暴峭壁目标点",
+          fromUiMapID = 120,
+          toUiMapID = 120,
+          traversedUiMapIDs = { 120 },
+          traversedUiMapNames = { "风暴峭壁" },
+        },
+      },
+    }
+  end
+
+  local function buildTransportLeakRouteResult()
+    return {
+      totalSteps = 2,
+      rawNodePath = { "current", 8500, 9100, 9101, "target" },
+      semanticNodes = {
+        { kind = "map", text = "奥格瑞玛", uiMapID = 85 },
+        { kind = "action", mode = "transport", text = "乘坐奥格瑞玛的飞艇前往北风苔原" },
+        { kind = "map", text = "北风苔原", uiMapID = 114 },
+      },
+      segments = {
+        {
+          mode = "walk_local",
+          label = "步行：奥格瑞玛 -> 乘坐奥格瑞玛的飞艇前往北风苔原",
+          fromName = "当前位置",
+          toName = "乘坐奥格瑞玛的飞艇前往北风苔原",
+          fromUiMapID = 85,
+          toUiMapID = 85,
+          traversedUiMapIDs = { 85 },
+          traversedUiMapNames = { "奥格瑞玛" },
+        },
+        {
+          mode = "transport",
+          label = "乘坐奥格瑞玛的飞艇前往北风苔原",
+          fromName = "乘坐奥格瑞玛的飞艇前往北风苔原",
+          toName = "乘坐战歌要塞的飞艇前往奥格瑞玛",
+          fromUiMapID = 85,
+          toUiMapID = 114,
+          traversedUiMapIDs = { 85, 114 },
+          traversedUiMapNames = { "奥格瑞玛", "北风苔原" },
+        },
+        {
+          mode = "walk_local",
+          label = "目标位置：北风苔原 51.9, 41.6",
+          fromName = "战歌要塞",
+          toName = "北风苔原目标点",
+          fromUiMapID = 114,
+          toUiMapID = 114,
+          traversedUiMapIDs = { 114 },
+          traversedUiMapNames = { "北风苔原" },
         },
       },
     }
@@ -251,6 +399,7 @@ describe("Navigation RouteBar", function()
         NavigationMapNodes = {
           nodes = {
             [85] = { Name_lang = "奥格瑞玛" },
+            [84] = { Name_lang = "暴风城" },
             [114] = { Name_lang = "北风苔原" },
             [120] = { Name_lang = "风暴峭壁" },
             [626] = { Name_lang = "达拉然" },
@@ -258,6 +407,8 @@ describe("Navigation RouteBar", function()
             [95] = { Name_lang = "永歌森林" },
             [22] = { Name_lang = "东瘟疫之地" },
             [26] = { Name_lang = "辛特兰" },
+            [991] = { Name_lang = "这是一段非常非常长的起始位置说明文本" },
+            [992] = { Name_lang = "这是一段非常非常长的终点说明文本" },
           },
         },
         NavigationRouteEdges = {
@@ -331,7 +482,7 @@ describe("Navigation RouteBar", function()
     assert.equals("风暴峭壁 41.8, 84.7", routeBarFrame._capsuleTargetValue:GetText())
   end)
 
-  it("toggles_the_expanded_navigation_page_and_renders_only_map_and_hub_nodes", function()
+  it("toggles_the_expanded_navigation_page_and_renders_map_action_map_nodes_without_promoting_taxi_actions", function()
     locationSnapshot = {
       currentUiMapID = 85,
       currentX = 0.45,
@@ -354,17 +505,70 @@ describe("Navigation RouteBar", function()
     assert.is_true(routeBarFrame._timelineText == nil or routeBarFrame._timelineText:GetText() == "")
     assert.same({
       "奥格瑞玛 45.0, 63.2",
-      "奥格瑞玛传送门",
+      "使用奥格瑞玛的传送门前往达拉然",
       "达拉然",
       "风暴峭壁 41.8, 84.7",
     }, collectNodeLabelList(routeBarFrame))
+    assert.is_nil(string.find(table.concat(collectNodeLabelList(routeBarFrame), "\n"), "奥格瑞玛传送门", 1, true))
     assert.is_nil(string.find(table.concat(collectNodeLabelList(routeBarFrame), "\n"), "飞行前往", 1, true))
     assert.is_nil(string.find(table.concat(collectNodeLabelList(routeBarFrame), "\n"), "K3", 1, true))
-    assert.is_nil(string.find(table.concat(collectNodeLabelList(routeBarFrame), "\n"), "前往", 1, true))
 
     routeBarFrame._capsuleButton:RunScript("OnClick")
     assert.is_false(routeBarFrame._expandedContent:IsShown())
     assert.is_false(moduleDb.routeWidgetExpanded)
+  end)
+
+  it("does_not_leak_return_transport_node_names_into_the_expanded_chain", function()
+    locationSnapshot = {
+      currentUiMapID = 85,
+      currentX = 0.5,
+      currentY = 0.6,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildTransportLeakRouteResult(), {
+      uiMapID = 114,
+      x = 0.519,
+      y = 0.416,
+      name = "北风苔原",
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    routeBarFrame._capsuleButton:RunScript("OnClick")
+
+    local nodePathText = table.concat(collectNodeLabelList(routeBarFrame), "\n") -- 展开态节点链文本
+    assert.is_true(string.find(nodePathText, "乘坐奥格瑞玛的飞艇前往北风苔原", 1, true) ~= nil)
+    assert.is_true(string.find(nodePathText, "北风苔原 51.9, 41.6", 1, true) ~= nil)
+    assert.is_nil(string.find(nodePathText, "乘坐战歌要塞的飞艇前往奥格瑞玛", 1, true))
+  end)
+
+  it("falls_back_to_segment_rendering_when_semantic_nodes_are_incomplete", function()
+    locationSnapshot = {
+      currentUiMapID = 85,
+      currentX = 0.45,
+      currentY = 0.632,
+    }
+
+    local routeResult = buildComplexRouteResult()
+    routeResult.semanticNodes = {
+      { kind = "action", mode = "public_portal", text = "使用奥格瑞玛的传送门前往达拉然" },
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(routeResult, {
+      uiMapID = 120,
+      x = 0.418,
+      y = 0.847,
+      name = "风暴峭壁",
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    routeBarFrame._capsuleButton:RunScript("OnClick")
+
+    assert.same({
+      "奥格瑞玛 45.0, 63.2",
+      "奥格瑞玛传送门",
+      "达拉然",
+      "风暴峭壁 41.8, 84.7",
+    }, collectNodeLabelList(routeBarFrame))
   end)
 
   it("renders_intermediate_map_nodes_in_the_expanded_chain_without_promoting_flight_point_details", function()
@@ -612,6 +816,46 @@ describe("Navigation RouteBar", function()
     assert.equals("北风苔原 45.0, 55.0", routeBarFrame._capsuleCurrentValue:GetText())
   end)
 
+  it("adapts_the_capsule_width_to_long_position_texts", function()
+    locationSnapshot = {
+      currentUiMapID = 991,
+      currentX = 0.123,
+      currentY = 0.456,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildLongCapsuleRouteResult(), {
+      uiMapID = 992,
+      x = 0.789,
+      y = 0.654,
+      name = "这是一段非常非常长的终点说明文本",
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    assert.is_true(routeBarFrame:GetWidth() > 420)
+  end)
+
+  it("expands_the_node_container_and_root_frame_to_cover_all_rendered_nodes", function()
+    locationSnapshot = {
+      currentUiMapID = 84,
+      currentX = 0.123,
+      currentY = 0.456,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildOverflowTimelineRouteResult(), {
+      uiMapID = 120,
+      x = 0.418,
+      y = 0.847,
+      name = "风暴峭壁",
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    routeBarFrame._capsuleButton:RunScript("OnClick")
+
+    assert.equals(5, #collectNodeLabelList(routeBarFrame))
+    assert.is_true(routeBarFrame._nodeListContainer:GetHeight() >= 252)
+    assert.is_true(routeBarFrame:GetHeight() >= 346)
+  end)
+
   it("restores_the_saved_anchor_and_persists_dragged_position", function()
     moduleDb.routeWidgetPosition = {
       point = "TOP",
@@ -653,12 +897,12 @@ describe("Navigation RouteBar", function()
     local routeText = Toolbox.NavigationModule.RouteBar.BuildRouteText(buildComplexRouteResult())
 
     assert.is_true(string.find(routeText, "奥格瑞玛", 1, true) ~= nil)
-    assert.is_true(string.find(routeText, "奥格瑞玛传送门", 1, true) ~= nil)
+    assert.is_true(string.find(routeText, "使用奥格瑞玛的传送门前往达拉然", 1, true) ~= nil)
     assert.is_true(string.find(routeText, "达拉然", 1, true) ~= nil)
     assert.is_true(string.find(routeText, "风暴峭壁", 1, true) ~= nil)
     assert.is_nil(string.find(routeText, "达拉然飞行点", 1, true))
     assert.is_nil(string.find(routeText, "K3", 1, true))
     assert.is_nil(string.find(routeText, "飞行前往", 1, true))
-    assert.is_nil(string.find(routeText, "前往", 1, true))
+    assert.is_nil(string.find(routeText, "奥格瑞玛传送门", 1, true))
   end)
 end)

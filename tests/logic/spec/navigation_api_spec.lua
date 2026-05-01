@@ -88,6 +88,14 @@ describe("Navigation API", function()
     return false
   end
 
+  local function collectSemanticNodeTextList(routeResult)
+    local textList = {} -- 语义节点文本列表
+    for _, nodeInfo in ipairs(type(routeResult) == "table" and type(routeResult.semanticNodes) == "table" and routeResult.semanticNodes or {}) do
+      textList[#textList + 1] = nodeInfo.text
+    end
+    return textList
+  end
+
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
     originalUnitClass = rawget(_G, "UnitClass")
@@ -278,6 +286,56 @@ describe("Navigation API", function()
     assert.equals(2, #routeResult.segments)
     assert.equals("walk_local", routeResult.segments[1].mode)
     assert.equals("class_portal", routeResult.segments[2].mode)
+  end)
+
+  it("builds_semantic_nodes_without_leaking_return_transport_names", function()
+    local routeGraph = {
+      nodes = {
+        start = { id = "start", name = "奥格瑞玛", uiMapID = 85, kind = "map_anchor" },
+        zeppelinOut = { id = "zeppelinOut", name = "乘坐奥格瑞玛的飞艇前往北风苔原", uiMapID = 85, kind = "transport" },
+        zeppelinReturn = { id = "zeppelinReturn", name = "乘坐战歌要塞的飞艇前往奥格瑞玛", uiMapID = 114, kind = "transport" },
+        target = { id = "target", name = "北风苔原目标点", uiMapID = 114, kind = "map_anchor" },
+      },
+      edges = {
+        {
+          from = "start",
+          to = "zeppelinOut",
+          stepCost = 1,
+          mode = "walk_local",
+          label = "步行：奥格瑞玛 -> 乘坐奥格瑞玛的飞艇前往北风苔原",
+          traversedUiMapIDs = { 85 },
+          traversedUiMapNames = { "奥格瑞玛" },
+        },
+        {
+          from = "zeppelinOut",
+          to = "zeppelinReturn",
+          stepCost = 1,
+          mode = "transport",
+          label = "乘坐奥格瑞玛的飞艇前往北风苔原",
+          traversedUiMapIDs = { 85, 114 },
+          traversedUiMapNames = { "奥格瑞玛", "北风苔原" },
+        },
+        {
+          from = "zeppelinReturn",
+          to = "target",
+          stepCost = 1,
+          mode = "walk_local",
+          label = "目标位置：北风苔原 51.9, 41.6",
+          traversedUiMapIDs = { 114 },
+          traversedUiMapNames = { "北风苔原" },
+        },
+      },
+    }
+
+    local routeResult, errorObject = Toolbox.Navigation.FindShortestPath(routeGraph, "start", "target")
+
+    assert.is_nil(errorObject)
+    assert.same({
+      "奥格瑞玛",
+      "乘坐奥格瑞玛的飞艇前往北风苔原",
+      "北风苔原",
+    }, collectSemanticNodeTextList(routeResult))
+    assert.is_nil(string.find(table.concat(collectSemanticNodeTextList(routeResult), "\n"), "战歌要塞", 1, true))
   end)
 
   it("filters_edges_that_are_not_confirmed_available_for_the_current_character", function()

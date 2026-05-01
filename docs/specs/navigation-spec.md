@@ -1,7 +1,7 @@
 # 地图导航模块需求规格
 
 - 文档类型：需求
-- 状态：已确认
+- 状态：可执行
 - 主题：navigation
 - 适用范围：`navigation` 模块的世界地图目标选择、跨地图路径规划与顶部路径 UI
 - 关联模块：`navigation`
@@ -9,7 +9,7 @@
   - `docs/designs/navigation-design.md`
   - `docs/plans/navigation-plan.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-29（实现/导出对齐，统一边表基线同步到 v17）
+- 最后更新：2026-05-02（用户确认开动；补充 semantic path、walk component 首批覆盖与 RouteBar 布局回归要求）
 
 ## 1. 背景
 
@@ -52,6 +52,11 @@
 - 统一运行时静态边只允许来自导出契约；来源侧允许保留追溯契约，但运行时不能直接消费来源边表。
 - `hearthstone / class_teleport / class_portal` 的模板定义也必须来自导出契约，不得在运行时代码里手工维护“法术 -> 目的地”关系。
 - `taxi` 边必须保留经过地图序列。
+- 玩家可见路线链必须先由 `semantic path` 归一化，再交给 RouteBar 与规划诊断输出消费。
+- `semantic path` 默认按 `地图节点 -> 动作节点 -> 地图节点` 交替组织。
+- `walk_local` 只负责把起点、终点和交通落点接入同一 `WalkComponent`，不直接显示成玩家节点。
+- `taxi` 保留为有效 segment 和记步来源，但不单独生成飞行点动作节点。
+- `transport / public_portal / hearthstone / class_teleport / class_portal` 需要生成玩家可见动作节点，且动作节点文案必须表示“前往目标地图的动作”，不能泄漏返程名或技术方向节点名。
 - 顶部路径 UI 显示在屏幕顶部中间位置，至少展示：
   - 总步数
   - 每段方式
@@ -62,6 +67,11 @@
 - 路线图组件需要保存最近 10 条历史记录。
 - 点击历史记录时，使用“玩家当前位置 + 历史终点”重新规划路线。
 - 路线图组件需要实时刷新当前步骤与偏航提示。
+- 起点节点与终点节点使用单行位置文本，格式固定为 `地址 x,y`。
+- 精简胶囊宽度需要根据标题与三段文本长度自适应扩展，并保留最小宽度 / 最大宽度 / 内边距护栏。
+- 展开态节点区底框 / 背景框需要按实际节点范围自动撑开，覆盖尾部节点、连线与外边距。
+- 本轮允许引入 `walk component` 正式契约与 runtime 数据出口，但首批覆盖只落主城、传送门房、飞艇塔 / 港口与常用交通落点。
+- `walk component` 数据来源固定为“`wow.db` 自动候选 + 源侧少量 override + 正式导出”，不允许在 runtime Lua 手写补边。
 
 ### 3.2 Out of Scope
 
@@ -89,6 +99,10 @@
 - `silvermoon -> borean tundra` 这类世界级路线允许先用角色能力到主城，再换公共交通。
 - 运行时静态数据继续只允许来自 DataContracts 导出；不得用手工导航边补洞。
 - `only_taxi`、`must_use_transport`、`no_public_route` 等强结论要等所有相关模态闭合后再引入。
+- 玩家可见路线表达拆成 `raw path -> semantic path -> display` 三层；`RouteBar` 与规划诊断不得直接消费技术节点名。
+- `semantic path` 中，地图节点承载“身处 / 将到达的地图”，动作节点承载“如何前往下一张地图”。
+- `transport / public_portal / class_portal` 到站后，显示链和规划摘要必须使用到站地图或动作代理名，不能显示返程技术节点名。
+- `walk component` 只允许通过正式契约与导出链路落地；少量人工修正只能留在源侧 override。
 
 ## 5. 导出与运行时边界
 
@@ -107,6 +121,7 @@
 - 当前仓库默认导出基线已经推进到 `navigation_route_edges` schema v17，统一边表可包含 `taxi / transport / public_portal`；`areatrigger` 仍为占位，不参与实际可达路径。
 - 如果需要“严格 V1-only”导出结果，必须另设冻结契约或独立输出，不能继续和当前统一边表共用同一份 `NavigationRouteEdges.lua`。
 - `walk` 不允许再由地图矩形、`UiMap` 父链或视觉相邻关系推导，必须等待独立连通规则。
+- `navigation_walk_components` 可以进入本轮执行范围，但只承载首批局部覆盖，不等同于全世界步行真值已经闭合。
 
 ### 5.1 当前静态闭环样例口径
 
@@ -151,10 +166,17 @@
 16. 路线图实时高亮当前步骤，并在偏离路线时给出持续可见提示。
 17. 最近 10 条历史记录可见，点击任意一条后会以玩家当前位置为起点、以该历史终点为目标重新规划。
 18. 到达终点后路线图不自动消失；手动关闭或重新规划前保持可再次展开查看。
+19. 玩家可见节点链必须按 `semantic path` 渲染；`walk_local` 不直接显示成节点，`taxi` 不单独生成飞行点动作节点。
+20. `transport / public_portal / class_portal` 等动作到站后，显示链与规划摘要不得泄漏返程名、方向性技术节点名或 portal 落点技术名。
+21. 起点节点与终点节点使用单行 `地址 x,y` 文本，中间节点默认不附带坐标。
+22. 精简胶囊宽度会随标题与三段文本长度自适应扩展，且不会因固定宽度裁切内容。
+23. 展开态节点区底框 / 背景框会覆盖完整节点范围，不再出现尾部节点超框。
+24. `walk component` 首批正式导出覆盖主城、传送门房、飞艇塔 / 港口与常用交通落点；人工修正仅存在于源侧 override。
 
 ## 7. 实施状态
 
 - 本规格自 2026-04-29 起，成为 `navigation` 的新需求基线。
+- 用户已于 2026-05-02 明确“开动”，并确认 semantic path、walk component 首批覆盖与 RouteBar 布局回归要求进入执行范围。
 - 当前实现已经完成“统一导出驱动 + 最少步数求解”的主干收敛：
   - 运行时不再直接消费 `NavigationManualEdges.lua`、`NavigationTaxiEdges.lua`、`NavigationUiMapRelations.lua`、`NavigationWaypointEdges.lua`
   - 统一边表默认基线已同步到 `navigation_route_edges` schema v17
@@ -178,3 +200,4 @@
 | 2026-04-29 | 边界样例同步：固定 `银月城 -> 东瘟疫之地` 当前期望为 `NAVIGATION_ERR_NO_ROUTE`，并明确这代表导出图未闭合，而不是静态证明游戏内不可达 |
 | 2026-04-30 | 正向样例同步：`银月城 -> 东瘟疫之地` 改为静态闭环回归；补充 `portal_118/556`、`taxi_82`、奥格传送门房并入与 `edges` 连续序列要求 |
 | 2026-04-30 | 路线图需求扩展：确认顶部胶囊 + 展开时间线、可拖动、位置 / 展开状态存档、实时偏航提示与最近 10 条历史终点重规划 |
+| 2026-05-02 | 用户确认开动：需求状态推进为 `可执行`，并补充 `raw path -> semantic path -> display` 三层、`walk component` 首批覆盖、胶囊宽度自适应与展开态节点区底框自动撑开要求 |

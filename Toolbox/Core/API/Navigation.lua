@@ -288,6 +288,235 @@ local function buildRouteSegments(routeGraph, edgePath)
   return segments, stepLabels
 end
 
+--- 从显示文本里提取地图级名称。
+---@param rawText any 原始文本
+---@return string
+local function extractMapLevelName(rawText)
+  local displayText = trimText(rawText) -- 原始显示文本
+  displayText = string.gsub(displayText, "^当前位置[:：]?", "")
+  displayText = string.gsub(displayText, "^目标位置[:：]?", "")
+  displayText = trimText(displayText)
+  local coordinatePrefix = string.match(displayText, "^(.-)%s+[%d%.]+,%s*[%d%.]+$") -- 去掉坐标后的前缀
+  if coordinatePrefix then
+    displayText = trimText(coordinatePrefix)
+  end
+  displayText = string.gsub(displayText, "目标点$", "")
+  return trimText(displayText)
+end
+
+--- 清理边标签里导出用的后缀节点补充，仅保留玩家需要执行的动作。
+---@param rawLabel any 原始标签
+---@return string
+local function cleanPlayerFacingLabel(rawLabel)
+  local cleanedLabel = trimText(rawLabel) -- 原始显示标签
+  if cleanedLabel == "" then
+    return ""
+  end
+
+  local splitMarkers = {
+    "→",
+    "â",
+  } -- 导出时可能拼入的箭头补充
+  local firstSplitIndex = nil -- 最早箭头位置
+  for _, marker in ipairs(splitMarkers) do
+    local markerIndex = string.find(cleanedLabel, marker, 1, true) -- 箭头位置
+    if markerIndex and (not firstSplitIndex or markerIndex < firstSplitIndex) then
+      firstSplitIndex = markerIndex
+    end
+  end
+  if firstSplitIndex then
+    cleanedLabel = trimText(string.sub(cleanedLabel, 1, firstSplitIndex - 1))
+  end
+  return cleanedLabel
+end
+
+--- 判断一段路线是否应该生成显式动作节点。
+---@param modeText string|nil 路线方式
+---@return boolean
+local function isSemanticActionMode(modeText)
+  return modeText == "public_portal"
+    or modeText == "class_portal"
+    or modeText == "transport"
+    or modeText == "hearthstone"
+    or modeText == "class_teleport"
+end
+
+--- 由路线方式映射语义动作节点类型。
+---@param modeText string|nil 路线方式
+---@return string
+local function buildSemanticActionKind(modeText)
+  if modeText == "public_portal" or modeText == "class_portal" then
+    return "portal"
+  end
+  if modeText == "transport" then
+    return "transport"
+  end
+  if modeText == "hearthstone" then
+    return "hearthstone"
+  end
+  if modeText == "class_teleport" then
+    return "teleport"
+  end
+  return "action"
+end
+
+--- 为一段路线读取更适合语义层使用的地图名。
+---@param segment table|nil 路线段
+---@param useDestination boolean 是否读取终点侧
+---@return string
+local function buildSemanticMapName(segment, useDestination)
+  if type(segment) ~= "table" then
+    return ""
+  end
+  local traversedNameList = type(segment.traversedUiMapNames) == "table" and segment.traversedUiMapNames or nil -- 经过地图名列表
+  if type(traversedNameList) == "table" and #traversedNameList > 0 then
+    local traversedIndex = useDestination and #traversedNameList or 1 -- 读取的经过地图索引
+    local traversedMapName = extractMapLevelName(traversedNameList[traversedIndex]) -- 经过地图名
+    if traversedMapName ~= "" then
+      return traversedMapName
+    end
+  end
+  local fallbackName = useDestination and segment.toName or segment.fromName -- 兜底名称
+  return extractMapLevelName(fallbackName)
+end
+
+--- 生成动作节点显示文本。
+---@param segment table|nil 路线段
+---@return string
+local function buildSemanticActionText(segment)
+  if type(segment) ~= "table" then
+    return ""
+  end
+
+  local cleanedLabel = cleanPlayerFacingLabel(segment.label) -- 清洗后的动作标签
+  if cleanedLabel ~= "" then
+    return cleanedLabel
+  end
+
+  local modeText = tostring(segment.mode or "") -- 路线方式
+  local destinationMapName = buildSemanticMapName(segment, true) -- 动作目标地图名
+  if destinationMapName == "" then
+    destinationMapName = extractMapLevelName(segment.toName or segment.to)
+  end
+  if destinationMapName == "" then
+    destinationMapName = "目标地图"
+  end
+
+  if modeText == "public_portal" or modeText == "class_portal" then
+    return string.format("使用传送门前往%s", destinationMapName)
+  end
+  if modeText == "transport" then
+    return string.format("乘坐交通前往%s", destinationMapName)
+  end
+  if modeText == "hearthstone" then
+    return string.format("使用炉石前往%s", destinationMapName)
+  end
+  if modeText == "class_teleport" then
+    return string.format("使用职业传送前往%s", destinationMapName)
+  end
+  return destinationMapName
+end
+
+--- 向语义节点链追加一个节点，并避免相邻重复。
+---@param nodeList table 语义节点链
+---@param text string 节点文本
+---@param kind string 节点类型
+---@param uiMapID number|nil 地图 ID
+---@param mode string|nil 动作方式
+local function appendSemanticNode(nodeList, text, kind, uiMapID, mode)
+  local trimmedText = trimText(text) -- 去空白后的节点文本
+  if trimmedText == "" then
+    return
+  end
+  local lastNode = nodeList[#nodeList] -- 最近一个语义节点
+  if type(lastNode) == "table" and trimText(lastNode.text) == trimmedText and tostring(lastNode.kind or "") == tostring(kind or "") then
+    if tonumber(uiMapID) and not tonumber(lastNode.uiMapID) then
+      lastNode.uiMapID = tonumber(uiMapID)
+    end
+    if trimText(mode) ~= "" and trimText(lastNode.mode) == "" then
+      lastNode.mode = trimText(mode)
+    end
+    return
+  end
+  nodeList[#nodeList + 1] = {
+    kind = trimText(kind) ~= "" and trimText(kind) or "map",
+    mode = trimText(mode),
+    text = trimmedText,
+    uiMapID = tonumber(uiMapID) or nil,
+  }
+end
+
+--- 把一段路线中的中间地图补进语义节点链。
+---@param nodeList table 语义节点链
+---@param segment table|nil 路线段
+local function appendSemanticIntermediateMapNodes(nodeList, segment)
+  local traversedNameList = type(segment) == "table" and segment.traversedUiMapNames or nil -- 原始经过地图名列表
+  local traversedMapIDList = type(segment) == "table" and segment.traversedUiMapIDs or nil -- 原始经过地图 ID 列表
+  local lastInteriorIndex = type(traversedNameList) == "table" and (#traversedNameList - 1) or 0 -- 最后一个中间节点索引
+  if type(traversedNameList) ~= "table" or lastInteriorIndex < 2 then
+    return
+  end
+  for traversedIndex = 2, lastInteriorIndex do
+    appendSemanticNode(
+      nodeList,
+      extractMapLevelName(traversedNameList[traversedIndex]),
+      "map",
+      type(traversedMapIDList) == "table" and traversedMapIDList[traversedIndex] or nil,
+      nil
+    )
+  end
+end
+
+--- 判断动作段的到站地图是否应由最后一步本地步行目标吸收。
+---@param segmentList table|nil 路线分段列表
+---@param segmentIndex number 当前段序号
+---@return boolean
+local function shouldMergeSemanticArrivalIntoFinalWalk(segmentList, segmentIndex)
+  local currentSegment = type(segmentList) == "table" and segmentList[segmentIndex] or nil -- 当前路线段
+  local nextSegment = type(segmentList) == "table" and segmentList[segmentIndex + 1] or nil -- 下一段路线
+  return type(nextSegment) == "table"
+    and segmentIndex + 1 == #segmentList
+    and tostring(nextSegment.mode or "") == WALK_LOCAL_MODE
+    and tonumber(currentSegment and currentSegment.toUiMapID) ~= nil
+    and tonumber(currentSegment and currentSegment.toUiMapID) == tonumber(nextSegment.toUiMapID)
+end
+
+--- 基于 segments 构建语义节点链。
+---@param segmentList table|nil 路线分段列表
+---@return table
+local function buildSemanticNodes(segmentList)
+  if type(segmentList) ~= "table" or #segmentList == 0 then
+    return {}
+  end
+
+  local nodeList = {} -- 语义节点链
+  local firstSegment = segmentList[1] or nil -- 第一段路线
+  appendSemanticNode(nodeList, buildSemanticMapName(firstSegment, false), "map", firstSegment and firstSegment.fromUiMapID, nil)
+
+  for segmentIndex, segment in ipairs(segmentList) do
+    local modeText = tostring(type(segment) == "table" and segment.mode or "") -- 当前段方式
+    if modeText == WALK_LOCAL_MODE then
+      appendSemanticIntermediateMapNodes(nodeList, segment)
+      if segmentIndex == #segmentList then
+        appendSemanticNode(nodeList, buildSemanticMapName(segment, true), "map", segment.toUiMapID, nil)
+      end
+    elseif modeText == "taxi" then
+      if not shouldMergeSemanticArrivalIntoFinalWalk(segmentList, segmentIndex) then
+        appendSemanticNode(nodeList, buildSemanticMapName(segment, true), "map", segment.toUiMapID, nil)
+      end
+    elseif isSemanticActionMode(modeText) then
+      appendSemanticNode(nodeList, buildSemanticActionText(segment), buildSemanticActionKind(modeText), segment.fromUiMapID, modeText)
+      if not shouldMergeSemanticArrivalIntoFinalWalk(segmentList, segmentIndex) then
+        appendSemanticNode(nodeList, buildSemanticMapName(segment, true), "map", segment.toUiMapID, nil)
+      end
+    else
+      appendSemanticNode(nodeList, buildSemanticMapName(segment, true), "map", segment.toUiMapID, nil)
+    end
+  end
+
+  return nodeList
+end
+
 --- 回溯路径状态，生成路线结果。
 ---@param routeGraph table 路径图
 ---@param finalState table 最终状态
@@ -316,9 +545,11 @@ local function buildRouteResult(routeGraph, finalState)
   end
 
   local segments, stepLabels = buildRouteSegments(routeGraph, rawEdgePath) -- 展示段与兼容文案
+  local semanticNodes = buildSemanticNodes(segments) -- 语义节点链
   return {
     totalSteps = tonumber(finalState and finalState.score and finalState.score.steps) or #segments,
     segments = segments,
+    semanticNodes = semanticNodes,
     rawNodePath = rawNodePath,
     rawEdgePath = rawEdgePath,
     totalCost = tonumber(finalState and finalState.score and finalState.score.steps) or #segments,

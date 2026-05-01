@@ -134,6 +134,65 @@ local function buildTraversedMapNameList(segment)
   return textList
 end
 
+--- 判断一段路线是否属于应按到站地图显示终点的动作。
+---@param modeText string|nil 路线方式
+---@return boolean
+local function isSemanticArrivalMode(modeText)
+  return modeText == "transport"
+    or modeText == "public_portal"
+    or modeText == "class_portal"
+    or modeText == "hearthstone"
+    or modeText == "class_teleport"
+end
+
+--- 基于 routeResult.semanticNodes 构建规划期节点摘要。
+---@param routeResult table|nil 路线结果
+---@return string
+local function buildSemanticNodeSummaryText(routeResult)
+  local semanticNodeList = type(routeResult) == "table" and routeResult.semanticNodes or nil -- API 生成的语义节点链
+  if type(semanticNodeList) ~= "table" or #semanticNodeList == 0 then
+    return ""
+  end
+
+  local textList = {} -- 语义节点文本列表
+  local firstKind = trimText(type(semanticNodeList[1]) == "table" and semanticNodeList[1].kind or nil) -- 第一节点类型
+  local lastKind = trimText(type(semanticNodeList[#semanticNodeList]) == "table" and semanticNodeList[#semanticNodeList].kind or nil) -- 最后一节点类型
+  if firstKind ~= "map" or lastKind ~= "map" then
+    return ""
+  end
+  local lastText = nil -- 最近一个已写入的节点文本
+  for _, nodeInfo in ipairs(semanticNodeList) do
+    local trimmedText = trimText(type(nodeInfo) == "table" and nodeInfo.text or nil) -- 当前语义节点文本
+    if trimmedText ~= "" and trimmedText ~= lastText then
+      textList[#textList + 1] = trimmedText
+      lastText = trimmedText
+    end
+  end
+  if #textList < 2 then
+    return ""
+  end
+  return table.concat(textList, " -> ")
+end
+
+--- 为规划期逐段诊断生成更适合玩家理解的端点文案。
+---@param segment table|nil 路线段
+---@param useDestination boolean 是否读取终点侧
+---@return string
+local function buildPlanningSegmentEndpointText(segment, useDestination)
+  if type(segment) ~= "table" then
+    return ""
+  end
+  local modeText = tostring(segment.mode or "") -- 当前路线方式
+  if useDestination and isSemanticArrivalMode(modeText) then
+    local traversedMapNameList = buildTraversedMapNameList(segment) -- 当前段经过地图名
+    local arrivalMapName = trimText(traversedMapNameList[#traversedMapNameList]) -- 当前动作段到站地图名
+    if arrivalMapName ~= "" then
+      return arrivalMapName
+    end
+  end
+  return trimText(useDestination and (segment.toName or segment.to) or (segment.fromName or segment.from))
+end
+
 --- 归一化节点文案，便于规划节点摘要去重。
 ---@param rawText any 原始文案
 ---@return string
@@ -180,6 +239,19 @@ end
 ---@param startLocationSnapshot table|nil 规划起点快照
 ---@return string
 local function buildPlanningNodeSummaryText(routeBar, routeResult, routeTarget, startLocationSnapshot)
+  local semanticNodeList = type(routeResult) == "table" and routeResult.semanticNodes or nil -- 路线结果携带的语义节点链
+  local hasSemanticNodeList = type(semanticNodeList) == "table" and #semanticNodeList > 0 -- 当前是否带了语义节点
+  local semanticNodeSummaryText = buildSemanticNodeSummaryText(routeResult) -- API 已生成的语义节点摘要
+  if semanticNodeSummaryText ~= "" then
+    return semanticNodeSummaryText
+  end
+  if hasSemanticNodeList and type(routeBar) == "table" and type(routeBar.BuildRouteNodePathText) == "function" then
+    local routeBarSummaryText = trimText(routeBar.BuildRouteNodePathText(routeResult, routeTarget, startLocationSnapshot)) -- RouteBar 统一节点链摘要
+    if routeBarSummaryText ~= "" then
+      return routeBarSummaryText
+    end
+  end
+
   local segmentList = type(routeResult) == "table" and routeResult.segments or nil -- 路线分段列表
   if type(segmentList) ~= "table" or #segmentList == 0 then
     return ""
@@ -297,8 +369,8 @@ local function buildPlanningDiagnosticMessages(routeBar, routeResult, routeTarge
       "第%d段 | mode=%s | from=%s | to=%s | traversedUiMapNames=%s",
       segmentIndex,
       tostring(segment and segment.mode or ""),
-      tostring(segment and (segment.fromName or segment.from) or ""),
-      tostring(segment and (segment.toName or segment.to) or ""),
+      buildPlanningSegmentEndpointText(segment, false),
+      buildPlanningSegmentEndpointText(segment, true),
       buildTraversedMapNamesText(segment)
     )
   end
