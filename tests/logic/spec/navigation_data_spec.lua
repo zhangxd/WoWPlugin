@@ -309,6 +309,39 @@ describe("Navigation data", function()
     assert.is_table(findEdgeByNodeIDs(exportedData, zulamanHubTaxi.NodeID, zulamanTaxi.NodeID))
   end)
 
+  it("exports_the_orgrimmar_public_portal_arrival_into_the_silvermoon_walk_component", function()
+    dofile("Toolbox/Data/NavigationRouteEdges.lua")
+    dofile("Toolbox/Data/NavigationWalkComponents.lua")
+
+    local exportedRouteData = Toolbox.Data.NavigationRouteEdges -- 导出的统一路线边数据
+    local walkComponentData = Toolbox.Data.NavigationWalkComponents -- 导出的正式步行组件数据
+    local silvermoonPortalArrival = findNodeByOrigin(exportedRouteData, "portal", "portal", 116) -- 奥格公共传送门的银月城落点
+    local silvermoonMapAnchor = findNodeByOrigin(exportedRouteData, "map_anchor", "uimap", 2393) -- 12.0 银月城锚点
+    local silvermoonComponent = walkComponentData.components["silvermoon_city"] -- 银月城正式步行组件
+    local arrivalAssignment = walkComponentData.nodeAssignments[tonumber(silvermoonPortalArrival.NodeID)] -- 落点节点归属
+    local hasMemberNode = false -- 组件成员是否包含该落点
+    local hasEntryNode = false -- 组件入口是否包含该落点
+
+    assert.is_table(silvermoonComponent)
+    assert.is_table(arrivalAssignment)
+    assert.equals("silvermoon_city", arrivalAssignment.ComponentID)
+    assert.equals(tonumber(silvermoonMapAnchor.NodeID), tonumber(silvermoonComponent.PreferredAnchorNodeID))
+
+    for _, nodeID in ipairs(silvermoonComponent.MemberNodeIDs or {}) do
+      if tonumber(nodeID) == tonumber(silvermoonPortalArrival.NodeID) then
+        hasMemberNode = true
+      end
+    end
+    for _, nodeID in ipairs(silvermoonComponent.EntryNodeIDs or {}) do
+      if tonumber(nodeID) == tonumber(silvermoonPortalArrival.NodeID) then
+        hasEntryNode = true
+      end
+    end
+
+    assert.is_true(hasMemberNode)
+    assert.is_true(hasEntryNode)
+  end)
+
   it("exports_navigation_map_assignments_without_region_coordinate_fields", function()
     dofile("Toolbox/Data/NavigationMapAssignments.lua")
 

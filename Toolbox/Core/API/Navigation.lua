@@ -1522,7 +1522,11 @@ end
 ---@param routeGraph table 正在构建的路径图
 local function addDynamicWalkLocalEdges(routeGraph)
   for nodeId, nodeDef in pairs(routeGraph.nodes or {}) do
-    local walkClusterTargetID = type(nodeDef) == "table" and nodeDef.preferredWalkAnchorNodeID or nil -- 正式步行组件首选锚点
+    local preferredWalkAnchorNodeID = type(nodeDef) == "table" and nodeDef.preferredWalkAnchorNodeID or nil -- 正式步行组件首选锚点
+    local walkClusterTargetID = nil -- 当前节点应接入的本地步行目标
+    if preferredWalkAnchorNodeID ~= nil and preferredWalkAnchorNodeID ~= nodeId then
+      walkClusterTargetID = preferredWalkAnchorNodeID
+    end
     if walkClusterTargetID == nil then
       walkClusterTargetID = tonumber(nodeDef and nodeDef.walkClusterNodeID) -- 旧版数字步行锚点
     end

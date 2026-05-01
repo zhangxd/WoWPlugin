@@ -73,12 +73,14 @@
       "preferred_anchor": { "kind": "map_anchor", "source": "uimap", "source_id": 2393 },
       "entry_nodes": [
         { "kind": "map_anchor", "source": "uimap", "source_id": 2393 },
+        { "kind": "portal", "source": "portal", "source_id": 116 },
         { "kind": "portal", "source": "portal", "source_id": 117 },
         { "kind": "portal", "source": "portal", "source_id": 118 },
         { "kind": "portal", "source": "portal", "source_id": 526 }
       ],
       "members": [
         { "kind": "map_anchor", "source": "uimap", "source_id": 2393, "role": "anchor" },
+        { "kind": "portal", "source": "portal", "source_id": 116, "role": "hub", "visible_name": "银月城传送门落点" },
         { "kind": "portal", "source": "portal", "source_id": 117, "role": "hub", "visible_name": "日怒之塔" },
         { "kind": "portal", "source": "portal", "source_id": 118, "role": "hub", "visible_name": "内部圣殿" },
         { "kind": "portal", "source": "portal", "source_id": 526, "role": "hub", "visible_name": "银月城传送门落点" },
