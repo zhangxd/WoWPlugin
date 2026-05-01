@@ -216,6 +216,169 @@ local function triggerBoxRefresh(boxFrame, options)
   end
 end
 
+local function anchorInset(frameObject, parentObject, insetValue)
+  if not frameObject or not parentObject then
+    return
+  end
+  local insetAmount = tonumber(insetValue) or 0 -- 统一内缩值
+  frameObject:ClearAllPoints()
+  frameObject:SetPoint("TOPLEFT", parentObject, "TOPLEFT", insetAmount, -insetAmount)
+  frameObject:SetPoint("BOTTOMRIGHT", parentObject, "BOTTOMRIGHT", -insetAmount, insetAmount)
+end
+
+local function setObjectShown(frameObject, shouldShow)
+  if not frameObject then
+    return
+  end
+  if shouldShow then
+    frameObject:Show()
+  else
+    frameObject:Hide()
+  end
+end
+
+local function setControlLabelText(controlObject, textValue)
+  if controlObject and controlObject._toolboxLabel and controlObject._toolboxLabel.SetText then
+    controlObject._toolboxLabel:SetText(textValue or "")
+  end
+  if controlObject and controlObject.SetText then
+    controlObject:SetText(textValue or "")
+  end
+end
+
+local function createSurfaceControl(parentFrame, frameType)
+  local controlObject = CreateFrame(frameType or "Button", nil, parentFrame) -- 通用表面控件
+  local borderTexture = controlObject:CreateTexture(nil, "BORDER") -- 外边框贴图
+  borderTexture:SetAllPoints()
+  borderTexture:SetColorTexture(0.27, 0.31, 0.4, 1)
+  controlObject._toolboxBorderTexture = borderTexture
+
+  local backgroundTexture = controlObject:CreateTexture(nil, "BACKGROUND") -- 主背景贴图
+  anchorInset(backgroundTexture, controlObject, 1)
+  backgroundTexture:SetColorTexture(0.09, 0.11, 0.16, 0.96)
+  controlObject._toolboxBackgroundTexture = backgroundTexture
+
+  local accentTexture = controlObject:CreateTexture(nil, "ARTWORK") -- 选中高亮贴图
+  anchorInset(accentTexture, controlObject, 1)
+  accentTexture:SetColorTexture(0.21, 0.45, 0.82, 0.36)
+  accentTexture:Hide()
+  controlObject._toolboxAccentTexture = accentTexture
+
+  local labelText = controlObject:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 控件标签文本
+  labelText:SetPoint("CENTER", controlObject, "CENTER", 0, 0)
+  labelText:SetJustifyH("CENTER")
+  controlObject._toolboxLabel = labelText
+  return controlObject
+end
+
+local function applySurfaceControlState(controlObject, isEnabled, isSelected, isOpen)
+  if not controlObject then
+    return
+  end
+  local borderTexture = controlObject._toolboxBorderTexture -- 控件边框贴图
+  local backgroundTexture = controlObject._toolboxBackgroundTexture -- 控件背景贴图
+  local accentTexture = controlObject._toolboxAccentTexture -- 控件高亮贴图
+  local labelText = controlObject._toolboxLabel -- 控件标签文本
+
+  if borderTexture and borderTexture.SetColorTexture then
+    if isEnabled == false then
+      borderTexture:SetColorTexture(0.2, 0.22, 0.28, 1)
+    elseif isSelected or isOpen then
+      borderTexture:SetColorTexture(0.46, 0.63, 0.95, 1)
+    else
+      borderTexture:SetColorTexture(0.27, 0.31, 0.4, 1)
+    end
+  end
+
+  if backgroundTexture and backgroundTexture.SetColorTexture then
+    if isEnabled == false then
+      backgroundTexture:SetColorTexture(0.08, 0.09, 0.12, 0.82)
+    elseif isSelected or isOpen then
+      backgroundTexture:SetColorTexture(0.14, 0.2, 0.33, 0.96)
+    else
+      backgroundTexture:SetColorTexture(0.09, 0.11, 0.16, 0.96)
+    end
+  end
+
+  if accentTexture then
+    setObjectShown(accentTexture, isEnabled ~= false and (isSelected or isOpen))
+  end
+
+  if labelText and labelText.SetTextColor then
+    if isEnabled == false then
+      labelText:SetTextColor(0.5, 0.52, 0.58)
+    elseif isSelected or isOpen then
+      labelText:SetTextColor(0.96, 0.97, 1)
+    else
+      labelText:SetTextColor(0.86, 0.88, 0.93)
+    end
+  end
+end
+
+local function createCheckboxControl(parentFrame)
+  local checkButton = CreateFrame("CheckButton", nil, parentFrame) -- 自绘勾选控件
+  checkButton:RegisterForClicks("LeftButtonUp")
+
+  local borderTexture = checkButton:CreateTexture(nil, "BORDER") -- 勾选框边框
+  borderTexture:SetAllPoints()
+  borderTexture:SetColorTexture(0.27, 0.31, 0.4, 1)
+  checkButton._toolboxBorderTexture = borderTexture
+
+  local backgroundTexture = checkButton:CreateTexture(nil, "BACKGROUND") -- 勾选框底色
+  anchorInset(backgroundTexture, checkButton, 1)
+  backgroundTexture:SetColorTexture(0.09, 0.11, 0.16, 0.96)
+  checkButton._toolboxBackgroundTexture = backgroundTexture
+
+  local checkTexture = checkButton:CreateTexture(nil, "ARTWORK") -- 勾选标记贴图
+  anchorInset(checkTexture, checkButton, 3)
+  checkTexture:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+  checkTexture:Hide()
+  checkButton._toolboxCheckTexture = checkTexture
+  return checkButton
+end
+
+local function applyCheckboxState(checkButton, isEnabled, isChecked)
+  if not checkButton then
+    return
+  end
+  local borderTexture = checkButton._toolboxBorderTexture -- 勾选框边框
+  local backgroundTexture = checkButton._toolboxBackgroundTexture -- 勾选框底色
+  local checkTexture = checkButton._toolboxCheckTexture -- 勾选标记贴图
+  local inlineLabel = checkButton._toolboxInlineLabel -- 行内标签文本
+
+  if borderTexture and borderTexture.SetColorTexture then
+    if isEnabled == false then
+      borderTexture:SetColorTexture(0.2, 0.22, 0.28, 1)
+    elseif isChecked then
+      borderTexture:SetColorTexture(0.46, 0.63, 0.95, 1)
+    else
+      borderTexture:SetColorTexture(0.27, 0.31, 0.4, 1)
+    end
+  end
+
+  if backgroundTexture and backgroundTexture.SetColorTexture then
+    if isEnabled == false then
+      backgroundTexture:SetColorTexture(0.08, 0.09, 0.12, 0.82)
+    elseif isChecked then
+      backgroundTexture:SetColorTexture(0.13, 0.19, 0.31, 0.96)
+    else
+      backgroundTexture:SetColorTexture(0.09, 0.11, 0.16, 0.96)
+    end
+  end
+
+  if checkTexture then
+    setObjectShown(checkTexture, isChecked == true)
+  end
+
+  if inlineLabel and inlineLabel.SetTextColor then
+    if isEnabled == false then
+      inlineLabel:SetTextColor(0.5, 0.52, 0.58)
+    else
+      inlineLabel:SetTextColor(0.86, 0.88, 0.93)
+    end
+  end
+end
+
 local function CreateSettingsBox(parentFrame, startY, pageKey)
   local boxFrame = CreateFrame("Frame", nil, parentFrame) -- 统一设置构建容器
   boxFrame:SetSize(MODULE_BOX_WIDTH, SETTINGS_BOX_MIN_HEIGHT)
@@ -322,8 +485,8 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
       rowHeight = 18 + math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8))
     end
 
-    local stateButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate") -- 开关按钮
-    stateButton:SetSize(rowOptions.buttonWidth or SETTINGS_ROW_BUTTON_WIDTH, 22)
+    local stateButton = createCheckboxControl(self) -- 开关勾选控件
+    stateButton:SetSize(22, 22)
     stateButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, rowTop - 2)
 
     local function getValue()
@@ -349,10 +512,9 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
         rowOptions.setValue(isChecked == true)
       end
       local isEnabled = self:_IsRowEnabled(rowOptions) -- 当前行启用态
-      local onText = rowOptions.onText or "ON" -- 开启文本
-      local offText = rowOptions.offText or "OFF" -- 关闭文本
       stateButton:SetEnabled(isEnabled)
-      stateButton:SetText(isChecked and onText or offText)
+      stateButton:SetChecked(isChecked == true)
+      applyCheckboxState(stateButton, isEnabled, isChecked == true)
       setFontStringTextColor(titleLabel, isEnabled)
       setFontStringTextColor(descriptionLabel, isEnabled)
     end
@@ -394,11 +556,14 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
     local buttonList = {} -- 选项按钮列表
     local currentLeft = SETTINGS_ROW_CONTROL_LEFT -- 当前按钮起点
     for _, optionObject in ipairs(choiceList) do
-      local choiceButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate") -- 选项按钮
+      local choiceButton = createSurfaceControl(self, "Button") -- 选项按钮
       choiceButton:SetSize(rowOptions.buttonWidth or SETTINGS_ROW_BUTTON_WIDTH, 22)
       choiceButton:SetPoint("TOPLEFT", self, "TOPLEFT", currentLeft, rowTop - 2)
       choiceButton._toolboxValue = optionObject.value
-      choiceButton._toolboxLabel = optionObject.label or tostring(optionObject.value)
+      choiceButton._toolboxValueLabel = optionObject.label or tostring(optionObject.value)
+      if choiceButton._toolboxLabel then
+        choiceButton._toolboxLabel:SetText(choiceButton._toolboxValueLabel)
+      end
       choiceButton:SetScript("OnClick", function()
         if type(rowOptions.setValue) == "function" then
           rowOptions.setValue(optionObject.value)
@@ -426,11 +591,8 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
       for _, choiceButton in ipairs(buttonList) do
         local isSelected = choiceButton._toolboxValue == currentValue -- 是否当前选中
         choiceButton:SetEnabled(isEnabled and not isSelected)
-        if isSelected then
-          choiceButton:SetText("[" .. tostring(choiceButton._toolboxLabel) .. "]")
-        else
-          choiceButton:SetText(tostring(choiceButton._toolboxLabel))
-        end
+        setControlLabelText(choiceButton, tostring(choiceButton._toolboxValueLabel or ""))
+        applySurfaceControlState(choiceButton, isEnabled, isSelected, false)
       end
       setFontStringTextColor(titleLabel, isEnabled)
       setFontStringTextColor(descriptionLabel, isEnabled)
@@ -464,9 +626,19 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
       rowHeight = 18 + math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8))
     end
 
-    local menuButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate") -- 菜单按钮
+    local menuButton = createSurfaceControl(self, "Button") -- 菜单按钮
     menuButton:SetSize(rowOptions.buttonWidth or 170, 22)
     menuButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, rowTop - 2)
+    local menuArrow = menuButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 菜单箭头文本
+    menuArrow:SetPoint("RIGHT", menuButton, "RIGHT", -8, 0)
+    menuArrow:SetText("v")
+    menuButton._toolboxArrow = menuArrow
+    if menuButton._toolboxLabel then
+      menuButton._toolboxLabel:ClearAllPoints()
+      menuButton._toolboxLabel:SetPoint("LEFT", menuButton, "LEFT", 10, 0)
+      menuButton._toolboxLabel:SetPoint("RIGHT", menuArrow, "LEFT", -6, 0)
+      menuButton._toolboxLabel:SetJustifyH("LEFT")
+    end
     local popupFrame = CreateFrame("Frame", nil, self) -- 下拉菜单弹层
     popupFrame:SetPoint("TOPLEFT", menuButton, "BOTTOMLEFT", 0, -4)
     popupFrame:SetSize(rowOptions.buttonWidth or 170, math.max(1, #choiceList) * 24)
@@ -474,6 +646,12 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
     if popupFrame.SetFrameLevel and self.GetFrameLevel then
       popupFrame:SetFrameLevel((self:GetFrameLevel() or 0) + 20)
     end
+    local popupBorder = popupFrame:CreateTexture(nil, "BORDER") -- 弹层边框贴图
+    popupBorder:SetAllPoints()
+    popupBorder:SetColorTexture(0.27, 0.31, 0.4, 1)
+    local popupBackground = popupFrame:CreateTexture(nil, "BACKGROUND") -- 弹层背景贴图
+    anchorInset(popupBackground, popupFrame, 1)
+    popupBackground:SetColorTexture(0.07, 0.09, 0.14, 0.98)
     popupFrame:Hide()
     menuButton._toolboxPopupFrame = popupFrame
     local optionButtonList = {} -- 下拉选项按钮列表
@@ -497,11 +675,20 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
       end
       local optionTop = 0 -- 当前选项顶部
       for _, optionObject in ipairs(choiceList) do
-        local optionButton = CreateFrame("Button", nil, popupFrame, "UIPanelButtonTemplate") -- 菜单选项按钮
+        local optionButton = createSurfaceControl(popupFrame, "Button") -- 菜单选项按钮
         optionButton:SetSize(rowOptions.buttonWidth or 170, 22)
         optionButton:SetPoint("TOPLEFT", popupFrame, "TOPLEFT", 0, optionTop)
         optionButton._toolboxValue = optionObject.value
-        optionButton._toolboxLabel = optionObject.label or tostring(optionObject.value)
+        optionButton._toolboxValueLabel = optionObject.label or tostring(optionObject.value)
+        if optionButton._toolboxLabel then
+          optionButton._toolboxLabel:SetText(optionButton._toolboxValueLabel)
+        end
+        if optionButton._toolboxLabel then
+          optionButton._toolboxLabel:ClearAllPoints()
+          optionButton._toolboxLabel:SetPoint("LEFT", optionButton, "LEFT", 10, 0)
+          optionButton._toolboxLabel:SetPoint("RIGHT", optionButton, "RIGHT", -10, 0)
+          optionButton._toolboxLabel:SetJustifyH("LEFT")
+        end
         optionButton:SetScript("OnClick", function()
           if type(rowOptions.setValue) == "function" then
             rowOptions.setValue(optionObject.value)
@@ -533,17 +720,25 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
       local currentLabel = currentOption.label or tostring(currentOption.value or "") -- 当前按钮文案
       menuButton:SetEnabled(isEnabled)
       menuButton:SetText(currentLabel .. " v")
+      if menuButton._toolboxLabel and menuButton._toolboxLabel.SetText then
+        menuButton._toolboxLabel:SetText(currentLabel)
+      end
+      applySurfaceControlState(menuButton, isEnabled, false, popupFrame.IsShown and popupFrame:IsShown())
       setFontStringTextColor(titleLabel, isEnabled)
       setFontStringTextColor(descriptionLabel, isEnabled)
+      if menuArrow and menuArrow.SetTextColor then
+        if isEnabled == false then
+          menuArrow:SetTextColor(0.5, 0.52, 0.58)
+        else
+          menuArrow:SetTextColor(0.86, 0.88, 0.93)
+        end
+      end
       ensureOptionButtons()
       for _, optionButton in ipairs(optionButtonList) do
         local isSelected = optionButton._toolboxValue == currentValue -- 当前按钮是否选中
         optionButton:SetEnabled(isEnabled and not isSelected)
-        if isSelected then
-          optionButton:SetText("[ " .. tostring(optionButton._toolboxLabel) .. " ]")
-        else
-          optionButton:SetText(tostring(optionButton._toolboxLabel))
-        end
+        setControlLabelText(optionButton, tostring(optionButton._toolboxValueLabel or ""))
+        applySurfaceControlState(optionButton, isEnabled, isSelected, false)
       end
       if isEnabled == false then
         hidePopup()
@@ -558,6 +753,7 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
         popupFrame:SetHeight(math.max(1, #optionButtonList) * 24)
         popupFrame:Show()
       end
+      applySurfaceControlState(menuButton, self:_IsRowEnabled(rowOptions), false, popupFrame.IsShown and popupFrame:IsShown())
     end)
 
     self:_RegisterRefresher(refresh)
@@ -593,11 +789,16 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
     local buttonList = {} -- 勾选按钮列表
     local optionTop = rowTop - rowHeight -- 第一项顶部
     for _, optionObject in ipairs(choiceList) do
-      local checkButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate") -- 多选按钮
+      local checkButton = createCheckboxControl(self) -- 多选按钮
       checkButton:SetSize(rowOptions.buttonWidth or 180, 22)
       checkButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, optionTop - 2)
       checkButton._toolboxValue = optionObject.value
-      checkButton._toolboxLabel = optionObject.label or tostring(optionObject.value)
+      local optionLabel = checkButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 多选项文本
+      optionLabel:SetPoint("LEFT", checkButton, "RIGHT", 8, 0)
+      optionLabel:SetPoint("RIGHT", self, "RIGHT", -8, 0)
+      optionLabel:SetJustifyH("LEFT")
+      optionLabel:SetText(optionObject.label or tostring(optionObject.value))
+      checkButton._toolboxInlineLabel = optionLabel
       checkButton:SetScript("OnClick", function()
         local currentlySelected = type(rowOptions.isSelected) == "function" and rowOptions.isSelected(optionObject.value) == true or false
         if type(rowOptions.setSelected) == "function" then
@@ -618,11 +819,8 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
       for _, checkButton in ipairs(buttonList) do
         local isSelected = type(rowOptions.isSelected) == "function" and rowOptions.isSelected(checkButton._toolboxValue) == true or false
         checkButton:SetEnabled(isEnabled)
-        if isSelected then
-          checkButton:SetText("[x] " .. tostring(checkButton._toolboxLabel))
-        else
-          checkButton:SetText("[ ] " .. tostring(checkButton._toolboxLabel))
-        end
+        checkButton:SetChecked(isSelected == true)
+        applyCheckboxState(checkButton, isEnabled, isSelected == true)
       end
       setFontStringTextColor(titleLabel, isEnabled)
       setFontStringTextColor(descriptionLabel, isEnabled)

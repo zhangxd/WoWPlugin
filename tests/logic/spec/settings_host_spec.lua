@@ -485,6 +485,105 @@ describe("Toolbox.SettingsHost", function()
     assert.is_true(success, err)
   end)
 
+  it("stateful_rows_stop_using_action_button_template", function()
+    installEnvironment()
+    rawset(_G, "ToolboxDB", nil)
+
+    local toggleControl = nil -- 开关控件
+    local choiceControls = nil -- 单选控件
+    local menuControl = nil -- 菜单控件
+    local multiSelectControls = nil -- 多选控件
+    local actionControl = nil -- 动作控件
+    moduleList = {
+      {
+        id = "mover",
+        nameKey = "MODULE_MOVER",
+        settingsIntroKey = "MODULE_MOVER_INTRO",
+        settingsOrder = 20,
+        OnEnabledSettingChanged = function() end,
+        OnDebugSettingChanged = function() end,
+        ResetToDefaultsAndRebuild = function() end,
+        RegisterSettings = function(box)
+          local moduleDb = Toolbox.Config.GetModule("mover") -- mover 模块存档
+          toggleControl = box:AddToggleRow({
+            label = "开关",
+            defaultValue = true,
+            getValue = function()
+              return moduleDb.enabled
+            end,
+            setValue = function(value)
+              moduleDb.enabled = value == true
+            end,
+          })
+          choiceControls = box:AddChoiceRow({
+            label = "二选一",
+            defaultValue = "titlebar",
+            getValue = function()
+              return moduleDb.blizzardDragHitMode
+            end,
+            setValue = function(value)
+              moduleDb.blizzardDragHitMode = value
+            end,
+            options = {
+              { value = "titlebar", label = "标题栏" },
+              { value = "titlebar_and_empty", label = "标题栏与空白区" },
+            },
+          })
+          menuControl = box:AddMenuRow({
+            label = "三选一",
+            defaultValue = "default",
+            getValue = function()
+              return moduleDb.modeKey
+            end,
+            setValue = function(value)
+              moduleDb.modeKey = value
+            end,
+            options = {
+              { value = "default", label = "默认" },
+              { value = "cursor", label = "光标" },
+              { value = "follow", label = "跟随" },
+            },
+          })
+          multiSelectControls = box:AddMultiSelectRow({
+            label = "多选",
+            options = {
+              { value = "reload_ui", label = "重载" },
+              { value = "open_settings", label = "设置" },
+            },
+            isSelected = function(value)
+              return value == "reload_ui"
+            end,
+            setSelected = function() end,
+          })
+          actionControl = box:AddActionRow({
+            label = "动作",
+            buttonText = "执行",
+            onClick = function() end,
+          })
+        end,
+      },
+    }
+
+    loadConfigAndHost()
+    Toolbox.SettingsHost:BuildPage("interface")
+
+    assert.is_truthy(toggleControl)
+    assert.is_truthy(choiceControls)
+    assert.is_truthy(menuControl)
+    assert.is_truthy(multiSelectControls)
+    assert.is_truthy(actionControl)
+
+    assert.not_equals("UIPanelButtonTemplate", toggleControl.templateName)
+    for _, choiceControl in ipairs(choiceControls) do
+      assert.not_equals("UIPanelButtonTemplate", choiceControl.templateName)
+    end
+    assert.not_equals("UIPanelButtonTemplate", menuControl.templateName)
+    for _, multiSelectControl in ipairs(multiSelectControls) do
+      assert.not_equals("UIPanelButtonTemplate", multiSelectControl.templateName)
+    end
+    assert.equals("UIPanelButtonTemplate", actionControl.templateName)
+  end)
+
   it("refresh_all_pages_does_not_register_categories_again", function()
     installEnvironment()
     rawset(_G, "ToolboxDB", nil)

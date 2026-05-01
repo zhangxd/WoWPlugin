@@ -290,7 +290,7 @@ ToolboxDB = {
 - 提供 **`/toolbox`**（或约定 slash）便于调试与无菜单时打开。
 - **页面结构**：左侧仅保留一个根 `Toolbox` 与 6 个叶子页；`通用` 收编语言、重载、小地图按钮与聊天提示，`界面` 收编 `mover` 与 `tooltip_anchor`，`地图` 承载 `navigation`，`任务` 承载 `quest` 与 Quest Inspector 工具区，`冒险手册` 承载 `encounter_journal`，“关于”只保留静态说明。
 - **默认打开规则**：`/toolbox`、ESC 菜单按钮与小地图按钮统一执行“优先回到上次停留叶子页，否则回退到 `通用`”；战斗内改用独立宿主直接打开目标叶子页。
-- **页内控件模型**：`SettingsHost` 第二阶段统一为原生列表式设置行，宿主负责语言、reload 与模块公共区，也负责菜单弹层、局部刷新和自定义块高度收口；模块不再散排旧模板控件。
+- **页内控件模型**：`SettingsHost` 第二阶段统一为原生列表式设置行，宿主负责语言、reload 与模块公共区，也负责菜单弹层、局部刷新和自定义块高度收口；模块不再散排旧模板控件。除真正动作行外，toggle / segmented / dropdown / multi-select 均不再默认使用 `UIPanelButtonTemplate` 按钮观感。
 - **战斗内独立宿主**：当系统 `Settings.OpenToCategory` 在战斗中不可用时，宿主提供等价 Canvas 承载；菜单按钮、多选与动作行必须保持和系统设置页等价可操作。
 
 ### 5.2 自有窗口拖动（Mover）
