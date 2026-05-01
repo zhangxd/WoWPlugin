@@ -73,50 +73,8 @@ Toolbox.RegisterModule({
     Toolbox.Config.ResetModule(MODULE_ID)
   end,
   RegisterSettings = function(box)
-    local L = Toolbox.L or {}
-    local db = getModuleDb()
-    local y = 0
-
-    local hint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    hint:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    hint:SetWidth(580)
-    hint:SetJustifyH("LEFT")
-    hint:SetText(L.CHAT_NOTIFY_HINT)
-    y = y - 36
-
-    local copySec = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    copySec:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    copySec:SetWidth(580)
-    copySec:SetJustifyH("LEFT")
-    copySec:SetText(L.CHAT_NOTIFY_COPY_SECTION or "")
-    y = y - 20
-
-    local copyHint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    copyHint:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    copyHint:SetWidth(560)
-    copyHint:SetJustifyH("LEFT")
-    copyHint:SetText(L.CHAT_NOTIFY_COPY_HINT or "")
-    y = y - math.max(28, math.ceil((copyHint:GetStringHeight() or 0) + 8))
-
-    local copyBtn = CreateFrame("Button", nil, box, "UIPanelButtonTemplate")
-    copyBtn:SetSize(200, 26)
-    copyBtn:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    copyBtn:SetText(L.CHAT_NOTIFY_COPY_BUTTON or "")
-    copyBtn:SetScript("OnClick", function()
-      local ok, key = Toolbox.Chat.CopyDefaultChatToClipboard(30)
-      local L2 = Toolbox.L or {}
-      if ok then
-        -- key 现在总是返回状态键："CHAT_COPY_SUCCESS" 或 "CHAT_COPY_FALLBACK"
-        if key == "CHAT_COPY_SUCCESS" then
-          Toolbox.Chat.PrintAddonMessage(L2.CHAT_NOTIFY_COPY_DONE or "")
-        elseif key == "CHAT_COPY_FALLBACK" then
-          Toolbox.Chat.PrintAddonMessage(L2.CHAT_NOTIFY_COPY_FALLBACK or "")
-        end
-      else
-        Toolbox.Chat.PrintAddonMessage(L2[key or "CHAT_COPY_ERR_FAILED"] or "")
-      end
-    end)
-    y = y - 36
+    local L = Toolbox.L or {} -- 本地化文案
+    local db = getModuleDb() -- 模块存档
 
     -- 与 Core/Chat.PrintAddonMessage、存档 prefixColor / contentColor 一致
     local colors = {
@@ -126,7 +84,7 @@ Toolbox.RegisterModule({
       { nameKey = "CHAT_NOTIFY_COLOR_BLUE", color = "00aaff" },
       { nameKey = "CHAT_NOTIFY_COLOR_PURPLE", color = "cc88ff" },
       { nameKey = "CHAT_NOTIFY_COLOR_WHITE", color = "ffffff" },
-    }
+    } -- 可选颜色列表
 
     local function labelForHex(hex)
       for _, c in ipairs(colors) do
@@ -141,62 +99,68 @@ Toolbox.RegisterModule({
       return string.format("|cff%s%s|r", hex, labelForHex(hex))
     end
 
-    ---@param dbField string 模块表键名，如 "prefixColor" / "contentColor"
-    ---@param defaultHex string 缺省或非法存档时的十六进制色（无 |cff）
-    local function addColorDropdownRow(dbField, defaultHex, labelKey)
-      local rowLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-      rowLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-      rowLabel:SetWidth(168)
-      rowLabel:SetJustifyH("LEFT")
-      rowLabel:SetText(L[labelKey] or labelKey)
-
-      local dd = CreateFrame("Frame", nil, box, "UIDropDownMenuTemplate")
-      dd:SetPoint("TOPLEFT", box, "TOPLEFT", 170, y - 2)
-
-      local function currentHex()
-        local v = db[dbField]
-        if type(v) ~= "string" or v == "" then
-          return defaultHex
-        end
-        return v
+    local function buildColorOptions()
+      local optionList = {} -- box helper 菜单项
+      for _, colorInfo in ipairs(colors) do
+        optionList[#optionList + 1] = {
+          value = colorInfo.color,
+          label = menuTextForHex(colorInfo.color),
+        }
       end
-
-      local function refreshButtonText()
-        UIDropDownMenu_SetText(dd, menuTextForHex(currentHex()))
-      end
-
-      UIDropDownMenu_SetWidth(dd, 240)
-      UIDropDownMenu_JustifyText(dd, "LEFT")
-      UIDropDownMenu_Initialize(dd, function(_, level)
-        if level and level > 1 then
-          return
-        end
-        for _, c in ipairs(colors) do
-          local info = UIDropDownMenu_CreateInfo()
-          info.text = menuTextForHex(c.color)
-          info.func = function()
-            db[dbField] = c.color
-            refreshButtonText()
-            CloseDropDownMenus()
-          end
-          UIDropDownMenu_AddButton(info)
-        end
-      end)
-      refreshButtonText()
-      y = y - 38
+      return optionList
     end
 
-    local section = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    section:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    section:SetWidth(580)
-    section:SetJustifyH("LEFT")
-    section:SetText(L.CHAT_NOTIFY_COLORS_SECTION or "")
-    y = y - 22
+    ---@param dbField string 模块表键名，如 "prefixColor" / "contentColor"
+    ---@param defaultHex string 缺省或非法存档时的十六进制色（无 |cff）
+    ---@param labelKey string 本地化标签键
+    local function addColorMenuRow(dbField, defaultHex, labelKey)
+      box:AddMenuRow({
+        label = L[labelKey] or labelKey,
+        options = buildColorOptions(),
+        defaultValue = defaultHex,
+        buttonWidth = 240,
+        getValue = function()
+          local storedHex = db[dbField] -- 当前存档色值
+          if type(storedHex) ~= "string" or storedHex == "" then
+            return defaultHex
+          end
+          return storedHex
+        end,
+        setValue = function(value)
+          db[dbField] = value
+        end,
+      })
+    end
 
-    addColorDropdownRow("prefixColor", "ffd700", "CHAT_NOTIFY_PREFIX_COLOR_LABEL")
-    addColorDropdownRow("contentColor", "ffffff", "CHAT_NOTIFY_CONTENT_COLOR_LABEL")
-
-    y = y - 8
-    box.realHeight = math.abs(y) + 8
+    box:AddNoteRow({
+      text = L.CHAT_NOTIFY_HINT or "",
+      gap = 12,
+    })
+    box:AddActionRow({
+      label = L.CHAT_NOTIFY_COPY_SECTION or "",
+      description = L.CHAT_NOTIFY_COPY_HINT or "",
+      buttonText = L.CHAT_NOTIFY_COPY_BUTTON or "",
+      buttonWidth = 200,
+      onClick = function()
+        local success, resultKey = Toolbox.Chat.CopyDefaultChatToClipboard(30) -- 复制最近聊天结果
+        local latestLocaleTable = Toolbox.L or {} -- 点击时最新本地化文案
+        if success then
+          if resultKey == "CHAT_COPY_SUCCESS" then
+            Toolbox.Chat.PrintAddonMessage(latestLocaleTable.CHAT_NOTIFY_COPY_DONE or "")
+          elseif resultKey == "CHAT_COPY_FALLBACK" then
+            Toolbox.Chat.PrintAddonMessage(latestLocaleTable.CHAT_NOTIFY_COPY_FALLBACK or "")
+          end
+          return
+        end
+        Toolbox.Chat.PrintAddonMessage(latestLocaleTable[resultKey or "CHAT_COPY_ERR_FAILED"] or "")
+      end,
+    })
+    box:AddNoteRow({
+      text = L.CHAT_NOTIFY_COLORS_SECTION or "",
+      fontObject = "GameFontNormal",
+      gap = 8,
+    })
+    addColorMenuRow("prefixColor", "ffd700", "CHAT_NOTIFY_PREFIX_COLOR_LABEL")
+    addColorMenuRow("contentColor", "ffffff", "CHAT_NOTIFY_CONTENT_COLOR_LABEL")
   end,
 })

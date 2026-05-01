@@ -44,7 +44,7 @@ UI
 └── GameMenu — 按钮 → Settings.OpenToCategory（与选项中入口一致）
 ```
 
-**原则**：可扩展能力经 `RegisterModule` 进入；持久化落在 `ToolboxDB.modules[moduleId]`；设置页由宿主按叶子页组合内容块并统一承载公共启用/调试/重置区，再由各模块补自己的专属设置区。
+**原则**：可扩展能力经 `RegisterModule` 进入；持久化落在 `ToolboxDB.modules[moduleId]`；设置页由宿主按叶子页组合内容块并统一承载公共启用/调试/重置区，再由各模块通过统一 helper（toggle / choice / menu / multi-select / action / note / custom block）补自己的专属设置区。
 
 **本地环境隔离原则（强制）**：严禁在任何仓库文件（包括 `.md`、`.ps1`、`.lua`、`.toc`、脚本等）中硬编码开发者个人的**本地路径、盘符、用户名、机器特定配置**。所有路径相关配置必须通过**环境变量**（如 `WOW_RETAIL_ADDONS`）、命令行参数、或运行时自动探测实现。违反此原则的修改一律回滚或拒绝。
 
@@ -171,9 +171,9 @@ sequenceDiagram
 | 能力 | 模块 id（建议） | 数据 | 设置 |
 |------|-----------------|------|------|
 | 窗口拖动（自建 + 可选暴雪） | `mover` | `modules.mover`（`enabled`/`debug`/`frames`/`blizzardDragHitMode`/`allowDragInCombat`）；旧 `micromenu_panels.frames` 一次性迁入 `mover` | 归入“界面”叶子页：启用、拖动命中模式、战斗中是否允许拖；调试与“清理并重建”位于页底低频区；暴雪顶层仅代码内 `PANEL_KEYS` |
-| Tooltip 锚点 | `tooltip_anchor` | `modules.tooltip_anchor`（`enabled`/`debug`/`mode`/`offsetX`/`offsetY`） | 归入“界面”叶子页：启用、锚点模式与偏移；调试与“清理并重建”位于页底低频区 |
+| Tooltip 锚点 | `tooltip_anchor` | `modules.tooltip_anchor`（`enabled`/`debug`/`mode`/`offsetX`/`offsetY`） | 归入“界面”叶子页：启用、3 项菜单式锚点模式（`default / cursor / follow`）；调试与“清理并重建”位于页底低频区；保留旧偏移字段兼容但不在本轮设置页继续展开 |
 | 小地图打开设置按钮 | `minimap_button` | `modules.minimap_button`（`enabled`/`debug`/`showMinimapButton`/`showCoordsOnMinimap`/`minimapCoordsAnchor`/`minimapPos`/`flyoutSlotIds`） | 归入“通用”叶子页：是否显示小地图按钮、坐标显示、恢复默认位置，以及悬停菜单功能勾选；运行时固定为圆形主按钮 + 横向悬停菜单，`flyoutSlotIds` 仅表示勾选加入的功能项。内置“冒险手册”飞出项会打开冒险指南，并在 tooltip 里追加当前副本锁定摘要 |
-| 加载聊天提示 | `chat_notify` | `modules.chat_notify`（`enabled`/`debug`） | 归入“通用”叶子页：加载提示说明文案；调试与“清理并重建”位于页底低频区 |
+| 加载聊天提示 | `chat_notify` | `modules.chat_notify`（`enabled`/`debug`/`prefixColor`/`contentColor`） | 归入“通用”叶子页：最近聊天复制动作、加载提示颜色菜单与必要说明；调试与“清理并重建”位于页底低频区 |
 | 冒险指南增强 | `encounter_journal` | `modules.encounter_journal`（`enabled`/`debug`/`mountFilterEnabled`/`listPinAlwaysVisible`）+ `Toolbox.Data.MountDrops` + `Toolbox.Data.InstanceMapIDs` + `Toolbox.Data.InstanceEntrances` + `Toolbox.EJ` | 归入“冒险手册”叶子页：覆盖副本列表“仅坐骑”、副本列表图钉导航、列表锁定叠加、悬停锁定详情、详情页重置标签，以及 `EJMicroButton` / 小地图“冒险手册” tooltip 锁定摘要。入口导航不新增额外存档字段，运行时入口缺精确 `journalInstanceID` 时读取 DB 生成的 `InstanceEntrances` 静态入口，跟随模块总开关。详见 [designs/encounter-journal-design.md](./designs/encounter-journal-design.md)。 |
 | 地图导航 | `navigation` | `modules.navigation`（`enabled`/`debug`/`lastTargetUiMapID`/`lastTargetX`/`lastTargetY`）+ `Toolbox.Navigation` + `Toolbox.Data.NavigationMapNodes` + `Toolbox.Data.NavigationMapAssignments` + `Toolbox.Data.NavigationInstanceEntrances` + `Toolbox.Data.NavigationAbilityTemplates` + `Toolbox.Data.NavigationRouteEdges` | 归入“地图”叶子页：当前导航基线已收敛为“当前角色配置 + 最少路径步数”的多模态路线图，并已在统一静态边表中接入 `taxi / transport / public_portal / hearthstone / class_teleport / class_portal / walk_local`；仍待后续补齐的模态主要是 `areatrigger / walk component`。地图基础节点由 `navigation_map_nodes` 正式导出，`navigation_map_assignments` 当前仅导出 `UiMap <-> MapID` 关系，副本入口外部目标由 `navigation_instance_entrances` 正式导出，能力模板由 `navigation_ability_templates` 正式导出，运行时静态路线边统一由 `navigation_route_edges` 正式导出。自 2026-04-30 起，运行时节点引用与能力模板目标统一切到不透明数字 `NodeID` / `ToNodeID`，`WalkClusterNodeID` 成为本地步行锚点主字段；测试与运行时均通过 `Source + SourceID + Kind` 解析节点，不再依赖旧字符串节点键。`navigation_taxi_edges` 只作为 Taxi 来源侧导出，不再由运行时构图链路直接消费；`Region_*`、轨迹坐标与 SafeLoc 坐标不再进入运行时路线图。所有导航运行时数据必须由 DataContracts 契约导出，`NavigationManualEdges.lua` 不得作为运行时数据源。详见 [specs/navigation-spec.md](./specs/navigation-spec.md)、[designs/navigation-design.md](./designs/navigation-design.md)、[plans/navigation-plan.md](./plans/navigation-plan.md)。 |
 | 独立任务浏览 | `quest` | `modules.quest`（`enabled`/`debug`/`questlineTreeEnabled`/`questNavExpansionID`/`questNavModeKey`/`questNavSelectedMapID`/`questNavSelectedTypeKey`/`questNavSearchText`/`questNavSkinPreset`/`questInspectorLastQuestID`/`questRecentCompletedList`/`questRecentCompletedMax`/`questNavExpandedQuestLineID`/`questlineTreeCollapsed`）+ `Toolbox.Data.InstanceQuestlines`（正式入口 `export_quest_achievement_merged_from_db.py`）+ `Toolbox.Data.QuestTypeNames`（`quest_type_names` 契约导出）+ `Toolbox.Questlines` | 归入“任务”叶子页：覆盖独立任务界面、底部 `active_log` / `map_questline` 双视图、左上角通用导航路径、节点驱动的任务线左树、任务搜索、最近完成、列表内展开详情，以及并回本页下半部分的 Quest Inspector 工具区；左侧不再保留独立 Quest Inspector 设置子页面。`active_log` 打开链路已收口为当前任务快路径；主区、当前任务区与最近完成区统一采用固定按钮池渲染，避免按总行数线性建控件。详见 [designs/quest-design.md](./designs/quest-design.md)。 |
@@ -252,7 +252,9 @@ ToolboxDB = {
 - `Settings.RegisterCanvasLayoutCategory` / `RegisterCanvasLayoutSubcategory` 只能在 `ADDON_LOADED` 或之后调用；禁止在模块文件顶层（脚本执行阶段）调用。
 - 设置叶子页与模块设置承载**必须由 `SettingsHost` 统一注册与重建**；禁止模块自行调用 `RegisterCanvasLayoutSubcategory`，以保证顺序（`settingsOrder`）、叶子页归属与公共区（启用/调试/重置）一致性。
 - `RegisterSettings(box)` 回调**只负责绘制控件**；不得在此回调中修改 `ToolboxDB`（修改应在 `OnClick` / `OnValueChanged` 等用户交互回调里）。**允许读取**：从 `ToolboxDB.modules.<id>` 读取已有值以设置控件初始状态（如 `checkbox:SetChecked(db.enabled)`）是允许的。
-- **`box.realHeight` 必须在 `RegisterSettings` 末尾赋值**（`SettingsHost` 据此决定滚动区高度）；遗漏时内容会被截断且无报错。
+- `RegisterSettings(box)` 统一通过宿主 helper 追加内容：`AddToggleRow`、`AddChoiceRow`、`AddMenuRow`、`AddMultiSelectRow`、`AddActionRow`、`AddNoteRow`、`AddCustomBlock`。两项单选优先 `AddChoiceRow`，三项及以上单选或下拉优先 `AddMenuRow`。
+- 模块**不得自行管理纵向游标或手工回写 `box.realHeight`**；宿主 helper 负责累计高度。只有复杂自定义块才通过 `AddCustomBlock` 返回实际高度。
+- 行级禁用态、局部刷新与重建统一经宿主处理：仅影响勾选态 / 选中态 / 文案时优先 `refreshMode = "local"` 或 `RequestLocalRefresh()`；影响显隐、行数或自定义块高度时改走 `RequestPageRebuild()` / `BuildPage()`。
 
 ---
 
@@ -288,6 +290,8 @@ ToolboxDB = {
 - 提供 **`/toolbox`**（或约定 slash）便于调试与无菜单时打开。
 - **页面结构**：左侧仅保留一个根 `Toolbox` 与 6 个叶子页；`通用` 收编语言、重载、小地图按钮与聊天提示，`界面` 收编 `mover` 与 `tooltip_anchor`，`地图` 承载 `navigation`，`任务` 承载 `quest` 与 Quest Inspector 工具区，`冒险手册` 承载 `encounter_journal`，“关于”只保留静态说明。
 - **默认打开规则**：`/toolbox`、ESC 菜单按钮与小地图按钮统一执行“优先回到上次停留叶子页，否则回退到 `通用`”；战斗内改用独立宿主直接打开目标叶子页。
+- **页内控件模型**：`SettingsHost` 第二阶段统一为原生列表式设置行，宿主负责语言、reload 与模块公共区，也负责菜单弹层、局部刷新和自定义块高度收口；模块不再散排旧模板控件。
+- **战斗内独立宿主**：当系统 `Settings.OpenToCategory` 在战斗中不可用时，宿主提供等价 Canvas 承载；菜单按钮、多选与动作行必须保持和系统设置页等价可操作。
 
 ### 5.2 自有窗口拖动（Mover）
 
@@ -445,3 +449,4 @@ ToolboxDB = {
 | 2026-04-29 | `navigation` 路线基线重定义：导航按“当前角色配置 + 最少路径步数”求解；V1 聚焦 `taxi / hearthstone / class_teleport / class_portal / walk_local`，并要求输出逐段方式与经过地图 |
 | 2026-04-30 | `navigation` 数字 node ID 收尾：`NavigationRouteEdges` / `NavigationAbilityTemplates` 统一切到不透明数字节点引用，`WalkClusterNodeID` 成为本地步行锚点主字段，`Navigation.lua` 保留 `HearthBindNodeID` 兼容输入并完成逻辑测试迁移 |
 | 2026-04-29 | `settings-host-redesign` 收口：设置宿主改为根类目 + 6 个叶子页，默认打开规则统一为“上次停留叶子页优先，否则回退 `通用`”；Quest Inspector 并回“任务”叶子页工具区 |
+| 2026-05-01 | `settings-host-redesign` 第二阶段落地：`SettingsHost` 统一 toggle / choice / menu / multi-select / action / note / custom block helper，模块公共区收口到宿主，`TooltipAnchor` 改为 3 项菜单选择，菜单弹层抬到 `DIALOG` strata 以兼容后续行覆盖与战斗内独立宿主交互 |

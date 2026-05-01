@@ -947,125 +947,102 @@ Toolbox.RegisterModule({
   RegisterSettings = function(box)
     local localeTable = Toolbox.L or {} -- 本地化文案
     local moduleDb = Toolbox.Config.GetModule(MODULE_ID) -- 小地图按钮模块存档
-    local yOffset = 0 -- 当前纵向游标
-
-    local function persistFlyoutSlots()
-      syncFlyoutRegistryFromDb()
-      Toolbox.MinimapButton.Refresh()
-      Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(MODULE_ID))
-    end
-
-    local showButtonCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 显示小地图按钮开关
-    showButtonCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
-    showButtonCheck.Text:SetText(localeTable.MINIMAP_BUTTON_SETTING_SHOW or "")
-    showButtonCheck:SetChecked(moduleDb.showMinimapButton ~= false)
-    showButtonCheck:SetScript("OnClick", function(self)
-      moduleDb.showMinimapButton = self:GetChecked() and true or false
-      Toolbox.MinimapButton.Refresh()
-      Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(MODULE_ID))
-    end)
-    yOffset = yOffset - 36
-
-    local hintLabel = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 小地图按钮说明
-    hintLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
-    hintLabel:SetWidth(580)
-    hintLabel:SetJustifyH("LEFT")
-    hintLabel:SetText(localeTable.MINIMAP_BUTTON_SETTING_HINT or "")
-    yOffset = yOffset - math.max(40, math.ceil((hintLabel:GetStringHeight() or 0) + 12))
-
-    local showCoordsCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 小地图坐标显示开关
-    showCoordsCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
-    showCoordsCheck.Text:SetText(localeTable.MINIMAP_COORDS_SETTING_SHOW or "")
-    showCoordsCheck:SetChecked(moduleDb.showCoordsOnMinimap ~= false)
-    showCoordsCheck:SetScript("OnClick", function(self)
-      moduleDb.showCoordsOnMinimap = self:GetChecked() == true
-      refreshCoordinateDisplays()
-      Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(MODULE_ID))
-    end)
-    yOffset = yOffset - 30
-
-    local coordsAnchorLabel = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 坐标锚点标题
-    coordsAnchorLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 28, yOffset)
-    coordsAnchorLabel:SetText(localeTable.MINIMAP_COORDS_SETTING_ANCHOR or "")
-    yOffset = yOffset - 20
-
-    local anchorTopCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 上方锚点开关
-    anchorTopCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 28, yOffset)
-    anchorTopCheck.Text:SetText(localeTable.MINIMAP_COORDS_SETTING_ANCHOR_TOP or "")
-    local anchorBottomCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 下方锚点开关
-    anchorBottomCheck:SetPoint("LEFT", anchorTopCheck, "RIGHT", 20, 0)
-    anchorBottomCheck.Text:SetText(localeTable.MINIMAP_COORDS_SETTING_ANCHOR_BOTTOM or "")
-
-    local function syncAnchorChecks()
-      local anchorKey = getMinimapCoordsAnchor() -- 当前坐标锚点
-      local coordsEnabled = moduleDb.showCoordsOnMinimap ~= false -- 坐标显示是否启用
-      anchorTopCheck:SetChecked(anchorKey == MINIMAP_COORDS_ANCHOR_TOP)
-      anchorBottomCheck:SetChecked(anchorKey == MINIMAP_COORDS_ANCHOR_BOTTOM)
-      anchorTopCheck:SetEnabled(coordsEnabled)
-      anchorBottomCheck:SetEnabled(coordsEnabled)
-    end
-
-    syncAnchorChecks()
-    anchorTopCheck:SetScript("OnClick", function()
-      moduleDb.minimapCoordsAnchor = MINIMAP_COORDS_ANCHOR_TOP
-      syncAnchorChecks()
-      refreshCoordinateDisplays()
-    end)
-    anchorBottomCheck:SetScript("OnClick", function()
-      moduleDb.minimapCoordsAnchor = MINIMAP_COORDS_ANCHOR_BOTTOM
-      syncAnchorChecks()
-      refreshCoordinateDisplays()
-    end)
-    yOffset = yOffset - 34
-
     local selectedIdList = ensureFlyoutSlotIds(moduleDb) -- 已勾选的悬停菜单项
-    yOffset = yOffset - 12
-
-    local flyoutSectionLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 悬停菜单分节标题
-    flyoutSectionLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
-    flyoutSectionLabel:SetText(localeTable.MINIMAP_FLYOUT_SLOTS_LABEL or "")
-    yOffset = yOffset - 24
-
-    local flyoutSectionHint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 悬停菜单说明
-    flyoutSectionHint:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
-    flyoutSectionHint:SetWidth(580)
-    flyoutSectionHint:SetJustifyH("LEFT")
-    flyoutSectionHint:SetText(localeTable.MINIMAP_FLYOUT_SLOTS_HINT or "")
-    yOffset = yOffset - math.max(22, math.ceil((flyoutSectionHint:GetStringHeight() or 0) + 8))
+    local flyoutOptions = {} -- 悬停菜单多选项
 
     for _, entryId in ipairs(getSortedFlyoutEntryIds()) do
       local entryDef = flyoutCatalog[entryId] -- 当前悬停菜单定义
       if entryDef then
-        local entryCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 当前功能勾选框
-        entryCheck:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-        entryCheck.Text:SetText(getFlyoutEntryDisplayName(entryDef, localeTable))
-        entryCheck:SetChecked(hasFlyoutEntryId(selectedIdList, entryId))
-        entryCheck:SetScript("OnClick", function(self)
-          if self:GetChecked() then
-            if not hasFlyoutEntryId(selectedIdList, entryId) then
-              selectedIdList[#selectedIdList + 1] = entryId
-            end
-          else
-            removeFlyoutEntryId(selectedIdList, entryId)
-          end
-          persistFlyoutSlots()
-        end)
-        yOffset = yOffset - 28
+        flyoutOptions[#flyoutOptions + 1] = {
+          value = entryId,
+          label = getFlyoutEntryDisplayName(entryDef, localeTable),
+        }
       end
     end
 
-    yOffset = yOffset - 12
-    local resetPositionButton = CreateFrame("Button", nil, box, "UIPanelButtonTemplate") -- 恢复默认位置按钮
-    resetPositionButton:SetSize(200, 26)
-    resetPositionButton:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
-    resetPositionButton:SetText(localeTable.MINIMAP_BUTTON_RESET_POSITION or "")
-    resetPositionButton:SetScript("OnClick", function()
-      Toolbox.MinimapButton.ResetPositionToDefault()
-      Toolbox.SettingsHost:BuildPage(Toolbox.SettingsHost:GetModulePageKey(MODULE_ID))
-    end)
-    yOffset = yOffset - 40
+    box:AddToggleRow({
+      label = localeTable.MINIMAP_BUTTON_SETTING_SHOW or "",
+      description = localeTable.MINIMAP_BUTTON_SETTING_HINT or "",
+      refreshMode = "local",
+      getValue = function()
+        return moduleDb.showMinimapButton ~= false
+      end,
+      setValue = function(value)
+        moduleDb.showMinimapButton = value == true
+      end,
+      afterChange = function()
+        Toolbox.MinimapButton.Refresh()
+      end,
+    })
 
-    box.realHeight = math.max(280, math.abs(yOffset) + 24)
+    box:AddToggleRow({
+      label = localeTable.MINIMAP_COORDS_SETTING_SHOW or "",
+      refreshMode = "local",
+      getValue = function()
+        return moduleDb.showCoordsOnMinimap ~= false
+      end,
+      setValue = function(value)
+        moduleDb.showCoordsOnMinimap = value == true
+      end,
+      afterChange = function()
+        refreshCoordinateDisplays()
+      end,
+    })
+
+    box:AddChoiceRow({
+      label = localeTable.MINIMAP_COORDS_SETTING_ANCHOR or "",
+      refreshMode = "local",
+      buttonWidth = 120,
+      enabledWhen = function()
+        return moduleDb.showCoordsOnMinimap ~= false
+      end,
+      options = {
+        { value = MINIMAP_COORDS_ANCHOR_TOP, label = localeTable.MINIMAP_COORDS_SETTING_ANCHOR_TOP or "" },
+        { value = MINIMAP_COORDS_ANCHOR_BOTTOM, label = localeTable.MINIMAP_COORDS_SETTING_ANCHOR_BOTTOM or "" },
+      },
+      getValue = function()
+        return getMinimapCoordsAnchor()
+      end,
+      setValue = function(value)
+        moduleDb.minimapCoordsAnchor = value
+      end,
+      afterChange = function()
+        refreshCoordinateDisplays()
+      end,
+    })
+
+    box:AddMultiSelectRow({
+      label = localeTable.MINIMAP_FLYOUT_SLOTS_LABEL or "",
+      description = localeTable.MINIMAP_FLYOUT_SLOTS_HINT or "",
+      refreshMode = "local",
+      options = flyoutOptions,
+      isSelected = function(value)
+        return hasFlyoutEntryId(selectedIdList, value)
+      end,
+      setSelected = function(value, isSelected)
+        if isSelected then
+          if not hasFlyoutEntryId(selectedIdList, value) then
+            selectedIdList[#selectedIdList + 1] = value
+          end
+          return
+        end
+        removeFlyoutEntryId(selectedIdList, value)
+      end,
+      afterChange = function()
+        syncFlyoutRegistryFromDb()
+        Toolbox.MinimapButton.Refresh()
+      end,
+    })
+
+    box:AddActionRow({
+      label = localeTable.MINIMAP_BUTTON_RESET_POSITION or "",
+      buttonText = localeTable.MINIMAP_BUTTON_RESET_POSITION or "",
+      buttonWidth = 200,
+      refreshMode = "local",
+      onClick = function()
+        Toolbox.MinimapButton.ResetPositionToDefault()
+      end,
+    })
   end,
 })
 

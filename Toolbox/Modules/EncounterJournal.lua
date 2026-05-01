@@ -484,18 +484,17 @@ Toolbox.RegisterModule({
   RegisterSettings = function(box)
     local localeTable = Toolbox.L or {} -- 本地化文案
     local moduleDb = getModuleDb() -- 模块存档
-    local yOffset = 0 -- 当前纵向游标
-
-    local pinAlwaysVisibleCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 图钉常驻显示开关
-    pinAlwaysVisibleCheck:SetPoint("TOPLEFT", 20, yOffset)
-    pinAlwaysVisibleCheck.Text:SetText(localeTable.EJ_LIST_PIN_ALWAYS_VISIBLE_LABEL or "定位图标常驻显示")
-    pinAlwaysVisibleCheck:SetChecked(moduleDb.listPinAlwaysVisible == true)
-    pinAlwaysVisibleCheck:SetScript("OnClick", function(checkButton)
-      moduleDb.listPinAlwaysVisible = checkButton:GetChecked() and true or false
-      ListNavigationPin:updateFrames()
-    end)
-    yOffset = yOffset - 36
-
-    box.realHeight = math.abs(yOffset) + 12
+    box:AddToggleRow({
+      label = localeTable.EJ_LIST_PIN_ALWAYS_VISIBLE_LABEL or "定位图标常驻显示",
+      getValue = function()
+        return moduleDb.listPinAlwaysVisible == true
+      end,
+      setValue = function(value)
+        moduleDb.listPinAlwaysVisible = value == true
+      end,
+      afterChange = function()
+        ListNavigationPin:updateFrames()
+      end,
+    })
   end,
 })

@@ -1221,92 +1221,45 @@ Toolbox.RegisterModule({
     refreshAddonRegisteredFramesOnly()
   end,
   RegisterSettings = function(box)
-    local L = Toolbox.L or {}
-    local db = getMoverDb()
-    local y = 0
-    local en = db.enabled ~= false
+    local localeTable = Toolbox.L or {} -- 本地化文案
+    local moduleDb = getMoverDb() -- 拖动模块存档
 
-    local hitSec = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    hitSec:SetPoint("TOPLEFT", 0, y)
-    hitSec:SetWidth(560)
-    hitSec:SetJustifyH("LEFT")
-    hitSec:SetText(L.MOVER_SETTINGS_HIT_TITLE)
-    y = y - 22
+    box:AddChoiceRow({
+      label = localeTable.MOVER_SETTINGS_HIT_TITLE or "",
+      description = localeTable.MOVER_SETTINGS_HIT_SUB or "",
+      buttonWidth = 132,
+      refreshMode = "local",
+      enabledWhen = function()
+        return moduleDb.enabled ~= false
+      end,
+      options = {
+        { value = HIT_TITLEBAR, label = localeTable.MOVER_SETTINGS_HIT_TITLEBAR or "" },
+        { value = HIT_TITLEBAR_EMPTY, label = localeTable.MOVER_SETTINGS_HIT_TITLEBAR_EMPTY or "" },
+      },
+      getValue = function()
+        return moduleDb.blizzardDragHitMode or HIT_TITLEBAR
+      end,
+      setValue = function(value)
+        moduleDb.blizzardDragHitMode = value
+      end,
+      afterChange = function()
+        Toolbox.Mover.RefreshDragConfiguration()
+      end,
+    })
 
-    local hitSub = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    hitSub:SetPoint("TOPLEFT", 0, y)
-    hitSub:SetWidth(560)
-    hitSub:SetJustifyH("LEFT")
-    hitSub:SetText(L.MOVER_SETTINGS_HIT_SUB)
-    y = y - math.max(32, math.ceil((hitSub:GetStringHeight() or 0) + 10))
-
-    local rbTitle = CreateFrame("CheckButton", nil, box, "UICheckButtonTemplate")
-    rbTitle:SetSize(22, 22)
-    rbTitle:SetPoint("TOPLEFT", 0, y)
-    local rbTitleL = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    rbTitleL:SetPoint("LEFT", rbTitle, "RIGHT", 6, 0)
-    rbTitleL:SetWidth(520)
-    rbTitleL:SetJustifyH("LEFT")
-    rbTitleL:SetText(L.MOVER_SETTINGS_HIT_TITLEBAR)
-
-    local rbEmpty = CreateFrame("CheckButton", nil, box, "UICheckButtonTemplate")
-    rbEmpty:SetSize(22, 22)
-    rbEmpty:SetPoint("TOPLEFT", 0, y - 26)
-    local rbEmptyL = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    rbEmptyL:SetPoint("LEFT", rbEmpty, "RIGHT", 6, 0)
-    rbEmptyL:SetWidth(520)
-    rbEmptyL:SetJustifyH("LEFT")
-    rbEmptyL:SetText(L.MOVER_SETTINGS_HIT_TITLEBAR_EMPTY)
-
-    local function syncHitRadios()
-      local m = db.blizzardDragHitMode or HIT_TITLEBAR
-      rbTitle:SetChecked(m == HIT_TITLEBAR)
-      rbEmpty:SetChecked(m == HIT_TITLEBAR_EMPTY)
-    end
-    syncHitRadios()
-    rbTitle:SetEnabled(en)
-    rbEmpty:SetEnabled(en)
-    rbTitle:SetScript("OnClick", function()
-      db.blizzardDragHitMode = HIT_TITLEBAR
-      syncHitRadios()
-      Toolbox.Mover.RefreshDragConfiguration()
-    end)
-    rbEmpty:SetScript("OnClick", function()
-      db.blizzardDragHitMode = HIT_TITLEBAR_EMPTY
-      syncHitRadios()
-      Toolbox.Mover.RefreshDragConfiguration()
-    end)
-    y = y - 56
-
-    local combatSec = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    combatSec:SetPoint("TOPLEFT", 0, y)
-    combatSec:SetWidth(560)
-    combatSec:SetJustifyH("LEFT")
-    combatSec:SetText(L.MOVER_SETTINGS_COMBAT_TITLE)
-    y = y - 22
-
-    local combatSub = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    combatSub:SetPoint("TOPLEFT", 0, y)
-    combatSub:SetWidth(560)
-    combatSub:SetJustifyH("LEFT")
-    combatSub:SetText(L.MOVER_SETTINGS_COMBAT_SUB)
-    y = y - math.max(28, math.ceil((combatSub:GetStringHeight() or 0) + 6))
-
-    local cbCombat = CreateFrame("CheckButton", nil, box, "UICheckButtonTemplate")
-    cbCombat:SetSize(22, 22)
-    cbCombat:SetPoint("TOPLEFT", 0, y)
-    local cbCombatL = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    cbCombatL:SetPoint("LEFT", cbCombat, "RIGHT", 6, 0)
-    cbCombatL:SetWidth(520)
-    cbCombatL:SetJustifyH("LEFT")
-    cbCombatL:SetText(L.MOVER_SETTINGS_COMBAT_CHECK)
-    cbCombat:SetChecked(db.allowDragInCombat == true)
-    cbCombat:SetEnabled(en)
-    cbCombat:SetScript("OnClick", function(self)
-      db.allowDragInCombat = self:GetChecked() == true
-    end)
-    y = y - 28
-
-    box.realHeight = math.abs(y) + 8
+    box:AddToggleRow({
+      label = localeTable.MOVER_SETTINGS_COMBAT_CHECK or "",
+      description = localeTable.MOVER_SETTINGS_COMBAT_SUB or "",
+      refreshMode = "local",
+      enabledWhen = function()
+        return moduleDb.enabled ~= false
+      end,
+      getValue = function()
+        return moduleDb.allowDragInCombat == true
+      end,
+      setValue = function(value)
+        moduleDb.allowDragInCombat = value == true
+      end,
+    })
   end,
 })

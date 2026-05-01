@@ -14,6 +14,12 @@ local PANEL_HEIGHT = 920
 local SCROLL_CHILD_WIDTH = 640
 local MODULE_BOX_WIDTH = 604
 local DEFAULT_LEAF_PAGE_KEY = "general" -- 默认打开的叶子页键名
+local SETTINGS_ROW_LABEL_WIDTH = 340
+local SETTINGS_ROW_TEXT_WIDTH = 360
+local SETTINGS_ROW_CONTROL_LEFT = 390
+local SETTINGS_ROW_BUTTON_WIDTH = 92
+local SETTINGS_BOX_BOTTOM_PADDING = 8
+local SETTINGS_BOX_MIN_HEIGHT = 8
 --- 战斗内独立展示时相对裸 `UIParent` 居中略缩小，贴近系统设置窗口内嵌 Canvas 的观感（可按实机再调）。
 local STANDALONE_PANEL_SCALE = 0.82
 local MODULE_LEAF_KEY_MAP = {
@@ -143,6 +149,560 @@ local function applyModuleCallbacks(moduleObject)
   end
 end
 
+local function getChoiceOptions(optionList)
+  if type(optionList) ~= "table" then
+    return {}
+  end
+  return optionList
+end
+
+local function normalizeChoiceValue(currentValue, optionList, defaultValue)
+  local choiceList = getChoiceOptions(optionList) -- 选项列表
+  for _, optionObject in ipairs(choiceList) do
+    if optionObject and optionObject.value == currentValue then
+      return currentValue, false
+    end
+  end
+
+  if defaultValue ~= nil then
+    for _, optionObject in ipairs(choiceList) do
+      if optionObject and optionObject.value == defaultValue then
+        return defaultValue, true
+      end
+    end
+  end
+
+  local firstOption = choiceList[1] -- 首项兜底
+  if firstOption ~= nil then
+    return firstOption.value, true
+  end
+  return defaultValue, true
+end
+
+local function normalizeToggleValue(currentValue, defaultValue)
+  if type(currentValue) == "boolean" then
+    return currentValue, false
+  end
+  if defaultValue ~= nil then
+    return defaultValue == true, true
+  end
+  if currentValue == nil then
+    return false, true
+  end
+  return currentValue == true, true
+end
+
+local function setFontStringTextColor(fontString, isEnabled)
+  if not fontString or not fontString.SetTextColor then
+    return
+  end
+  if isEnabled == false then
+    fontString:SetTextColor(0.55, 0.55, 0.55)
+  else
+    fontString:SetTextColor(1, 1, 1)
+  end
+end
+
+local function triggerBoxRefresh(boxFrame, options)
+  local refreshMode = type(options) == "table" and options.refreshMode or nil -- 刷新模式
+  if refreshMode == "page" then
+    boxFrame:RequestPageRebuild()
+  elseif refreshMode == "all_pages" then
+    Toolbox.SettingsHost:RefreshAllPages()
+  elseif refreshMode == "none" then
+    return
+  else
+    boxFrame:RequestLocalRefresh()
+  end
+end
+
+local function CreateSettingsBox(parentFrame, startY, pageKey)
+  local boxFrame = CreateFrame("Frame", nil, parentFrame) -- 统一设置构建容器
+  boxFrame:SetSize(MODULE_BOX_WIDTH, SETTINGS_BOX_MIN_HEIGHT)
+  boxFrame:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 0, startY)
+  boxFrame.realHeight = SETTINGS_BOX_MIN_HEIGHT
+  boxFrame._toolboxCursorY = 0
+  boxFrame._toolboxRefreshers = {}
+  boxFrame._toolboxPageKey = pageKey
+
+  function boxFrame:_UpdateRealHeight()
+    self.realHeight = math.max(SETTINGS_BOX_MIN_HEIGHT, math.abs(self._toolboxCursorY) + SETTINGS_BOX_BOTTOM_PADDING)
+    self:SetHeight(self.realHeight)
+  end
+
+  function boxFrame:_ConsumeHeight(heightValue, gapValue)
+    local usedHeight = tonumber(heightValue) or 0 -- 当前占用高度
+    local usedGap = tonumber(gapValue) or 0 -- 行尾间距
+    self._toolboxCursorY = self._toolboxCursorY - usedHeight - usedGap
+    self:_UpdateRealHeight()
+  end
+
+  function boxFrame:_RegisterRefresher(refreshFunc)
+    if type(refreshFunc) == "function" then
+      self._toolboxRefreshers[#self._toolboxRefreshers + 1] = refreshFunc
+    end
+  end
+
+  function boxFrame:_IsRowEnabled(options)
+    if type(options) ~= "table" then
+      return true
+    end
+    if type(options.enabledWhen) == "function" then
+      return options.enabledWhen() ~= false
+    end
+    if type(options.isEnabled) == "function" then
+      return options.isEnabled() ~= false
+    end
+    return true
+  end
+
+  function boxFrame:RequestLocalRefresh()
+    for _, refreshFunc in ipairs(self._toolboxRefreshers or {}) do
+      refreshFunc()
+    end
+  end
+
+  function boxFrame:RequestPageRebuild()
+    Toolbox.SettingsHost:BuildPage(self._toolboxPageKey)
+  end
+
+  function boxFrame:AddSectionHeader(titleOrOptions, descriptionText)
+    local options = type(titleOrOptions) == "table" and titleOrOptions or { title = titleOrOptions, description = descriptionText } -- 分节配置
+    local rowTop = self._toolboxCursorY -- 行顶部位置
+    local usedHeight = 22 -- 当前分节高度
+
+    local titleLabel = self:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 分节标题
+    titleLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop)
+    titleLabel:SetWidth(SETTINGS_ROW_TEXT_WIDTH + 180)
+    titleLabel:SetJustifyH("LEFT")
+    titleLabel:SetText(options.title or "")
+
+    if options.description and options.description ~= "" then
+      local descriptionLabel = self:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 分节说明
+      descriptionLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop - 22)
+      descriptionLabel:SetWidth(SETTINGS_ROW_TEXT_WIDTH + 180)
+      descriptionLabel:SetJustifyH("LEFT")
+      descriptionLabel:SetText(options.description)
+      usedHeight = 22 + math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8))
+    end
+
+    self:_ConsumeHeight(usedHeight, 6)
+  end
+
+  function boxFrame:AddNoteRow(options)
+    local rowOptions = type(options) == "table" and options or { text = tostring(options or "") } -- 说明配置
+    local rowTop = self._toolboxCursorY -- 行顶部位置
+    local noteLabel = self:CreateFontString(nil, "OVERLAY", rowOptions.fontObject or "GameFontHighlightSmall") -- 说明文本
+    noteLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop)
+    noteLabel:SetWidth(rowOptions.width or (SETTINGS_ROW_TEXT_WIDTH + 180))
+    noteLabel:SetJustifyH("LEFT")
+    noteLabel:SetText(rowOptions.text or "")
+    self:_ConsumeHeight(math.max(18, math.ceil((noteLabel:GetStringHeight() or 0) + 8)), rowOptions.gap or 8)
+    return noteLabel
+  end
+
+  function boxFrame:AddToggleRow(options)
+    local rowOptions = options or {} -- 开关行配置
+    local rowTop = self._toolboxCursorY -- 行顶部位置
+    local rowHeight = 24 -- 当前行高度
+
+    local titleLabel = self:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 行标题
+    titleLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop)
+    titleLabel:SetWidth(SETTINGS_ROW_LABEL_WIDTH)
+    titleLabel:SetJustifyH("LEFT")
+    titleLabel:SetText(rowOptions.label or "")
+
+    local descriptionLabel = nil -- 说明文本
+    if rowOptions.description and rowOptions.description ~= "" then
+      descriptionLabel = self:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      descriptionLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop - 18)
+      descriptionLabel:SetWidth(SETTINGS_ROW_TEXT_WIDTH)
+      descriptionLabel:SetJustifyH("LEFT")
+      descriptionLabel:SetText(rowOptions.description)
+      rowHeight = 18 + math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8))
+    end
+
+    local stateButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate") -- 开关按钮
+    stateButton:SetSize(rowOptions.buttonWidth or SETTINGS_ROW_BUTTON_WIDTH, 22)
+    stateButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, rowTop - 2)
+
+    local function getValue()
+      if type(rowOptions.getValue) == "function" then
+        return rowOptions.getValue()
+      end
+      return rowOptions.value
+    end
+
+    local function setValue(newValue)
+      if type(rowOptions.setValue) == "function" then
+        rowOptions.setValue(newValue == true)
+      end
+      if type(rowOptions.afterChange) == "function" then
+        rowOptions.afterChange(newValue == true)
+      end
+    end
+
+    local function refresh()
+      local rawValue = getValue() -- 当前原始取值
+      local isChecked, wasNormalized = normalizeToggleValue(rawValue, rowOptions.defaultValue) -- 当前开关值
+      if wasNormalized and type(rowOptions.setValue) == "function" then
+        rowOptions.setValue(isChecked == true)
+      end
+      local isEnabled = self:_IsRowEnabled(rowOptions) -- 当前行启用态
+      local onText = rowOptions.onText or "ON" -- 开启文本
+      local offText = rowOptions.offText or "OFF" -- 关闭文本
+      stateButton:SetEnabled(isEnabled)
+      stateButton:SetText(isChecked and onText or offText)
+      setFontStringTextColor(titleLabel, isEnabled)
+      setFontStringTextColor(descriptionLabel, isEnabled)
+    end
+
+    stateButton:SetScript("OnClick", function()
+      local currentValue = select(1, normalizeToggleValue(getValue(), rowOptions.defaultValue)) -- 当前归一后的布尔值
+      setValue(not currentValue)
+      triggerBoxRefresh(self, rowOptions)
+    end)
+
+    self:_RegisterRefresher(refresh)
+    refresh()
+    self:_ConsumeHeight(rowHeight, rowOptions.gap or 10)
+    return stateButton
+  end
+
+  function boxFrame:AddChoiceRow(options)
+    local rowOptions = options or {} -- 单值选择配置
+    local choiceList = getChoiceOptions(rowOptions.options) -- 选项列表
+    local rowTop = self._toolboxCursorY -- 行顶部位置
+    local rowHeight = 24 -- 当前行高度
+
+    local titleLabel = self:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 行标题
+    titleLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop)
+    titleLabel:SetWidth(SETTINGS_ROW_LABEL_WIDTH)
+    titleLabel:SetJustifyH("LEFT")
+    titleLabel:SetText(rowOptions.label or "")
+
+    local descriptionLabel = nil -- 说明文本
+    if rowOptions.description and rowOptions.description ~= "" then
+      descriptionLabel = self:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      descriptionLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop - 18)
+      descriptionLabel:SetWidth(SETTINGS_ROW_TEXT_WIDTH)
+      descriptionLabel:SetJustifyH("LEFT")
+      descriptionLabel:SetText(rowOptions.description)
+      rowHeight = 18 + math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8))
+    end
+
+    local buttonList = {} -- 选项按钮列表
+    local currentLeft = SETTINGS_ROW_CONTROL_LEFT -- 当前按钮起点
+    for _, optionObject in ipairs(choiceList) do
+      local choiceButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate") -- 选项按钮
+      choiceButton:SetSize(rowOptions.buttonWidth or SETTINGS_ROW_BUTTON_WIDTH, 22)
+      choiceButton:SetPoint("TOPLEFT", self, "TOPLEFT", currentLeft, rowTop - 2)
+      choiceButton._toolboxValue = optionObject.value
+      choiceButton._toolboxLabel = optionObject.label or tostring(optionObject.value)
+      choiceButton:SetScript("OnClick", function()
+        if type(rowOptions.setValue) == "function" then
+          rowOptions.setValue(optionObject.value)
+        end
+        if type(rowOptions.afterChange) == "function" then
+          rowOptions.afterChange(optionObject.value)
+        end
+        triggerBoxRefresh(self, rowOptions)
+      end)
+      buttonList[#buttonList + 1] = choiceButton
+      currentLeft = currentLeft + (rowOptions.buttonWidth or SETTINGS_ROW_BUTTON_WIDTH) + 6
+    end
+
+    local function refresh()
+      local currentValue = type(rowOptions.getValue) == "function" and rowOptions.getValue() or rowOptions.value -- 当前取值
+      local normalizedValue, wasNormalized = normalizeChoiceValue(currentValue, choiceList, rowOptions.defaultValue)
+      if wasNormalized and normalizedValue ~= nil and type(rowOptions.setValue) == "function" then
+        rowOptions.setValue(normalizedValue)
+        currentValue = normalizedValue
+      else
+        currentValue = normalizedValue
+      end
+
+      local isEnabled = self:_IsRowEnabled(rowOptions) -- 当前行启用态
+      for _, choiceButton in ipairs(buttonList) do
+        local isSelected = choiceButton._toolboxValue == currentValue -- 是否当前选中
+        choiceButton:SetEnabled(isEnabled and not isSelected)
+        if isSelected then
+          choiceButton:SetText("[" .. tostring(choiceButton._toolboxLabel) .. "]")
+        else
+          choiceButton:SetText(tostring(choiceButton._toolboxLabel))
+        end
+      end
+      setFontStringTextColor(titleLabel, isEnabled)
+      setFontStringTextColor(descriptionLabel, isEnabled)
+    end
+
+    self:_RegisterRefresher(refresh)
+    refresh()
+    self:_ConsumeHeight(rowHeight, rowOptions.gap or 10)
+    return buttonList
+  end
+
+  function boxFrame:AddMenuRow(options)
+    local rowOptions = options or {} -- 菜单行配置
+    local choiceList = getChoiceOptions(rowOptions.options) -- 菜单选项
+    local rowTop = self._toolboxCursorY -- 行顶部位置
+    local rowHeight = 24 -- 当前行高度
+
+    local titleLabel = self:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 行标题
+    titleLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop)
+    titleLabel:SetWidth(SETTINGS_ROW_LABEL_WIDTH)
+    titleLabel:SetJustifyH("LEFT")
+    titleLabel:SetText(rowOptions.label or "")
+
+    local descriptionLabel = nil -- 说明文本
+    if rowOptions.description and rowOptions.description ~= "" then
+      descriptionLabel = self:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      descriptionLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop - 18)
+      descriptionLabel:SetWidth(SETTINGS_ROW_TEXT_WIDTH)
+      descriptionLabel:SetJustifyH("LEFT")
+      descriptionLabel:SetText(rowOptions.description)
+      rowHeight = 18 + math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8))
+    end
+
+    local menuButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate") -- 菜单按钮
+    menuButton:SetSize(rowOptions.buttonWidth or 170, 22)
+    menuButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, rowTop - 2)
+    local popupFrame = CreateFrame("Frame", nil, self) -- 下拉菜单弹层
+    popupFrame:SetPoint("TOPLEFT", menuButton, "BOTTOMLEFT", 0, -4)
+    popupFrame:SetSize(rowOptions.buttonWidth or 170, math.max(1, #choiceList) * 24)
+    popupFrame:SetFrameStrata("DIALOG")
+    if popupFrame.SetFrameLevel and self.GetFrameLevel then
+      popupFrame:SetFrameLevel((self:GetFrameLevel() or 0) + 20)
+    end
+    popupFrame:Hide()
+    menuButton._toolboxPopupFrame = popupFrame
+    local optionButtonList = {} -- 下拉选项按钮列表
+
+    local function findCurrentIndex(currentValue)
+      for indexNumber, optionObject in ipairs(choiceList) do
+        if optionObject and optionObject.value == currentValue then
+          return indexNumber
+        end
+      end
+      return 1
+    end
+
+    local function hidePopup()
+      popupFrame:Hide()
+    end
+
+    local function ensureOptionButtons()
+      if #optionButtonList > 0 then
+        return
+      end
+      local optionTop = 0 -- 当前选项顶部
+      for _, optionObject in ipairs(choiceList) do
+        local optionButton = CreateFrame("Button", nil, popupFrame, "UIPanelButtonTemplate") -- 菜单选项按钮
+        optionButton:SetSize(rowOptions.buttonWidth or 170, 22)
+        optionButton:SetPoint("TOPLEFT", popupFrame, "TOPLEFT", 0, optionTop)
+        optionButton._toolboxValue = optionObject.value
+        optionButton._toolboxLabel = optionObject.label or tostring(optionObject.value)
+        optionButton:SetScript("OnClick", function()
+          if type(rowOptions.setValue) == "function" then
+            rowOptions.setValue(optionObject.value)
+          end
+          if type(rowOptions.afterChange) == "function" then
+            rowOptions.afterChange(optionObject.value)
+          end
+          hidePopup()
+          triggerBoxRefresh(self, rowOptions)
+        end)
+        optionButtonList[#optionButtonList + 1] = optionButton
+        optionTop = optionTop - 24
+      end
+    end
+
+    local function refresh()
+      local currentValue = type(rowOptions.getValue) == "function" and rowOptions.getValue() or rowOptions.value -- 当前取值
+      local normalizedValue, wasNormalized = normalizeChoiceValue(currentValue, choiceList, rowOptions.defaultValue)
+      if wasNormalized and normalizedValue ~= nil and type(rowOptions.setValue) == "function" then
+        rowOptions.setValue(normalizedValue)
+        currentValue = normalizedValue
+      else
+        currentValue = normalizedValue
+      end
+
+      local isEnabled = self:_IsRowEnabled(rowOptions) -- 当前行启用态
+      local currentIndex = findCurrentIndex(currentValue) -- 当前索引
+      local currentOption = choiceList[currentIndex] or {} -- 当前选项
+      local currentLabel = currentOption.label or tostring(currentOption.value or "") -- 当前按钮文案
+      menuButton:SetEnabled(isEnabled)
+      menuButton:SetText(currentLabel .. " v")
+      setFontStringTextColor(titleLabel, isEnabled)
+      setFontStringTextColor(descriptionLabel, isEnabled)
+      ensureOptionButtons()
+      for _, optionButton in ipairs(optionButtonList) do
+        local isSelected = optionButton._toolboxValue == currentValue -- 当前按钮是否选中
+        optionButton:SetEnabled(isEnabled and not isSelected)
+        if isSelected then
+          optionButton:SetText("[ " .. tostring(optionButton._toolboxLabel) .. " ]")
+        else
+          optionButton:SetText(tostring(optionButton._toolboxLabel))
+        end
+      end
+      if isEnabled == false then
+        hidePopup()
+      end
+    end
+
+    menuButton:SetScript("OnClick", function()
+      if popupFrame.IsShown and popupFrame:IsShown() then
+        hidePopup()
+      else
+        ensureOptionButtons()
+        popupFrame:SetHeight(math.max(1, #optionButtonList) * 24)
+        popupFrame:Show()
+      end
+    end)
+
+    self:_RegisterRefresher(refresh)
+    refresh()
+    self:_ConsumeHeight(rowHeight, rowOptions.gap or 10)
+    return menuButton
+  end
+
+  function boxFrame:AddMultiSelectRow(options)
+    local rowOptions = options or {} -- 多选列表配置
+    local choiceList = getChoiceOptions(rowOptions.options) -- 多选项列表
+    local rowTop = self._toolboxCursorY -- 行顶部位置
+    local rowHeight = 0 -- 当前累计高度
+
+    local titleLabel = self:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 列表标题
+    titleLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop)
+    titleLabel:SetWidth(SETTINGS_ROW_TEXT_WIDTH + 180)
+    titleLabel:SetJustifyH("LEFT")
+    titleLabel:SetText(rowOptions.label or "")
+    rowHeight = rowHeight + 20
+
+    local descriptionLabel = nil -- 说明文本
+    if rowOptions.description and rowOptions.description ~= "" then
+      descriptionLabel = self:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      descriptionLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop - 18)
+      descriptionLabel:SetWidth(SETTINGS_ROW_TEXT_WIDTH + 180)
+      descriptionLabel:SetJustifyH("LEFT")
+      descriptionLabel:SetText(rowOptions.description)
+      local descHeight = math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8))
+      rowHeight = 18 + descHeight
+    end
+
+    local buttonList = {} -- 勾选按钮列表
+    local optionTop = rowTop - rowHeight -- 第一项顶部
+    for _, optionObject in ipairs(choiceList) do
+      local checkButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate") -- 多选按钮
+      checkButton:SetSize(rowOptions.buttonWidth or 180, 22)
+      checkButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, optionTop - 2)
+      checkButton._toolboxValue = optionObject.value
+      checkButton._toolboxLabel = optionObject.label or tostring(optionObject.value)
+      checkButton:SetScript("OnClick", function()
+        local currentlySelected = type(rowOptions.isSelected) == "function" and rowOptions.isSelected(optionObject.value) == true or false
+        if type(rowOptions.setSelected) == "function" then
+          rowOptions.setSelected(optionObject.value, currentlySelected ~= true)
+        end
+        if type(rowOptions.afterChange) == "function" then
+          rowOptions.afterChange(optionObject.value, currentlySelected ~= true)
+        end
+        triggerBoxRefresh(self, rowOptions)
+      end)
+      buttonList[#buttonList + 1] = checkButton
+      optionTop = optionTop - 28
+      rowHeight = rowHeight + 28
+    end
+
+    local function refresh()
+      local isEnabled = self:_IsRowEnabled(rowOptions) -- 当前行启用态
+      for _, checkButton in ipairs(buttonList) do
+        local isSelected = type(rowOptions.isSelected) == "function" and rowOptions.isSelected(checkButton._toolboxValue) == true or false
+        checkButton:SetEnabled(isEnabled)
+        if isSelected then
+          checkButton:SetText("[x] " .. tostring(checkButton._toolboxLabel))
+        else
+          checkButton:SetText("[ ] " .. tostring(checkButton._toolboxLabel))
+        end
+      end
+      setFontStringTextColor(titleLabel, isEnabled)
+      setFontStringTextColor(descriptionLabel, isEnabled)
+    end
+
+    self:_RegisterRefresher(refresh)
+    refresh()
+    self:_ConsumeHeight(rowHeight, rowOptions.gap or 8)
+    return buttonList
+  end
+
+  function boxFrame:AddActionRow(options)
+    local rowOptions = options or {} -- 操作行配置
+    local rowTop = self._toolboxCursorY -- 行顶部位置
+    local rowHeight = 24 -- 当前行高度
+
+    local titleLabel = self:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 行标题
+    titleLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop)
+    titleLabel:SetWidth(SETTINGS_ROW_LABEL_WIDTH)
+    titleLabel:SetJustifyH("LEFT")
+    titleLabel:SetText(rowOptions.label or "")
+
+    local descriptionLabel = nil -- 说明文本
+    if rowOptions.description and rowOptions.description ~= "" then
+      descriptionLabel = self:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      descriptionLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop - 18)
+      descriptionLabel:SetWidth(SETTINGS_ROW_TEXT_WIDTH)
+      descriptionLabel:SetJustifyH("LEFT")
+      descriptionLabel:SetText(rowOptions.description)
+      rowHeight = 18 + math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8))
+    end
+
+    local actionButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate") -- 操作按钮
+    actionButton:SetSize(rowOptions.buttonWidth or 170, 22)
+    actionButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, rowTop - 2)
+    actionButton:SetText(rowOptions.buttonText or rowOptions.label or "")
+    actionButton:SetScript("OnClick", function()
+      if type(rowOptions.onClick) == "function" then
+        rowOptions.onClick()
+      end
+      triggerBoxRefresh(self, rowOptions)
+    end)
+
+    local function refresh()
+      local isEnabled = self:_IsRowEnabled(rowOptions) -- 当前行启用态
+      actionButton:SetEnabled(isEnabled)
+      setFontStringTextColor(titleLabel, isEnabled)
+      setFontStringTextColor(descriptionLabel, isEnabled)
+    end
+
+    self:_RegisterRefresher(refresh)
+    refresh()
+    self:_ConsumeHeight(rowHeight, rowOptions.gap or 10)
+    return actionButton
+  end
+
+  function boxFrame:AddCustomBlock(builderFunc)
+    local rowTop = self._toolboxCursorY -- 当前块顶部
+    local blockFrame = CreateFrame("Frame", nil, self) -- 自定义内容块
+    blockFrame:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop)
+    blockFrame:SetSize(MODULE_BOX_WIDTH, 1)
+    local reportedHeight = 0 -- 上报高度
+    if type(builderFunc) == "function" then
+      reportedHeight = tonumber(builderFunc(blockFrame, self)) or 0
+    end
+    if reportedHeight <= 0 then
+      reportedHeight = tonumber(blockFrame.realHeight) or tonumber(blockFrame:GetHeight()) or 0
+    end
+    if reportedHeight <= 0 then
+      reportedHeight = 1
+    end
+    blockFrame:SetHeight(reportedHeight)
+    self:_ConsumeHeight(reportedHeight, 8)
+    return blockFrame
+  end
+
+  boxFrame:_UpdateRealHeight()
+  return boxFrame
+end
+
 local function buildHeader(childFrame, startY, titleText, introText)
   local yOffset = startY -- 当前纵向游标
 
@@ -261,80 +821,55 @@ end
 --- 构建界面语言区。
 ---@param childFrame Frame 页面根 child
 ---@param startY number 当前纵向游标
+---@param pageKey string 当前叶子页键名
 ---@return number
-function Toolbox.SettingsHost:BuildLanguageSection(childFrame, startY)
-  local localeTable = Toolbox.L -- 本地化文案
+function Toolbox.SettingsHost:BuildLanguageSection(childFrame, startY, pageKey)
+  local localeTable = Toolbox.L or {} -- 本地化文案
   local globalDb = Toolbox.Config.GetGlobal() -- 全局存档
-  local yOffset = startY -- 当前纵向游标
-
-  local titleLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 分节标题
-  titleLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
-  titleLabel:SetText(localeTable.LOCALE_SECTION_TITLE)
-  yOffset = yOffset - 24
-
-  local modeButtonList = {} -- 语言模式按钮列表
-  local function setLocale(localeKey)
-    globalDb.locale = localeKey
-    for _, checkButton in ipairs(modeButtonList) do
-      checkButton:SetChecked(checkButton.localePref == localeKey)
-    end
-    Toolbox.Locale_Apply()
-    Toolbox.SettingsHost:RefreshAllPages()
-  end
-
-  local function makeOption(localeKey, labelText)
-    local checkButton = CreateFrame("CheckButton", nil, childFrame, "InterfaceOptionsCheckButtonTemplate") -- 语言选项按钮
-    checkButton:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 20, yOffset)
-    checkButton.Text:SetText(labelText)
-    checkButton.localePref = localeKey
-    checkButton:SetChecked((globalDb.locale or "auto") == localeKey)
-    checkButton:SetScript("OnClick", function(self)
-      setLocale(self.localePref)
-    end)
-    modeButtonList[#modeButtonList + 1] = checkButton
-    yOffset = yOffset - 28
-  end
-
-  makeOption("auto", localeTable.LOCALE_OPTION_AUTO)
-  makeOption("zhCN", localeTable.LOCALE_OPTION_ZHCN)
-  makeOption("enUS", localeTable.LOCALE_OPTION_ENUS)
-
-  yOffset = yOffset - 8
-  local hintLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 语言切换提示
-  hintLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
-  hintLabel:SetWidth(580)
-  hintLabel:SetJustifyH("LEFT")
-  hintLabel:SetText(localeTable.LOCALE_HINT)
-  yOffset = yOffset - 40
-
-  return yOffset
+  local settingsBox = CreateSettingsBox(childFrame, startY, pageKey) -- 语言设置容器
+  settingsBox:AddMenuRow({
+    label = localeTable.LOCALE_SECTION_TITLE,
+    description = localeTable.LOCALE_HINT,
+    defaultValue = "auto",
+    refreshMode = "none",
+    buttonWidth = 140,
+    getValue = function()
+      return globalDb.locale or "auto"
+    end,
+    setValue = function(localeKey)
+      globalDb.locale = localeKey
+    end,
+    afterChange = function()
+      Toolbox.Locale_Apply()
+      Toolbox.SettingsHost:RefreshAllPages()
+    end,
+    options = {
+      { value = "auto", label = localeTable.LOCALE_OPTION_AUTO or "Auto" },
+      { value = "zhCN", label = localeTable.LOCALE_OPTION_ZHCN or "zhCN" },
+      { value = "enUS", label = localeTable.LOCALE_OPTION_ENUS or "enUS" },
+    },
+  })
+  return startY - settingsBox.realHeight - 10
 end
 
 --- 构建重载界面区。
 ---@param childFrame Frame 页面根 child
 ---@param startY number 当前纵向游标
+---@param pageKey string 当前叶子页键名
 ---@return number
-function Toolbox.SettingsHost:BuildReloadSection(childFrame, startY)
-  local localeTable = Toolbox.L -- 本地化文案
-  local yOffset = startY -- 当前纵向游标
-
-  local reloadButton = CreateFrame("Button", nil, childFrame, "UIPanelButtonTemplate") -- 重载按钮
-  reloadButton:SetSize(180, 22)
-  reloadButton:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
-  reloadButton:SetText(localeTable.SETTINGS_RELOAD_UI)
-  reloadButton:SetScript("OnClick", function()
-    ReloadUI()
-  end)
-  yOffset = yOffset - 32
-
-  local hintLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 重载说明
-  hintLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
-  hintLabel:SetWidth(580)
-  hintLabel:SetJustifyH("LEFT")
-  hintLabel:SetText(localeTable.SETTINGS_RELOAD_HINT)
-  yOffset = yOffset - 44
-
-  return yOffset
+function Toolbox.SettingsHost:BuildReloadSection(childFrame, startY, pageKey)
+  local localeTable = Toolbox.L or {} -- 本地化文案
+  local settingsBox = CreateSettingsBox(childFrame, startY, pageKey) -- 重载设置容器
+  settingsBox:AddActionRow({
+    label = localeTable.SETTINGS_RELOAD_UI,
+    description = localeTable.SETTINGS_RELOAD_HINT,
+    buttonText = localeTable.SETTINGS_RELOAD_UI,
+    refreshMode = "none",
+    onClick = function()
+      ReloadUI()
+    end,
+  })
+  return startY - settingsBox.realHeight - 10
 end
 
 --- 构建模块页首的高频主开关。
@@ -346,22 +881,24 @@ end
 function Toolbox.SettingsHost:BuildModulePrimaryControls(childFrame, startY, moduleObject, pageKey)
   local localeTable = Toolbox.L or {} -- 本地化文案
   local moduleDb = Toolbox.Config.GetModule(moduleObject.id) -- 模块存档
-  local yOffset = startY -- 当前纵向游标
-
-  local enableButton = CreateFrame("CheckButton", nil, childFrame, "InterfaceOptionsCheckButtonTemplate") -- 启用开关
-  enableButton:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
-  enableButton.Text:SetText(localeTable.SETTINGS_MODULE_ENABLE or "")
-  enableButton:SetChecked(moduleDb.enabled ~= false)
-  enableButton:SetScript("OnClick", function(self)
-    moduleDb.enabled = self:GetChecked() and true or false
-    if moduleObject.OnEnabledSettingChanged then
-      moduleObject.OnEnabledSettingChanged(moduleDb.enabled ~= false)
-    end
-    Toolbox.SettingsHost:BuildPage(pageKey)
-  end)
-  yOffset = yOffset - 34
-
-  return yOffset
+  local settingsBox = CreateSettingsBox(childFrame, startY, pageKey) -- 模块主控件容器
+  settingsBox:AddToggleRow({
+    label = localeTable.SETTINGS_MODULE_ENABLE or "",
+    defaultValue = true,
+    refreshMode = "page",
+    getValue = function()
+      return moduleDb.enabled ~= false
+    end,
+    setValue = function(value)
+      moduleDb.enabled = value == true
+    end,
+    afterChange = function(enabled)
+      if moduleObject.OnEnabledSettingChanged then
+        moduleObject.OnEnabledSettingChanged(enabled == true)
+      end
+    end,
+  })
+  return startY - settingsBox.realHeight
 end
 
 --- 构建模块页尾的低频动作区（调试 / 重置并重建）。
@@ -373,47 +910,40 @@ end
 function Toolbox.SettingsHost:BuildModuleSecondaryControls(childFrame, startY, moduleObject, pageKey)
   local localeTable = Toolbox.L or {} -- 本地化文案
   local moduleDb = Toolbox.Config.GetModule(moduleObject.id) -- 模块存档
-  local yOffset = startY -- 当前纵向游标
-
-  local debugButton = CreateFrame("CheckButton", nil, childFrame, "InterfaceOptionsCheckButtonTemplate") -- 调试开关
-  debugButton:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
-  debugButton.Text:SetText(localeTable.SETTINGS_MODULE_DEBUG or "")
-  debugButton:SetChecked(moduleDb.debug == true)
-  debugButton:SetScript("OnClick", function(self)
-    moduleDb.debug = self:GetChecked() == true
-    if moduleObject.OnDebugSettingChanged then
-      moduleObject.OnDebugSettingChanged(moduleDb.debug == true)
-    end
-    Toolbox.SettingsHost:BuildPage(pageKey)
-  end)
-  yOffset = yOffset - 36
-
-  local resetButton = CreateFrame("Button", nil, childFrame, "UIPanelButtonTemplate") -- 重置并重建按钮
-  resetButton:SetSize(180, 24)
-  resetButton:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
-  resetButton:SetText(localeTable.SETTINGS_MODULE_RESET_REBUILD or "")
-  resetButton:SetScript("OnClick", function()
-    if moduleObject.ResetToDefaultsAndRebuild then
-      moduleObject.ResetToDefaultsAndRebuild()
-    else
-      Toolbox.Config.ResetModule(moduleObject.id)
-      applyModuleCallbacks(moduleObject)
-    end
-    if Toolbox.Chat and Toolbox.Chat.PrintAddonMessage and localeTable.SETTINGS_MODULE_RESET_DONE_FMT then
-      Toolbox.Chat.PrintAddonMessage(string.format(localeTable.SETTINGS_MODULE_RESET_DONE_FMT, getModuleTitle(moduleObject)))
-    end
-    Toolbox.SettingsHost:BuildPage(pageKey)
-  end)
-  yOffset = yOffset - 32
-
-  local hintLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 重置说明
-  hintLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
-  hintLabel:SetWidth(580)
-  hintLabel:SetJustifyH("LEFT")
-  hintLabel:SetText(localeTable.SETTINGS_MODULE_RESET_HINT or "")
-  yOffset = yOffset - 36
-
-  return yOffset
+  local settingsBox = CreateSettingsBox(childFrame, startY, pageKey) -- 模块次级控件容器
+  settingsBox:AddToggleRow({
+    label = localeTable.SETTINGS_MODULE_DEBUG or "",
+    refreshMode = "page",
+    getValue = function()
+      return moduleDb.debug == true
+    end,
+    setValue = function(value)
+      moduleDb.debug = value == true
+    end,
+    afterChange = function(enabled)
+      if moduleObject.OnDebugSettingChanged then
+        moduleObject.OnDebugSettingChanged(enabled == true)
+      end
+    end,
+  })
+  settingsBox:AddActionRow({
+    label = localeTable.SETTINGS_MODULE_RESET_REBUILD or "",
+    description = localeTable.SETTINGS_MODULE_RESET_HINT or "",
+    buttonText = localeTable.SETTINGS_MODULE_RESET_REBUILD or "",
+    refreshMode = "page",
+    onClick = function()
+      if moduleObject.ResetToDefaultsAndRebuild then
+        moduleObject.ResetToDefaultsAndRebuild()
+      else
+        Toolbox.Config.ResetModule(moduleObject.id)
+        applyModuleCallbacks(moduleObject)
+      end
+      if Toolbox.Chat and Toolbox.Chat.PrintAddonMessage and localeTable.SETTINGS_MODULE_RESET_DONE_FMT then
+        Toolbox.Chat.PrintAddonMessage(string.format(localeTable.SETTINGS_MODULE_RESET_DONE_FMT, getModuleTitle(moduleObject)))
+      end
+    end,
+  })
+  return startY - settingsBox.realHeight
 end
 
 --- 构建叶子页中的单个模块分节。
@@ -438,11 +968,11 @@ function Toolbox.SettingsHost:BuildModuleSection(childFrame, startY, moduleObjec
   settingsTitle:SetText(localeTable.SETTINGS_MODULE_SECTION_TITLE or "")
   yOffset = yOffset - 24
 
-  local boxFrame = CreateFrame("Frame", nil, childFrame) -- 模块专属设置容器
-  boxFrame:SetSize(MODULE_BOX_WIDTH, 160)
-  boxFrame:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+  local boxFrame = CreateSettingsBox(childFrame, yOffset, pageKey) -- 模块专属设置容器
   moduleObject.RegisterSettings(boxFrame)
-  yOffset = yOffset - (boxFrame.realHeight or 160) - 16
+  boxFrame.realHeight = math.max(tonumber(boxFrame.realHeight) or 0, SETTINGS_BOX_MIN_HEIGHT)
+  boxFrame:SetHeight(boxFrame.realHeight)
+  yOffset = yOffset - boxFrame.realHeight - 16
 
   yOffset = self:BuildModuleSecondaryControls(childFrame, yOffset, moduleObject, pageKey)
   return yOffset - 12
@@ -458,10 +988,10 @@ function Toolbox.SettingsHost:BuildLeafPage(pageObject)
   yOffset = buildHeader(childFrame, yOffset, getPageTitle(pageObject), getPageIntro(pageObject))
 
   if pageObject.includeLanguageSection == true then
-    yOffset = self:BuildLanguageSection(childFrame, yOffset)
+    yOffset = self:BuildLanguageSection(childFrame, yOffset, pageObject.key)
   end
   if pageObject.includeReloadSection == true then
-    yOffset = self:BuildReloadSection(childFrame, yOffset)
+    yOffset = self:BuildReloadSection(childFrame, yOffset, pageObject.key)
   end
 
   for indexNumber, moduleId in ipairs(moduleIdList) do

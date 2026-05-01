@@ -56,6 +56,19 @@ def validate_settings_host() -> None:
     for needle, label in [
         ("RegisterCanvasLayoutCategory", "settings category api"),
         ("RegisterCanvasLayoutSubcategory", "settings subcategory api"),
+        ("CreateSettingsBox", "settings box factory"),
+        ("AddSectionHeader", "settings box section helper"),
+        ("AddToggleRow", "settings box toggle helper"),
+        ("AddChoiceRow", "settings box choice helper"),
+        ("AddMenuRow", "settings box menu helper"),
+        ("AddMultiSelectRow", "settings box multi-select helper"),
+        ("AddActionRow", "settings box action helper"),
+        ("AddNoteRow", "settings box note helper"),
+        ("AddCustomBlock", "settings box custom block helper"),
+        ("RequestLocalRefresh", "settings box local refresh helper"),
+        ("RequestPageRebuild", "settings box rebuild helper"),
+        ('popupFrame:SetFrameStrata("DIALOG")', "settings menu popup elevated strata"),
+        ("menuButton._toolboxPopupFrame = popupFrame", "settings menu popup test hook"),
         ("BuildLeafPage", "leaf page builder"),
         ("BuildModuleSection", "module section builder"),
         ("BuildAboutPage", "about page builder"),
@@ -81,6 +94,9 @@ def validate_settings_host() -> None:
     if "SETTINGS_PREVIEW_" in text:
         raise AssertionError("settings overview preview locale references should be removed from SettingsHost")
     for removed_needle, removed_label in [
+        ("InterfaceOptionsCheckButtonTemplate", "legacy interface options checkbox template"),
+        ("UICheckButtonTemplate", "legacy ui checkbox template"),
+        ("UIDropDownMenu_", "legacy dropdown menu api"),
         ("BuildOverviewPage", "legacy overview page builder"),
         ("BuildModulePage", "legacy module page builder"),
         ("BuildModuleSubPage", "legacy module subpage builder"),
@@ -249,6 +265,49 @@ def validate_modules() -> None:
         if file_name == "Quest.lua" and "GetSettingsPages = function()" in text:
             raise AssertionError("Quest module should no longer register a standalone settings subpage")
 
+    chat_notify_text = read_text("Toolbox", "Modules", "ChatNotify.lua")
+    require_contains(chat_notify_text, "box:AddActionRow", "ChatNotify action row helper")
+    require_contains(chat_notify_text, "box:AddMenuRow", "ChatNotify menu row helper")
+    require_contains(chat_notify_text, "box:AddNoteRow", "ChatNotify note row helper")
+    if "UIDropDownMenuTemplate" in chat_notify_text or "UIDropDownMenu_" in chat_notify_text:
+        raise AssertionError("ChatNotify should not keep UIDropDownMenu settings controls")
+
+    tooltip_anchor_text = read_text("Toolbox", "Modules", "TooltipAnchor.lua")
+    require_contains(tooltip_anchor_text, "box:AddMenuRow", "TooltipAnchor menu row helper")
+    if "InterfaceOptionsCheckButtonTemplate" in tooltip_anchor_text:
+        raise AssertionError("TooltipAnchor should not keep InterfaceOptionsCheckButtonTemplate settings controls")
+
+    mover_text = read_text("Toolbox", "Modules", "Mover.lua")
+    require_contains(mover_text, "box:AddChoiceRow", "Mover choice row helper")
+    require_contains(mover_text, "box:AddToggleRow", "Mover toggle row helper")
+    if "UICheckButtonTemplate" in mover_text:
+        raise AssertionError("Mover should not keep UICheckButtonTemplate settings controls")
+
+    encounter_journal_text = read_text("Toolbox", "Modules", "EncounterJournal.lua")
+    require_contains(encounter_journal_text, "box:AddToggleRow", "EncounterJournal toggle row helper")
+    if "InterfaceOptionsCheckButtonTemplate" in encounter_journal_text:
+        raise AssertionError("EncounterJournal should not keep InterfaceOptionsCheckButtonTemplate settings controls")
+
+    navigation_text = read_text("Toolbox", "Modules", "Navigation.lua")
+    require_contains(navigation_text, "box:AddNoteRow", "Navigation note row helper")
+
+    minimap_button_text = read_text("Toolbox", "Modules", "MinimapButton.lua")
+    require_contains(minimap_button_text, "box:AddToggleRow", "MinimapButton toggle row helper")
+    require_contains(minimap_button_text, "box:AddChoiceRow", "MinimapButton choice row helper")
+    require_contains(minimap_button_text, "box:AddMultiSelectRow", "MinimapButton multi-select row helper")
+    require_contains(minimap_button_text, "box:AddActionRow", "MinimapButton action row helper")
+    if "InterfaceOptionsCheckButtonTemplate" in minimap_button_text:
+        raise AssertionError("MinimapButton should not keep InterfaceOptionsCheckButtonTemplate settings controls")
+    if "Toolbox.SettingsHost:BuildPage" in minimap_button_text:
+        raise AssertionError("MinimapButton settings should not call Toolbox.SettingsHost:BuildPage directly")
+
+    quest_text = read_text("Toolbox", "Modules", "Quest.lua")
+    require_contains(quest_text, "box:AddActionRow", "Quest action row helper")
+    require_contains(quest_text, "box:AddToggleRow", "Quest toggle row helper")
+    require_contains(quest_text, "box:AddCustomBlock", "Quest custom block helper")
+    if "InterfaceOptionsCheckButtonTemplate" in quest_text:
+        raise AssertionError("Quest should not keep InterfaceOptionsCheckButtonTemplate settings controls")
+
     require_file("Toolbox", "Modules", "MicroMenuPanels.lua")
     micromenu = read_text("Toolbox", "Modules", "MicroMenuPanels.lua")
     require_contains(micromenu, "Toolbox.Mover.BlizzardPanelsRefresh", "micromenu refresh delegate to mover")
@@ -366,8 +425,10 @@ def validate_mover_regressions() -> None:
 def validate_tooltip_anchor_regressions() -> None:
     module_text = read_text("Toolbox", "Modules", "TooltipAnchor.lua")
     core_text = read_text("Toolbox", "Core", "API", "Tooltip.lua")
-    # 设置页应暴露 follow 模式，和 locale 文案保持一致。
-    require_contains(module_text, 'makeMode("follow"', "tooltip anchor follow mode option")
+    # 三项模式应统一走菜单按钮行，并保留 follow 选项与说明文案。
+    require_contains(module_text, "box:AddMenuRow", "tooltip anchor menu row helper")
+    require_contains(module_text, '{ value = "follow", label =', "tooltip anchor follow mode option")
+    require_contains(module_text, "description = L.TOOLTIP_HINT or \"\"", "tooltip anchor helper description")
     # 核心逻辑应继续识别 follow 模式，并恢复全局默认锚点 hook。
     require_contains(
         core_text,

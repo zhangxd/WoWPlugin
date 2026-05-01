@@ -250,6 +250,7 @@ end
 
 --- 构建任务页中的 Quest Inspector 低频工具区。
 ---@param box Frame 子页面容器
+---@return number
 local function buildQuestInspectorSettingsPage(box)
   local localeTable = Toolbox.L or {} -- 本地化文案
   local moduleDb = getModuleDb() -- 模块存档
@@ -340,7 +341,10 @@ local function buildQuestInspectorSettingsPage(box)
   resultScrollFrame:SetScrollChild(resultEditBox)
 
   yOffset = yOffset - 436
-  box.realHeight = math.abs(yOffset) + 20
+  local blockHeight = math.abs(yOffset) + 20 -- Inspector 内容块最终高度
+  box:SetHeight(blockHeight)
+  box.realHeight = blockHeight
+  return blockHeight
 end
 
 local function setQuestTurnInEventEnabled(enabled)
@@ -488,89 +492,85 @@ Toolbox.RegisterModule({
   RegisterSettings = function(box)
     local localeTable = Toolbox.L or {} -- 本地化文案
     local moduleDb = getModuleDb() -- 模块存档
-    local yOffset = 0 -- 当前纵向游标
+    box:AddActionRow({
+      label = localeTable.MINIMAP_FLYOUT_QUEST or "任务",
+      buttonText = localeTable.MINIMAP_FLYOUT_QUEST or "任务",
+      onClick = function()
+        openQuestMainFrame()
+      end,
+    })
 
-    local openButton = CreateFrame("Button", nil, box, "UIPanelButtonTemplate") -- 打开界面按钮
-    openButton:SetSize(200, 22)
-    openButton:SetPoint("TOPLEFT", 20, yOffset)
-    openButton:SetText(localeTable.MINIMAP_FLYOUT_QUEST or "任务")
-    openButton:SetScript("OnClick", function()
-      openQuestMainFrame()
+    box:AddToggleRow({
+      label = localeTable.EJ_QUESTLINE_TREE_LABEL or "任务",
+      getValue = function()
+        return moduleDb.questlineTreeEnabled ~= false
+      end,
+      setValue = function(value)
+        moduleDb.questlineTreeEnabled = value == true
+      end,
+      afterChange = function()
+        local questView = getQuestView() -- 任务视图对象
+        if type(questView) == "table" and type(questView.refresh) == "function" then
+          questView:refresh()
+        end
+      end,
+    })
+
+    box:AddCustomBlock(function(blockFrame)
+      local yOffset = 0 -- 最近完成设置块纵向游标
+
+      local recentLabel = blockFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 最近完成上限标签
+      recentLabel:SetPoint("TOPLEFT", blockFrame, "TOPLEFT", 20, yOffset)
+      recentLabel:SetText(localeTable.EJ_QUEST_RECENT_COMPLETED_LIMIT_LABEL or "Recent completed limit")
+      yOffset = yOffset - 24
+
+      local recentInput = CreateFrame("EditBox", nil, blockFrame, "InputBoxTemplate") -- 最近完成上限输入框
+      recentInput:SetPoint("TOPLEFT", blockFrame, "TOPLEFT", 20, yOffset)
+      recentInput:SetSize(120, 24)
+      recentInput:SetAutoFocus(false)
+      recentInput:SetMaxLetters(3)
+      recentInput:SetText(tostring(normalizeRecentCompletedLimit(moduleDb.questRecentCompletedMax)))
+      recentInput:SetScript("OnEscapePressed", function(editBox)
+        editBox:ClearFocus()
+      end)
+
+      local applyButton = CreateFrame("Button", nil, blockFrame, "UIPanelButtonTemplate") -- 应用上限按钮
+      applyButton:SetSize(80, 22)
+      applyButton:SetPoint("LEFT", recentInput, "RIGHT", 12, 0)
+      applyButton:SetText(localeTable.MINIMAP_FLYOUT_SETTING_APPLY or "Apply")
+      applyButton:SetScript("OnClick", function()
+        moduleDb.questRecentCompletedMax = normalizeRecentCompletedLimit(recentInput:GetText())
+        recentInput:SetText(tostring(moduleDb.questRecentCompletedMax))
+        local questView = getQuestView() -- 任务视图对象
+        if type(questView) == "table" and type(questView.trimRecentCompletedQuestRecords) == "function" then
+          questView:trimRecentCompletedQuestRecords()
+        end
+        if type(questView) == "table" and type(questView.refresh) == "function" then
+          questView:refresh()
+        end
+      end)
+      yOffset = yOffset - 36
+
+      local hintText = blockFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 提示文本
+      hintText:SetPoint("TOPLEFT", blockFrame, "TOPLEFT", 20, yOffset)
+      hintText:SetWidth(560)
+      hintText:SetJustifyH("LEFT")
+      hintText:SetText(localeTable.EJ_QUEST_RECENT_COMPLETED_LIMIT_HINT or "")
+      yOffset = yOffset - math.max(28, math.ceil((hintText:GetStringHeight() or 0) + 8))
+
+      local blockHeight = math.abs(yOffset) + 4 -- 最近完成设置块最终高度
+      blockFrame:SetHeight(blockHeight)
+      blockFrame.realHeight = blockHeight
+      return blockHeight
     end)
-    yOffset = yOffset - 36
 
-    local enableTreeCheck = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate") -- 任务视图开关
-    enableTreeCheck:SetPoint("TOPLEFT", 20, yOffset)
-    enableTreeCheck.Text:SetText(localeTable.EJ_QUESTLINE_TREE_LABEL or "任务")
-    enableTreeCheck:SetChecked(moduleDb.questlineTreeEnabled ~= false)
-    enableTreeCheck:SetScript("OnClick", function(checkButton)
-      moduleDb.questlineTreeEnabled = checkButton:GetChecked() and true or false
-      local questView = getQuestView() -- 任务视图对象
-      if type(questView) == "table" and type(questView.refresh) == "function" then
-        questView:refresh()
-      end
+    box:AddSectionHeader({
+      title = localeTable.EJ_QUEST_INSPECTOR_PAGE_TITLE or "Quest Inspector",
+      description = localeTable.EJ_QUEST_INSPECTOR_PAGE_INTRO or "",
+    })
+
+    box:AddCustomBlock(function(blockFrame)
+      return buildQuestInspectorSettingsPage(blockFrame)
     end)
-    yOffset = yOffset - 36
-
-    local recentLabel = box:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 最近完成上限标签
-    recentLabel:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    recentLabel:SetText(localeTable.EJ_QUEST_RECENT_COMPLETED_LIMIT_LABEL or "Recent completed limit")
-    yOffset = yOffset - 24
-
-    local recentInput = CreateFrame("EditBox", nil, box, "InputBoxTemplate") -- 最近完成上限输入框
-    recentInput:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    recentInput:SetSize(120, 24)
-    recentInput:SetAutoFocus(false)
-    recentInput:SetMaxLetters(3)
-    recentInput:SetText(tostring(normalizeRecentCompletedLimit(moduleDb.questRecentCompletedMax)))
-    recentInput:SetScript("OnEscapePressed", function(editBox)
-      editBox:ClearFocus()
-    end)
-
-    local applyButton = CreateFrame("Button", nil, box, "UIPanelButtonTemplate") -- 应用上限按钮
-    applyButton:SetSize(80, 22)
-    applyButton:SetPoint("LEFT", recentInput, "RIGHT", 12, 0)
-    applyButton:SetText(localeTable.MINIMAP_FLYOUT_SETTING_APPLY or "Apply")
-    applyButton:SetScript("OnClick", function()
-      moduleDb.questRecentCompletedMax = normalizeRecentCompletedLimit(recentInput:GetText())
-      recentInput:SetText(tostring(moduleDb.questRecentCompletedMax))
-      local questView = getQuestView() -- 任务视图对象
-      if type(questView) == "table" and type(questView.trimRecentCompletedQuestRecords) == "function" then
-        questView:trimRecentCompletedQuestRecords()
-      end
-      if type(questView) == "table" and type(questView.refresh) == "function" then
-        questView:refresh()
-      end
-    end)
-    yOffset = yOffset - 36
-
-    local hintText = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 提示文本
-    hintText:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    hintText:SetWidth(560)
-    hintText:SetJustifyH("LEFT")
-    hintText:SetText(localeTable.EJ_QUEST_RECENT_COMPLETED_LIMIT_HINT or "")
-    yOffset = yOffset - math.max(28, math.ceil((hintText:GetStringHeight() or 0) + 8))
-
-    yOffset = yOffset - 12
-
-    local inspectorTitle = box:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- Inspector 标题
-    inspectorTitle:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    inspectorTitle:SetText(localeTable.EJ_QUEST_INSPECTOR_PAGE_TITLE or "Quest Inspector")
-    yOffset = yOffset - 24
-
-    local inspectorIntro = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- Inspector 说明
-    inspectorIntro:SetPoint("TOPLEFT", box, "TOPLEFT", 20, yOffset)
-    inspectorIntro:SetWidth(560)
-    inspectorIntro:SetJustifyH("LEFT")
-    inspectorIntro:SetText(localeTable.EJ_QUEST_INSPECTOR_PAGE_INTRO or "")
-    yOffset = yOffset - math.max(28, math.ceil((inspectorIntro:GetStringHeight() or 0) + 8))
-
-    local inspectorBox = CreateFrame("Frame", nil, box) -- Inspector 容器
-    inspectorBox:SetSize(560, 520)
-    inspectorBox:SetPoint("TOPLEFT", box, "TOPLEFT", 0, yOffset)
-    buildQuestInspectorSettingsPage(inspectorBox)
-    yOffset = yOffset - (inspectorBox.realHeight or 520)
-
-    box.realHeight = math.abs(yOffset) + 20
   end,
 })

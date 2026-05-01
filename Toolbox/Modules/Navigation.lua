@@ -60,15 +60,8 @@ Toolbox.RegisterModule({
   end,
   RegisterSettings = function(box)
     local localeTable = Toolbox.L or {} -- 本地化字符串表
-    local y = 0 -- 当前布局 Y 偏移
-
-    local hint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 功能说明文本
-    hint:SetPoint("TOPLEFT", box, "TOPLEFT", 0, y)
-    hint:SetWidth(580)
-    hint:SetJustifyH("LEFT")
-    hint:SetText(localeTable.NAVIGATION_SETTINGS_HINT or "")
-    y = y - 42
-
-    box.realHeight = math.abs(y) + 8
+    box:AddNoteRow({
+      text = localeTable.NAVIGATION_SETTINGS_HINT or "",
+    })
   end,
 })

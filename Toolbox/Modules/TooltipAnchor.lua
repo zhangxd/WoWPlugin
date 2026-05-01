@@ -31,46 +31,28 @@ Toolbox.RegisterModule({
     Toolbox.Tooltip.RefreshDriver()
   end,
   RegisterSettings = function(box)
-    local L = Toolbox.L
-    local db = Toolbox.Config.GetModule("tooltip_anchor")
-    local y = 0
+    local L = Toolbox.L or {} -- 本地化文案
+    local db = Toolbox.Config.GetModule("tooltip_anchor") -- 模块存档
 
-    local modeButtons = {}
-    local function setMode(mode)
-      db.mode = mode
-      for _, cb in ipairs(modeButtons) do
-        cb:SetChecked(cb.modeValue == mode)
-      end
-      Toolbox.Tooltip.RefreshDriver()
-    end
-
-    local function makeMode(mode, label)
-      local cb = CreateFrame("CheckButton", nil, box, "InterfaceOptionsCheckButtonTemplate")
-      cb:SetPoint("TOPLEFT", 20, y)
-      cb.Text:SetText(label)
-      cb.modeValue = mode
-      cb:SetChecked(db.mode == mode)
-      cb:SetScript("OnClick", function(self)
-        setMode(self.modeValue)
-      end)
-      modeButtons[#modeButtons + 1] = cb
-      y = y - 28
-    end
-
-    makeMode("default", L.TOOLTIP_MODE_DEFAULT)
-    makeMode("cursor", L.TOOLTIP_MODE_CURSOR)
-    makeMode("follow", L.TOOLTIP_MODE_FOLLOW)
-
-    setMode(db.mode or "default")
-
-    y = y - 8
-    local hint = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    hint:SetPoint("TOPLEFT", 0, y)
-    hint:SetWidth(580)
-    hint:SetJustifyH("LEFT")
-    hint:SetText(L.TOOLTIP_HINT)
-    y = y - 36
-
-    box.realHeight = math.abs(y) + 8
+    box:AddMenuRow({
+      label = L.MODULE_TOOLTIP or "tooltip_anchor",
+      description = L.TOOLTIP_HINT or "",
+      buttonWidth = 160,
+      options = {
+        { value = "default", label = L.TOOLTIP_MODE_DEFAULT or "default" },
+        { value = "cursor", label = L.TOOLTIP_MODE_CURSOR or "cursor" },
+        { value = "follow", label = L.TOOLTIP_MODE_FOLLOW or "follow" },
+      },
+      defaultValue = "default",
+      getValue = function()
+        return db.mode
+      end,
+      setValue = function(value)
+        db.mode = value
+      end,
+      afterChange = function()
+        Toolbox.Tooltip.RefreshDriver()
+      end,
+    })
   end,
 })
