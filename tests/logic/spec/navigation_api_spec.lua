@@ -1199,6 +1199,81 @@ describe("Navigation API", function()
     assert.is_false(usedLegacySilvermoonTaxi)
   end)
 
+  it("routes_from_orgrimmar_to_zulaman_via_the_12_0_silvermoon_mage_teleport_chain", function()
+    dofile("Toolbox/Data/NavigationAbilityTemplates.lua")
+
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 2437,
+      x = 0.379,
+      y = 0.479,
+    }, {
+      classFile = "MAGE",
+      faction = "Horde",
+      currentUiMapID = 85,
+      currentX = 0.576,
+      currentY = 0.900,
+      knownSpellByID = {
+        [1259190] = true,
+        [1259194] = true,
+      },
+      knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
+    })
+
+    assert.is_nil(errorObject)
+    assert.is_table(routeResult)
+    assert.is_true((routeResult.totalSteps or 0) > 0)
+
+    local newSilvermoonNodeIDSet = buildResolvedNodeIDSet({ -- 新版银月城 / 永歌森林链节点集合
+      { source = "uimap", sourceID = 2393, kind = "map_anchor" },
+      { source = "uimap", sourceID = 2395, kind = "map_anchor" },
+      { source = "taxi", sourceID = 3131, kind = "taxi" },
+      { source = "taxi", sourceID = 3132, kind = "taxi" },
+    })
+    local newSilvermoonTaxiNodeIDSet = buildResolvedNodeIDSet({ -- 新版银月城 / 永歌森林 taxi 集合
+      { source = "taxi", sourceID = 3131, kind = "taxi" },
+      { source = "taxi", sourceID = 3132, kind = "taxi" },
+      { source = "taxi", sourceID = 3133, kind = "taxi" },
+      { source = "taxi", sourceID = 3134, kind = "taxi" },
+    })
+    local zulamanTaxiNodeIDSet = buildResolvedNodeIDSet({ -- 祖阿曼 taxi 集合
+      { source = "taxi", sourceID = 3106, kind = "taxi" },
+      { source = "taxi", sourceID = 3126, kind = "taxi" },
+      { source = "taxi", sourceID = 3127, kind = "taxi" },
+      { source = "taxi", sourceID = 3128, kind = "taxi" },
+      { source = "taxi", sourceID = 3129, kind = "taxi" },
+      { source = "taxi", sourceID = 3130, kind = "taxi" },
+    })
+    local legacySilvermoonNodeIDSet = buildResolvedNodeIDSet({ -- 旧版银月城链节点集合
+      { source = "uimap", sourceID = 110, kind = "map_anchor" },
+      { source = "taxi", sourceID = 82, kind = "taxi" },
+      { source = "taxi", sourceID = 625, kind = "taxi" },
+      { source = "taxi", sourceID = 631, kind = "taxi" },
+      { source = "taxi", sourceID = 83, kind = "taxi" },
+      { source = "taxi", sourceID = 205, kind = "taxi" },
+    })
+    local usedNewSilvermoonArrival = false -- 是否落到了新版银月城链
+    local usedNewZulamanTaxiChain = false -- 是否接入了新版祖阿曼 taxi
+    local usedLegacySilvermoonTaxi = false -- 是否错误回退到了旧版银月城链
+    for _, edgeDef in ipairs(routeResult.rawEdgePath or {}) do
+      local fromNodeID = tonumber(edgeDef.FromNodeID or edgeDef.from or edgeDef.From) or (edgeDef.FromNodeID or edgeDef.from or edgeDef.From) -- 原始路径边起点
+      local toNodeID = tonumber(edgeDef.ToNodeID or edgeDef.to or edgeDef.To) or (edgeDef.ToNodeID or edgeDef.to or edgeDef.To) -- 原始路径边终点
+      local edgeMode = tostring(edgeDef.Mode or edgeDef.mode or "") -- 原始路径边模式
+      if (edgeMode == "class_teleport" or edgeMode == "class_portal") and newSilvermoonNodeIDSet[toNodeID] then
+        usedNewSilvermoonArrival = true
+      end
+      if newSilvermoonTaxiNodeIDSet[fromNodeID] and zulamanTaxiNodeIDSet[toNodeID] then
+        usedNewZulamanTaxiChain = true
+      end
+      if legacySilvermoonNodeIDSet[fromNodeID] or legacySilvermoonNodeIDSet[toNodeID] then
+        usedLegacySilvermoonTaxi = true
+      end
+    end
+
+    assert.is_true(usedNewSilvermoonArrival)
+    assert.is_true(usedNewZulamanTaxiChain)
+    assert.is_false(usedLegacySilvermoonTaxi)
+  end)
+
   it("prefers_formal_walk_components_for_local_access_and_semantic_proxy_names", function()
     setNavigationData({
       [1000] = { NodeID = 1000, Kind = "map_anchor", Source = "uimap", SourceID = 10, UiMapID = 10, Name_lang = "起点地图", WalkClusterNodeID = 1000 },

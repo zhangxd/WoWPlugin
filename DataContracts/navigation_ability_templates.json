@@ -1,8 +1,8 @@
 {
   "contract": {
     "contract_id": "navigation_ability_templates",
-    "schema_version": 2,
-    "summary": "navigation V2 能力模板（fixed_node 目标迁移为数字 node ID，炉石仍保留运行时解析）",
+    "schema_version": 3,
+    "summary": "navigation V3 能力模板（fixed_node 目标由 spellID 真值映射到数字 node ID，炉石仍保留运行时解析）",
     "source_of_truth": "WoWPlugin",
     "status": "active"
   },
@@ -30,15 +30,16 @@
         "spellname 负责收集炉石、传送与传送门候选法术名",
         "spelleffect 负责区分 teleport / portal / hearth 候选",
         "skilllineability / skillline / chrclasses 恢复职业与阵营线索",
-        "uimap / uimapassignment 通过静态名字与父链把目标法术落到 map_anchor 节点"
+        "spell_target_overrides 提供 fixed_node 法术的 spellID -> target UiMapID 真值"
       ],
       "select": [
         "templates_raw：能力候选法术的原始 spell / skillline / effect 字段",
-        "supplemental：过滤掉无法稳定解析目标的法术，只输出 V1 可消费模板"
+        "spell_target_overrides：fixed_node 法术的显式目标 UiMap 真值",
+        "supplemental：按 spellID 真值把 fixed_node 法术落到 map_anchor 节点，只输出 V1 可消费模板"
       ],
       "where": [
-        "只收炉石、传送与传送门候选，不手工维护 spell -> node 关系",
-        "无法仅靠静态数据稳定解析目标的法术先不进入 V1"
+        "只收炉石、传送与传送门候选",
+        "fixed_node 目标不再通过名字/限定词反推，统一由 spell_target_overrides 提供 spellID -> target UiMapID 真值"
       ],
       "group_by": [],
       "order_by": [
@@ -78,6 +79,25 @@
           ],
           "row_granularity": "一行代表一个导航能力候选法术"
         }
+      },
+      "spell_target_overrides": {
+        "sql": "WITH spell_target_overrides(spell_id, target_ui_map_id) AS (\n  VALUES\n    (3561, 84),\n    (3562, 87),\n    (3563, 998),\n    (3565, 89),\n    (3566, 88),\n    (3567, 85),\n    (10059, 84),\n    (11416, 87),\n    (11417, 85),\n    (11418, 998),\n    (11419, 89),\n    (11420, 88),\n    (18960, 80),\n    (32266, 103),\n    (32267, 2393),\n    (32271, 103),\n    (32272, 2393),\n    (33690, 111),\n    (33691, 111),\n    (35715, 111),\n    (35717, 111),\n    (49358, 51),\n    (49359, 70),\n    (49360, 70),\n    (49361, 51),\n    (53140, 501),\n    (53142, 501),\n    (88342, 244),\n    (88344, 244),\n    (88345, 244),\n    (88346, 244),\n    (120146, 501),\n    (132620, 390),\n    (132621, 390),\n    (132626, 390),\n    (132627, 390),\n    (176242, 624),\n    (176244, 624),\n    (176246, 622),\n    (176248, 622),\n    (193759, 734),\n    (224869, 626),\n    (224871, 626),\n    (281400, 1161),\n    (281402, 1165),\n    (281403, 1161),\n    (281404, 1165),\n    (344587, 1670),\n    (344597, 1670),\n    (395277, 2112),\n    (395289, 2112),\n    (446534, 2339),\n    (446540, 2339),\n    (1259190, 2393),\n    (1259194, 2393)\n)\nSELECT\n  CAST(spell_id AS INTEGER) AS spell_id,\n  CAST(target_ui_map_id AS INTEGER) AS target_ui_map_id\nFROM spell_target_overrides\nORDER BY CAST(spell_id AS INTEGER)",
+        "query": {
+          "from": "spell_target_overrides",
+          "joins": [],
+          "select": [
+            "spell_id",
+            "target_ui_map_id"
+          ],
+          "where": [
+            "固定落点法术必须显式声明 spellID -> target UiMapID 真值"
+          ],
+          "group_by": [],
+          "order_by": [
+            "spell_id ASC"
+          ],
+          "row_granularity": "一行代表一个 fixed_node 法术的目标 UiMap 真值"
+        }
       }
     }
   },
@@ -89,7 +109,7 @@
       {
         "name": "metadata",
         "metadata": {
-          "schemaVersion": 2,
+          "schemaVersion": 3,
           "sourceMode": "live",
           "generatedAt": "@generated_at"
         }
@@ -135,7 +155,7 @@
     "sort_rules": []
   },
   "versioning": {
-    "current_schema_version": 2,
+    "current_schema_version": 3,
     "change_log": [
       {
         "schema_version": 1,
@@ -144,6 +164,10 @@
       {
         "schema_version": 2,
         "summary": "fixed_node 模板目标迁移为不透明数字 node ID，与 navigation_route_edges 共用 map_anchor 分配规则"
+      },
+      {
+        "schema_version": 3,
+        "summary": "fixed_node 法术目标改为 spellID -> target UiMapID 显式真值，不再从名称或限定词反推落点"
       }
     ]
   }

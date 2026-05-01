@@ -81,6 +81,26 @@ def require(condition: bool, message: str) -> None:
         raise ValueError(message)
 
 
+EXPORT_PERFORMANCE_INDEX_SQL_LIST = (
+    # spellname 的候选筛选依赖 Name_lang，ID 也常以 CAST(... AS INTEGER) 参与排序与关联。
+    "CREATE INDEX IF NOT EXISTS idx_spellname_name_lang ON spellname(Name_lang)",
+    "CREATE INDEX IF NOT EXISTS idx_spellname_id_integer ON spellname(CAST(ID AS INTEGER))",
+    # 导航能力导出会高频按 SpellID / Effect 访问 spelleffect。
+    "CREATE INDEX IF NOT EXISTS idx_spelleffect_spellid_effect_integer ON spelleffect(CAST(SpellID AS INTEGER), CAST(Effect AS INTEGER))",
+    # 导航能力导出会高频按 Spell / SkillLine 访问 skilllineability。
+    "CREATE INDEX IF NOT EXISTS idx_skilllineability_spell_integer ON skilllineability(CAST(Spell AS INTEGER))",
+    "CREATE INDEX IF NOT EXISTS idx_skilllineability_spell_skillline_integer ON skilllineability(CAST(Spell AS INTEGER), CAST(SkillLine AS INTEGER))",
+)
+
+
+def ensure_export_performance_indexes(sqlite_conn: sqlite3.Connection) -> None:
+    """为导出高频查询补齐只读友好的性能索引。"""
+
+    for sql_text in EXPORT_PERFORMANCE_INDEX_SQL_LIST:
+        sqlite_conn.execute(sql_text)
+    sqlite_conn.commit()
+
+
 QUESTCOMPLETIST_LINE_PATTERN = re.compile(r'^\[(\d+)\]\s*=\s*\{(.+)\},$')
 QUESTCOMPLETIST_NAME_PATTERN = re.compile(r'^\[(\d+)\]\s*=\s*"((?:\\.|[^"])*)",?$')
 
@@ -1256,82 +1276,6 @@ def choose_navigation_faction_group(
     return None
 
 
-def build_navigation_uimap_name_chain(ui_map_id: int, ui_map_context: dict[str, Any]) -> list[str]:
-    """返回指定 UiMap 的名称父链。"""
-
-    name_chain: list[str] = []
-    uimap_by_id = ui_map_context["uimap_by_id"]
-    current_ui_map_id = int(ui_map_id or 0)
-    guard_count = 0
-    while current_ui_map_id > 0 and guard_count < 16:
-        map_row = uimap_by_id.get(current_ui_map_id)
-        if map_row is None:
-            break
-        name_chain.append(str(map_row["name"]))
-        current_ui_map_id = int(map_row["parent_ui_map_id"] or 0)
-        guard_count += 1
-    return name_chain
-
-
-def choose_navigation_named_uimap_id(
-    target_name: str,
-    qualifier_text: str,
-    ui_map_context: dict[str, Any],
-) -> int:
-    """按导出的地图名称与限定词选择一个稳定的 UiMap 锚点。"""
-
-    normalized_target_name = normalize_navigation_name(target_name)
-    normalized_qualifier = normalize_navigation_name(qualifier_text)
-    if normalized_target_name == "":
-        return 0
-
-    uimap_by_id = ui_map_context["uimap_by_id"]
-    canonical_local_uimap_id = ui_map_context["canonical_local_uimap_id"]
-    candidate_ui_map_id_set: set[int] = set()
-    for ui_map_id, map_row in uimap_by_id.items():
-        if int(map_row["system_id"]) != 0 or navigation_map_category(int(map_row["map_type"] or 0)) < 3:
-            continue
-        canonical_ui_map_id = int(canonical_local_uimap_id(ui_map_id))
-        if canonical_ui_map_id <= 0:
-            continue
-        canonical_row = uimap_by_id.get(canonical_ui_map_id)
-        if canonical_row is None:
-            continue
-        normalized_candidate_name = normalize_navigation_name(canonical_row["name"])
-        if normalized_candidate_name == "":
-            continue
-        if normalized_target_name not in normalized_candidate_name and normalized_candidate_name not in normalized_target_name:
-            continue
-        candidate_ui_map_id_set.add(canonical_ui_map_id)
-
-    if not candidate_ui_map_id_set:
-        return 0
-
-    def candidate_score(candidate_ui_map_id: int) -> tuple[int, int, int, int]:
-        candidate_row = uimap_by_id.get(candidate_ui_map_id, {})
-        normalized_candidate_name = normalize_navigation_name(candidate_row.get("name"))
-        exact_name_rank = 0 if normalized_candidate_name == normalized_target_name else 1
-        qualifier_rank = 0
-        if normalized_qualifier:
-            qualifier_rank = 1
-            for chain_name in build_navigation_uimap_name_chain(candidate_ui_map_id, ui_map_context):
-                normalized_chain_name = normalize_navigation_name(chain_name)
-                if normalized_chain_name and (
-                    normalized_qualifier in normalized_chain_name
-                    or normalized_chain_name in normalized_qualifier
-                ):
-                    qualifier_rank = 0
-                    break
-        return (
-            qualifier_rank,
-            exact_name_rank,
-            navigation_type_rank(int(candidate_row.get("map_type") or 0)),
-            int(candidate_ui_map_id),
-        )
-
-    return sorted(candidate_ui_map_id_set, key=candidate_score)[0]
-
-
 def resolve_navigation_class_file(
     class_mask: int,
     skillline_id: int,
@@ -1349,71 +1293,61 @@ def resolve_navigation_class_file(
 
 def parse_navigation_ability_spell(
     spell_id: int,
-    spell_name: str,
     has_portal_effect: int,
     has_teleport_effect: int,
 ) -> dict[str, Any] | None:
-    """把候选法术行解析成导航能力模板的中间语义。"""
+    """把候选法术行解析成导航能力模板的固定语义。"""
 
-    normalized_spell_name = str(spell_name or "").strip()
-    if normalized_spell_name == "":
-        return None
-
-    if normalized_spell_name == "炉石":
+    if int(spell_id or 0) == 8690:
+        # 炉石不需要固定目标；运行时按当前绑定点展开。
         if int(spell_id or 0) != 8690:
             return None
         return {
             "mode": "hearthstone",
             "target_rule_kind": "hearth_bind",
-            "target_name": "",
-            "qualifier_text": "",
         }
 
-    mode = ""
-    target_text = ""
-    if normalized_spell_name.startswith("传送门："):
-        if int(has_portal_effect or 0) <= 0:
-            return None
+    if int(has_portal_effect or 0) > 0:
         mode = "class_portal"
-        target_text = normalized_spell_name[len("传送门：") :].strip()
-    elif normalized_spell_name.startswith("远古传送门："):
-        if int(has_portal_effect or 0) <= 0:
-            return None
-        mode = "class_portal"
-        target_text = normalized_spell_name[len("远古传送门：") :].strip()
-    elif normalized_spell_name.startswith("传送："):
-        if int(has_teleport_effect or 0) <= 0:
-            return None
+    elif int(has_teleport_effect or 0) > 0:
         mode = "class_teleport"
-        target_text = normalized_spell_name[len("传送：") :].strip()
     else:
-        return None
-
-    target_text = re.sub(r"（[^）]*）", "", target_text)
-    target_text = re.sub(r"\([^)]*\)", "", target_text).strip()
-    if target_text == "" or "/" in target_text or "返回" in target_text or "到" in target_text:
-        return None
-
-    qualifier_text = ""
-    if " - " in target_text:
-        target_text, qualifier_text = [part.strip() for part in target_text.split(" - ", 1)]
-
-    if target_text == "":
         return None
 
     return {
         "mode": mode,
         "target_rule_kind": "fixed_node",
-        "target_name": target_text,
-        "qualifier_text": qualifier_text,
     }
+
+
+def build_navigation_ability_target_ui_map_id_by_spell_id(
+    dataset_rows_by_name: dict[str, list[dict[str, Any]]],
+) -> dict[int, int]:
+    """读取契约里的 spellID -> target UiMapID 真值。"""
+
+    override_rows = list(dataset_rows_by_name.get("spell_target_overrides", []))
+    require(bool(override_rows), "navigation_ability_templates: spell_target_overrides dataset must not be empty")
+
+    target_ui_map_id_by_spell_id: dict[int, int] = {}
+    for override_row in override_rows:
+        spell_id = int(override_row.get("spell_id") or 0)
+        target_ui_map_id = int(override_row.get("target_ui_map_id") or 0)
+        require(spell_id > 0, "navigation_ability_templates: override spell_id must be positive")
+        require(target_ui_map_id > 0, f"navigation_ability_templates: spell {spell_id} has invalid target UiMapID")
+        previous_target_ui_map_id = target_ui_map_id_by_spell_id.get(spell_id)
+        require(
+            previous_target_ui_map_id in (None, target_ui_map_id),
+            f"navigation_ability_templates: spell {spell_id} override duplicates conflicting UiMapID values",
+        )
+        target_ui_map_id_by_spell_id[spell_id] = target_ui_map_id
+    return target_ui_map_id_by_spell_id
 
 
 def enrich_navigation_ability_datasets(
     sqlite_conn: sqlite3.Connection,
     dataset_rows_by_name: dict[str, list[dict[str, Any]]],
 ) -> dict[str, list[dict[str, Any]]]:
-    """把导航能力候选法术补齐为运行时可消费的模板。"""
+    """把导航能力候选法术按 spellID 真值补齐为运行时可消费的模板。"""
 
     template_rows = list(dataset_rows_by_name.get("templates_raw", []))
     if not template_rows:
@@ -1424,6 +1358,7 @@ def enrich_navigation_ability_datasets(
     map_anchor_node_id_by_uimap_id = build_navigation_map_anchor_node_id_by_uimap_id(ui_map_context)
     class_context = build_navigation_class_context(sqlite_conn)
     faction_masks = build_navigation_faction_masks(sqlite_conn)
+    target_ui_map_id_by_spell_id = build_navigation_ability_target_ui_map_id_by_spell_id(dataset_rows_by_name)
 
     template_entry_by_id: dict[str, dict[str, Any]] = {}
     for template_row in template_rows:
@@ -1434,28 +1369,11 @@ def enrich_navigation_ability_datasets(
 
         parsed_template = parse_navigation_ability_spell(
             spell_id,
-            spell_name,
             int(template_row.get("has_portal_effect") or 0),
             int(template_row.get("has_teleport_effect") or 0),
         )
         if parsed_template is None:
             continue
-
-        to_node_id = None
-        if parsed_template["target_rule_kind"] == "fixed_node":
-            target_ui_map_id = choose_navigation_named_uimap_id(
-                str(parsed_template["target_name"]),
-                str(parsed_template["qualifier_text"]),
-                ui_map_context,
-            )
-            if target_ui_map_id <= 0:
-                continue
-            numeric_node_id = map_anchor_node_id_by_uimap_id.get(target_ui_map_id)
-            require(
-                numeric_node_id is not None,
-                f"missing navigation map_anchor node allocation for UiMapID {target_ui_map_id}",
-            )
-            to_node_id = int(numeric_node_id)
 
         class_file = resolve_navigation_class_file(
             int(template_row.get("class_mask") or 0),
@@ -1464,6 +1382,20 @@ def enrich_navigation_ability_datasets(
         )
         if parsed_template["mode"] != "hearthstone" and class_file is None:
             continue
+
+        to_node_id = None
+        if parsed_template["target_rule_kind"] == "fixed_node":
+            target_ui_map_id = int(target_ui_map_id_by_spell_id.get(spell_id) or 0)
+            require(
+                target_ui_map_id > 0,
+                f"navigation_ability_templates: missing spell_target_overrides truth for spell {spell_id}",
+            )
+            numeric_node_id = map_anchor_node_id_by_uimap_id.get(target_ui_map_id)
+            require(
+                numeric_node_id is not None,
+                f"missing navigation map_anchor node allocation for UiMapID {target_ui_map_id}",
+            )
+            to_node_id = int(numeric_node_id)
 
         template_id = f"spell_{spell_id}"
         template_entry_by_id[template_id] = {
@@ -2737,6 +2669,7 @@ def export_targets(
 
     sqlite_conn = sqlite3.connect(str(db_path))
     sqlite_conn.row_factory = sqlite3.Row
+    ensure_export_performance_indexes(sqlite_conn)
 
     written_files: list[Path] = []
     try:

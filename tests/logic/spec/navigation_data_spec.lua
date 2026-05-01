@@ -109,6 +109,22 @@ describe("Navigation data", function()
     assert.is_true(checkedAbilityTemplateCount > 0)
   end)
 
+  it("exports_the_12_0_silvermoon_mage_templates_to_the_new_silvermoon_anchor", function()
+    dofile("Toolbox/Data/NavigationRouteEdges.lua")
+    dofile("Toolbox/Data/NavigationAbilityTemplates.lua")
+
+    local exportedData = Toolbox.Data.NavigationRouteEdges -- 契约导出的统一路径边数据
+    local abilityTemplateData = Toolbox.Data.NavigationAbilityTemplates -- 导出的能力模板
+    local newSilvermoonNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 2393) -- 12.0 银月城锚点
+    local teleportTemplate = abilityTemplateData.templates["spell_1259190"] -- 12.0 银月城传送模板
+    local portalTemplate = abilityTemplateData.templates["spell_1259194"] -- 12.0 银月城传送门模板
+
+    assert.is_table(teleportTemplate)
+    assert.is_table(portalTemplate)
+    assert.equals(tonumber(newSilvermoonNode.NodeID), tonumber(teleportTemplate.ToNodeID))
+    assert.equals(tonumber(newSilvermoonNode.NodeID), tonumber(portalTemplate.ToNodeID))
+  end)
+
   it("no_longer_exports_map_link_or_waypoint_link_runtime_edges_for_v1", function()
     dofile("Toolbox/Data/NavigationRouteEdges.lua")
 
