@@ -17,6 +17,8 @@ local DEFAULT_REFRESH_INTERVAL = 0.5 -- 实时刷新节流秒数
 local DEFAULT_NODE_ROW_HEIGHT = 44 -- 节点行高度
 local MAX_WIDGET_WIDTH = 960 -- 路线图允许扩展到的最大宽度
 local DEFAULT_COLUMN_MIN_WIDTH = 120 -- 胶囊三列的最小宽度
+local DEFAULT_COLUMN_GAP = 28 -- 胶囊三列之间的最小间距
+local DEFAULT_COLUMN_OUTER_PADDING = 24 -- 胶囊列组左右外边距
 local DEFAULT_NODE_ROW_GAP = 6 -- 节点行之间的间距
 local DEFAULT_NODE_CONTAINER_PADDING = 8 -- 节点容器上下内边距
 local HISTORY_CONFIRM_DIALOG_KEY = "TOOLBOX_NAVIGATION_ROUTE_HISTORY_CONFIRM" -- 历史重规划确认弹框键
@@ -966,17 +968,10 @@ local function clampNumber(value, minValue, maxValue)
   return clampedValue
 end
 
---- 根据当前胶囊文本测量所需宽度。
+--- 测量胶囊三列各自需要的文本宽度。
 ---@param frame table 路线图根 Frame
----@return number
-local function resolveCapsuleWidth(frame)
-  local historyButtonWidth = type(frame._historyToggleButton) == "table" and type(frame._historyToggleButton.GetWidth) == "function"
-    and (tonumber(frame._historyToggleButton:GetWidth()) or 76)
-    or 76 -- 历史按钮宽度
-  local headerWidth = readFontStringWidth(frame._capsuleHeaderStatus)
-    + readFontStringWidth(frame._capsuleHeaderProgress)
-    + historyButtonWidth
-    + 56 -- 标题区总宽度
+---@return number, number, number
+local function measureCapsuleColumnWidths(frame)
   local startColumnWidth = math.max(
     DEFAULT_COLUMN_MIN_WIDTH,
     readFontStringWidth(frame._capsuleStartLabel),
@@ -992,7 +987,26 @@ local function resolveCapsuleWidth(frame)
     readFontStringWidth(frame._capsuleTargetLabel),
     readFontStringWidth(frame._capsuleTargetValue)
   ) -- 右列宽度
-  local bodyWidth = startColumnWidth + currentColumnWidth + targetColumnWidth + 96 -- 三列主体总宽度
+  return startColumnWidth, currentColumnWidth, targetColumnWidth
+end
+
+--- 根据当前胶囊文本测量所需宽度。
+---@param frame table 路线图根 Frame
+---@return number
+local function resolveCapsuleWidth(frame)
+  local historyButtonWidth = type(frame._historyToggleButton) == "table" and type(frame._historyToggleButton.GetWidth) == "function"
+    and (tonumber(frame._historyToggleButton:GetWidth()) or 76)
+    or 76 -- 历史按钮宽度
+  local headerWidth = readFontStringWidth(frame._capsuleHeaderStatus)
+    + readFontStringWidth(frame._capsuleHeaderProgress)
+    + historyButtonWidth
+    + 56 -- 标题区总宽度
+  local startColumnWidth, currentColumnWidth, targetColumnWidth = measureCapsuleColumnWidths(frame) -- 三列文本宽度
+  local bodyWidth = (DEFAULT_COLUMN_OUTER_PADDING * 2)
+    + startColumnWidth
+    + currentColumnWidth
+    + targetColumnWidth
+    + (DEFAULT_COLUMN_GAP * 2) -- 三列真实排布后的主体宽度
   return clampNumber(math.ceil(math.max(DEFAULT_WIDGET_WIDTH, headerWidth, bodyWidth)), DEFAULT_WIDGET_WIDTH, MAX_WIDGET_WIDTH)
 end
 
@@ -1004,20 +1018,27 @@ local function applyCapsuleColumnLayout(frame, resolvedWidth)
   if type(capsuleButton) ~= "table" then
     return
   end
-  local edgeOffset = math.max(48, math.floor((tonumber(resolvedWidth) or DEFAULT_WIDGET_WIDTH) / 6)) -- 左右列偏移
-  local dividerOffset = math.max(70, math.floor((tonumber(resolvedWidth) or DEFAULT_WIDGET_WIDTH) / 6)) -- 分隔线偏移
+  local safeWidth = tonumber(resolvedWidth) or DEFAULT_WIDGET_WIDTH -- 当前可用宽度
+  local startColumnWidth, currentColumnWidth, targetColumnWidth = measureCapsuleColumnWidths(frame) -- 三列文本宽度
+  local bandWidth = startColumnWidth + currentColumnWidth + targetColumnWidth + (DEFAULT_COLUMN_GAP * 2) -- 三列内容带宽
+  local bandStartX = math.max(math.floor((safeWidth - bandWidth) / 2), DEFAULT_COLUMN_OUTER_PADDING) -- 三列带起点
+  local startCenterX = bandStartX + (startColumnWidth / 2) -- 左列中心点
+  local currentCenterX = bandStartX + startColumnWidth + DEFAULT_COLUMN_GAP + (currentColumnWidth / 2) -- 中列中心点
+  local targetCenterX = bandStartX + startColumnWidth + DEFAULT_COLUMN_GAP + currentColumnWidth + DEFAULT_COLUMN_GAP + (targetColumnWidth / 2) -- 右列中心点
+  local leftDividerX = bandStartX + startColumnWidth + math.floor(DEFAULT_COLUMN_GAP / 2) -- 左分隔线 X
+  local rightDividerX = bandStartX + startColumnWidth + DEFAULT_COLUMN_GAP + currentColumnWidth + math.floor(DEFAULT_COLUMN_GAP / 2) -- 右分隔线 X
 
   frame._capsuleStartLabel:ClearAllPoints()
-  frame._capsuleStartLabel:SetPoint("TOPLEFT", capsuleButton, "TOPLEFT", edgeOffset, -38)
+  frame._capsuleStartLabel:SetPoint("TOP", capsuleButton, "TOPLEFT", startCenterX, -38)
   frame._capsuleCurrentLabel:ClearAllPoints()
-  frame._capsuleCurrentLabel:SetPoint("TOP", capsuleButton, "TOP", 0, -38)
+  frame._capsuleCurrentLabel:SetPoint("TOP", capsuleButton, "TOPLEFT", currentCenterX, -38)
   frame._capsuleTargetLabel:ClearAllPoints()
-  frame._capsuleTargetLabel:SetPoint("TOPRIGHT", capsuleButton, "TOPRIGHT", -edgeOffset, -38)
+  frame._capsuleTargetLabel:SetPoint("TOP", capsuleButton, "TOPLEFT", targetCenterX, -38)
 
   frame._capsuleDividerLeft:ClearAllPoints()
-  frame._capsuleDividerLeft:SetPoint("TOP", capsuleButton, "TOP", -dividerOffset, -34)
+  frame._capsuleDividerLeft:SetPoint("TOPLEFT", capsuleButton, "TOPLEFT", leftDividerX, -34)
   frame._capsuleDividerRight:ClearAllPoints()
-  frame._capsuleDividerRight:SetPoint("TOP", capsuleButton, "TOP", dividerOffset, -34)
+  frame._capsuleDividerRight:SetPoint("TOPLEFT", capsuleButton, "TOPLEFT", rightDividerX, -34)
 end
 
 --- 按显示节点数计算节点容器所需高度。

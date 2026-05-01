@@ -182,6 +182,32 @@ describe("Navigation RouteBar", function()
     }
   end
 
+  local function buildSingleWideColumnCapsuleRouteResult()
+    return {
+      totalSteps = 1,
+      rawNodePath = { "current", 9940, "target" },
+      semanticNodes = {
+        { kind = "map", text = "Hub", uiMapID = 994 },
+        { kind = "map", text = "LongTargetDestinationAlpha", uiMapID = 993 },
+      },
+      segments = {
+        {
+          mode = "walk_local",
+          label = "目标位置：LongTargetDestinationAlpha 78.9, 65.4",
+          fromName = "Hub",
+          toName = "LongTargetDestinationAlpha",
+          fromUiMapID = 994,
+          toUiMapID = 993,
+          traversedUiMapIDs = { 994, 993 },
+          traversedUiMapNames = {
+            "Hub",
+            "LongTargetDestinationAlpha",
+          },
+        },
+      },
+    }
+  end
+
   local function buildOverflowTimelineRouteResult()
     return {
       totalSteps = 5,
@@ -409,6 +435,8 @@ describe("Navigation RouteBar", function()
             [26] = { Name_lang = "辛特兰" },
             [991] = { Name_lang = "这是一段非常非常长的起始位置说明文本" },
             [992] = { Name_lang = "这是一段非常非常长的终点说明文本" },
+            [993] = { Name_lang = "LongTargetDestinationAlpha" },
+            [994] = { Name_lang = "Hub" },
           },
         },
         NavigationRouteEdges = {
@@ -832,6 +860,24 @@ describe("Navigation RouteBar", function()
 
     local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
     assert.is_true(routeBarFrame:GetWidth() > 420)
+  end)
+
+  it("widens_the_capsule_when_a_single_column_is_much_longer_than_the_others", function()
+    locationSnapshot = {
+      currentUiMapID = 994,
+      currentX = 0.123,
+      currentY = 0.456,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildSingleWideColumnCapsuleRouteResult(), {
+      uiMapID = 993,
+      x = 0.789,
+      y = 0.654,
+      name = "LongTargetDestinationAlpha",
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    assert.is_true(routeBarFrame:GetWidth() >= 640)
   end)
 
   it("expands_the_node_container_and_root_frame_to_cover_all_rendered_nodes", function()
