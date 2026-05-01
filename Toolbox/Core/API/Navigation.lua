@@ -34,6 +34,16 @@ local function copyArray(rawList)
   return copiedList
 end
 
+--- 去除首尾空白，避免节点显示名里残留多余空格。
+---@param rawText any 原始文本
+---@return string
+local function trimText(rawText)
+  local trimmedText = tostring(rawText or "") -- 待裁剪文本
+  trimmedText = string.gsub(trimmedText, "^%s+", "")
+  trimmedText = string.gsub(trimmedText, "%s+$", "")
+  return trimmedText
+end
+
 --- 将来源数组里的值追加到目标数组，保持去重。
 ---@param targetList table 目标数组
 ---@param sourceList table|nil 来源数组
@@ -63,6 +73,49 @@ end
 ---@return string
 local function readEdgeLabel(edge)
   return tostring((type(edge) == "table" and (edge.label or edge.Label or edge.name or edge.Name_lang)) or "")
+end
+
+--- 从方向性交通节点名里抽取真正的到站 / 出发枢纽名。
+---@param rawName any 原始节点名
+---@return string
+local function extractTransportHubName(rawName)
+  local normalizedName = trimText(rawName) -- 去空白后的节点名
+  local hubName = string.match(normalizedName, "^乘坐(.+)的飞艇前往.+$") -- 飞艇出发枢纽
+    or string.match(normalizedName, "^搭乘(.+)的飞艇前往.+$") -- 另一种飞艇文案
+    or string.match(normalizedName, "^乘坐(.+)的船前往.+$") -- 船只出发枢纽
+    or string.match(normalizedName, "^搭乘(.+)的船前往.+$") -- 另一种船只文案
+  return trimText(hubName)
+end
+
+--- 按当前展示场景读取更适合输出的节点名。
+---@param nodeDef table|nil 运行时节点定义
+---@param fallbackNodeId any 节点 ID 兜底
+---@param normalizeTransportHub boolean 是否将交通节点归一化为枢纽名
+---@return string
+local function buildRouteNodeDisplayName(nodeDef, fallbackNodeId, normalizeTransportHub)
+  local rawName = trimText(type(nodeDef) == "table" and nodeDef.name or fallbackNodeId) -- 原始节点名
+  if normalizeTransportHub and type(nodeDef) == "table" and tostring(nodeDef.kind or "") == "transport" then
+    local transportHubName = extractTransportHubName(rawName) -- 交通枢纽名
+    if transportHubName ~= "" then
+      return transportHubName
+    end
+  end
+  return rawName ~= "" and rawName or tostring(fallbackNodeId)
+end
+
+--- 读取步行边标签两端更适合展示的名称。
+---@param traversedUiMapNames table|nil 步行边经过名
+---@param fallbackName string 兜底名称
+---@param useDestination boolean 是否读取终点侧
+---@return string
+local function buildWalkLabelEndpointName(traversedUiMapNames, fallbackName, useDestination)
+  local traversedNameList = type(traversedUiMapNames) == "table" and traversedUiMapNames or nil -- 经过名列表
+  local nameIndex = useDestination and (type(traversedNameList) == "table" and #traversedNameList or 0) or 1 -- 标签端点索引
+  local endpointName = trimText(type(traversedNameList) == "table" and traversedNameList[nameIndex] or nil) -- 标签端点名
+  if endpointName ~= "" then
+    return endpointName
+  end
+  return trimText(fallbackName)
 end
 
 --- 为路线边生成稳定排序标记。
@@ -212,8 +265,8 @@ local function buildRouteSegments(routeGraph, edgePath)
         mode = edgeMode,
         from = fromNodeId,
         to = toNodeId,
-        fromName = tostring(fromNode.name or fromNodeId),
-        toName = tostring(toNode.name or toNodeId),
+        fromName = buildRouteNodeDisplayName(fromNode, fromNodeId, edgeMode == WALK_LOCAL_MODE),
+        toName = buildRouteNodeDisplayName(toNode, toNodeId, false),
         fromUiMapID = tonumber(fromNode.uiMapID),
         toUiMapID = tonumber(toNode.uiMapID),
         label = edgeLabel,
@@ -1139,12 +1192,14 @@ local function addWalkLocalEdge(routeGraph, fromNodeId, toNodeId, traversedUiMap
   end
   local fromNode = routeGraph.nodes[fromNodeId] or {} -- 起点节点
   local toNode = routeGraph.nodes[toNodeId] or {} -- 终点节点
+  local fromDisplayName = buildWalkLabelEndpointName(traversedUiMapNames, tostring(fromNode.name or fromNodeId), false) -- 步行段起点显示名
+  local toDisplayName = buildWalkLabelEndpointName(traversedUiMapNames, tostring(toNode.name or toNodeId), true) -- 步行段终点显示名
   routeGraph.edges[#routeGraph.edges + 1] = {
     from = fromNodeId,
     to = toNodeId,
     cost = 0,
     stepCost = 1,
-    label = string.format("步行：%s -> %s", tostring(fromNode.name or fromNodeId), tostring(toNode.name or toNodeId)),
+    label = string.format("步行：%s -> %s", fromDisplayName, toDisplayName),
     mode = WALK_LOCAL_MODE,
     walkDistance = 0,
     traversedUiMapIDs = copyArray(traversedUiMapIDs),
@@ -1166,14 +1221,26 @@ local function addDynamicWalkLocalEdges(routeGraph)
 
     local clusterNode = walkClusterTargetID and routeGraph.nodes[walkClusterTargetID] or nil -- 连通域锚点节点
     if walkClusterTargetID ~= nil and clusterNode ~= nil and walkClusterTargetID ~= nodeId then
-      local traversedUiMapIDs = {} -- 本地步行段经过地图 ID
-      local traversedUiMapNames = {} -- 本地步行段经过地图名
-      appendUniqueArray(traversedUiMapIDs, { tonumber(nodeDef.uiMapID) })
-      appendUniqueArray(traversedUiMapIDs, { tonumber(clusterNode.uiMapID) })
-      appendUniqueArray(traversedUiMapNames, { tostring(nodeDef.name or nodeId) })
-      appendUniqueArray(traversedUiMapNames, { tostring(clusterNode.name or walkClusterTargetID) })
-      addWalkLocalEdge(routeGraph, nodeId, walkClusterTargetID, traversedUiMapIDs, traversedUiMapNames)
-      addWalkLocalEdge(routeGraph, walkClusterTargetID, nodeId, traversedUiMapIDs, traversedUiMapNames)
+      local nodeToClusterUiMapIDs = {} -- 节点 -> 簇锚点的经过地图 ID
+      local nodeToClusterUiMapNames = {} -- 节点 -> 簇锚点的经过地图名
+      local clusterToNodeUiMapIDs = {} -- 簇锚点 -> 节点的经过地图 ID
+      local clusterToNodeUiMapNames = {} -- 簇锚点 -> 节点的经过地图名
+      local nodeDisplayName = buildRouteNodeDisplayName(nodeDef, nodeId, true) -- 节点 -> 簇锚点时使用的节点显示名
+      local clusterDisplayName = buildRouteNodeDisplayName(clusterNode, walkClusterTargetID, false) -- 簇锚点显示名
+      local rawNodeDisplayName = buildRouteNodeDisplayName(nodeDef, nodeId, false) -- 原始节点显示名
+
+      appendUniqueArray(nodeToClusterUiMapIDs, { tonumber(nodeDef.uiMapID) })
+      appendUniqueArray(nodeToClusterUiMapIDs, { tonumber(clusterNode.uiMapID) })
+      appendUniqueArray(nodeToClusterUiMapNames, { nodeDisplayName })
+      appendUniqueArray(nodeToClusterUiMapNames, { clusterDisplayName })
+
+      appendUniqueArray(clusterToNodeUiMapIDs, { tonumber(clusterNode.uiMapID) })
+      appendUniqueArray(clusterToNodeUiMapIDs, { tonumber(nodeDef.uiMapID) })
+      appendUniqueArray(clusterToNodeUiMapNames, { clusterDisplayName })
+      appendUniqueArray(clusterToNodeUiMapNames, { rawNodeDisplayName })
+
+      addWalkLocalEdge(routeGraph, nodeId, walkClusterTargetID, nodeToClusterUiMapIDs, nodeToClusterUiMapNames)
+      addWalkLocalEdge(routeGraph, walkClusterTargetID, nodeId, clusterToNodeUiMapIDs, clusterToNodeUiMapNames)
     end
   end
 end

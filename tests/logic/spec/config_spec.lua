@@ -192,6 +192,7 @@ describe("Toolbox.Config navigation module defaults", function()
     assert.equals(0, moduleDb.lastTargetX)
     assert.equals(0, moduleDb.lastTargetY)
     assert.is_false(moduleDb.routeWidgetExpanded)
+    assert.is_false(moduleDb.routeHistoryExpanded)
     assert.same({
       point = "TOP",
       x = 0,

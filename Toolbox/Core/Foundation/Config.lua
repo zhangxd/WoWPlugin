@@ -72,6 +72,8 @@ local defaults = {
       lastTargetY = 0,
       -- 路线图组件展开态：false=精简胶囊；true=展开完整时间线
       routeWidgetExpanded = false,
+      -- 最近路线侧贴抽屉展开态：false=收起；true=展开
+      routeHistoryExpanded = false,
       -- 路线图组件锚点位置
       routeWidgetPosition = {
         point = "TOP",
@@ -479,6 +481,7 @@ function Toolbox.Config.Init()
 
   local navigationDb = type(moduleStore.navigation) == "table" and moduleStore.navigation or {} -- navigation 模块存档
   navigationDb.routeWidgetExpanded = navigationDb.routeWidgetExpanded == true
+  navigationDb.routeHistoryExpanded = navigationDb.routeHistoryExpanded == true
 
   local widgetPosition = type(navigationDb.routeWidgetPosition) == "table" and navigationDb.routeWidgetPosition or {} -- 路线图位置存档
   local pointName = type(widgetPosition.point) == "string" and widgetPosition.point or "TOP" -- 路线图锚点名

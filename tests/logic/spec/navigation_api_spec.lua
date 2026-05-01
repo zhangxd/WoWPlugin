@@ -1043,6 +1043,36 @@ describe("Navigation API", function()
     assert.is_false(usedDalaranTaxiFallback)
   end)
 
+  it("uses_the_arrival_hub_name_for_the_final_walk_after_the_orgrimmar_borean_transport", function()
+    dofile("Toolbox/Data/NavigationAbilityTemplates.lua")
+
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 114,
+      x = 0.519,
+      y = 0.416,
+    }, {
+      classFile = "MAGE",
+      faction = "Horde",
+      currentUiMapID = 2393,
+      currentX = 0.636,
+      currentY = 0.640,
+      knownSpellByID = {
+        [3567] = true,
+      },
+      knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
+    })
+
+    assert.is_nil(errorObject)
+    assert.is_table(routeResult)
+    assert.equals(4, routeResult.totalSteps)
+    assert.equals(4, #routeResult.segments)
+    assert.equals("walk_local", routeResult.segments[4].mode)
+    assert.equals(114, routeResult.segments[4].fromUiMapID)
+    assert.equals("战歌要塞", routeResult.segments[4].fromName)
+    assert.same({ "战歌要塞", "北风苔原" }, routeResult.segments[4].traversedUiMapNames)
+    assert.is_nil(string.find(routeResult.segments[4].fromName or "", "前往奥格瑞玛", 1, true))
+  end)
+
   it("routes_from_the_12_0_silvermoon_map_to_zulaman_without_falling_back_to_legacy_silvermoon", function()
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 2437,

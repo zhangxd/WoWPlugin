@@ -9,10 +9,13 @@ local RouteBar = {}
 Toolbox.NavigationModule.RouteBar = RouteBar
 
 local DEFAULT_WIDGET_WIDTH = 420 -- 路线图默认宽度
-local DEFAULT_CAPSULE_HEIGHT = 48 -- 精简胶囊高度
-local DEFAULT_EXPANDED_HEIGHT = 312 -- 展开态高度
+local DEFAULT_CAPSULE_HEIGHT = 88 -- 精简胶囊高度
+local DEFAULT_EXPANDED_HEIGHT = 300 -- 展开态高度
+local DEFAULT_HISTORY_DRAWER_WIDTH = 248 -- 历史抽屉宽度
 local DEFAULT_HISTORY_LIMIT = 10 -- 最近历史记录上限
 local DEFAULT_REFRESH_INTERVAL = 0.5 -- 实时刷新节流秒数
+local DEFAULT_NODE_ROW_HEIGHT = 44 -- 节点行高度
+local HISTORY_CONFIRM_DIALOG_KEY = "TOOLBOX_NAVIGATION_ROUTE_HISTORY_CONFIRM" -- 历史重规划确认弹框键
 local DEFAULT_POSITION = {
   point = "TOP",
   x = 0,
@@ -32,6 +35,8 @@ local VALID_POINT_NAME = {
 
 local routeBarFrame = nil -- 路线图根 Frame
 local activeRouteState = nil -- 当前导航路线状态
+local cleanPlayerFacingLabel = nil -- 清洗后的玩家可见动作标签函数前置声明
+local buildTargetDisplayName = nil -- 路线终点显示名函数前置声明
 
 --- 读取 navigation 模块存档，兼容测试直接注入 Config 的场景。
 ---@return table
@@ -179,6 +184,7 @@ end
 ---@return table
 local function ensureWidgetDbFields(moduleDb)
   moduleDb.routeWidgetExpanded = moduleDb.routeWidgetExpanded == true
+  moduleDb.routeHistoryExpanded = moduleDb.routeHistoryExpanded == true
   moduleDb.routeWidgetPosition = normalizeWidgetPosition(moduleDb.routeWidgetPosition)
   if type(moduleDb.routeHistory) ~= "table" then
     moduleDb.routeHistory = {}
@@ -186,10 +192,298 @@ local function ensureWidgetDbFields(moduleDb)
   return moduleDb
 end
 
+--- 复制一个顺序数组。
+---@param sourceArray table|nil 原始数组
+---@return table
+local function copyArray(sourceArray)
+  local copiedArray = {} -- 复制后的数组
+  for index, value in ipairs(type(sourceArray) == "table" and sourceArray or {}) do
+    copiedArray[index] = value
+  end
+  return copiedArray
+end
+
+--- 从玩家可见文本里抽取地图级名称。
+---@param rawText any
+---@return string
+local function extractMapLevelName(rawText)
+  local displayText = trimText(rawText) -- 原始显示文本
+  displayText = string.gsub(displayText, "^当前位置[:：]?", "")
+  displayText = string.gsub(displayText, "^目标位置[:：]?", "")
+  displayText = trimText(displayText)
+  local coordinatePrefix = string.match(displayText, "^(.-)%s+[%d%.]+,%s*[%d%.]+$") -- 去掉坐标后的前缀
+  if coordinatePrefix then
+    displayText = trimText(coordinatePrefix)
+  end
+  displayText = string.gsub(displayText, "目标点$", "")
+  return trimText(displayText)
+end
+
+--- 读取路线段某一侧更适合展示给玩家的地图名。
+---@param segment table|nil 路线段
+---@param useDestination boolean 是否读取终点侧
+---@return string
+local function buildSegmentMapName(segment, useDestination)
+  if type(segment) ~= "table" then
+    return ""
+  end
+  local traversedNameList = type(segment.traversedUiMapNames) == "table" and segment.traversedUiMapNames or nil -- 经过地图名列表
+  if useDestination and type(traversedNameList) == "table" and #traversedNameList > 0 then
+    local lastTraversedName = extractMapLevelName(traversedNameList[#traversedNameList]) -- 最后一个经过地图名
+    if lastTraversedName ~= "" then
+      return lastTraversedName
+    end
+  end
+  local uiMapID = useDestination and segment.toUiMapID or segment.fromUiMapID -- 路线段地图 ID
+  local fallbackName = useDestination and segment.toName or segment.fromName -- 路线段兜底名
+  return extractMapLevelName(buildMapDisplayName(uiMapID, fallbackName))
+end
+
+--- 判断路线方式是否属于需要保留交通枢纽表达的类型。
+---@param modeText string|nil 路线方式
+---@return boolean
+local function isTransportMode(modeText)
+  return modeText == "public_portal"
+    or modeText == "class_portal"
+    or modeText == "transport"
+    or modeText == "hearthstone"
+    or modeText == "class_teleport"
+end
+
+--- 为交通段生成玩家可见的枢纽节点名。
+---@param segment table|nil 路线段
+---@return string, string
+local function buildTransportHubDisplay(segment)
+  if type(segment) ~= "table" then
+    return "", "map"
+  end
+  local modeText = tostring(segment.mode or "") -- 当前路线方式
+  local cleanedLabel = cleanPlayerFacingLabel(segment.label) -- 清洗后的动作标签
+  local fromName = extractMapLevelName(segment.fromName) -- 起点名
+  local fromMapName = buildMapDisplayName(segment.fromUiMapID, fromName) -- 起点地图名
+  if modeText == "public_portal" or modeText == "class_portal" then
+    if string.find(fromName, "传送门", 1, true) then
+      return fromName, "portal"
+    end
+    if fromMapName ~= "" then
+      return fromMapName .. "传送门", "portal"
+    end
+    if string.find(cleanedLabel, "传送门", 1, true) then
+      return "传送门", "portal"
+    end
+  elseif modeText == "transport" then
+    if string.find(fromName, "飞艇", 1, true) then
+      return fromName, "transport"
+    end
+    if string.find(cleanedLabel, "飞艇", 1, true) then
+      if fromMapName ~= "" then
+        return fromMapName .. "飞艇", "transport"
+      end
+      return "飞艇", "transport"
+    end
+    if string.find(fromName, "港口", 1, true) or string.find(fromName, "船", 1, true) then
+      return fromName, "transport"
+    end
+    if string.find(cleanedLabel, "港口", 1, true) or string.find(cleanedLabel, "船", 1, true) then
+      if fromMapName ~= "" then
+        return fromMapName .. "港口", "transport"
+      end
+      return "港口", "transport"
+    end
+    if string.find(cleanedLabel, "地铁", 1, true) then
+      if fromMapName ~= "" then
+        return fromMapName .. "地铁", "transport"
+      end
+      return "地铁", "transport"
+    end
+  elseif modeText == "hearthstone" then
+    return "炉石", "hearthstone"
+  elseif modeText == "class_teleport" then
+    return "职业传送", "teleport"
+  end
+  return "", "map"
+end
+
+--- 向节点链追加一个玩家可见节点，并避免相邻重复。
+---@param nodeList table 节点列表
+---@param displayText string 节点显示名
+---@param nodeKind string 节点类型
+---@param nodeMeta table|nil 节点补充信息
+local function appendDisplayNode(nodeList, displayText, nodeKind, nodeMeta)
+  local normalizedText = normalizeNavigationName(displayText) -- 节点归一化名
+  if normalizedText == "" then
+    return
+  end
+  local lastNode = nodeList[#nodeList] -- 最近一个节点
+  if type(lastNode) == "table" and normalizeNavigationName(lastNode.text) == normalizedText then
+    if tostring(lastNode.kind or "") == "map" and tostring(nodeKind or "") ~= "map" then
+      lastNode.kind = nodeKind
+    end
+    local incomingMapID = tonumber(type(nodeMeta) == "table" and nodeMeta.uiMapID) -- 待写入地图 ID
+    local incomingDetailText = trimText(type(nodeMeta) == "table" and nodeMeta.detailText or nil) -- 待写入节点明细
+    if incomingMapID and not tonumber(lastNode.uiMapID) then
+      lastNode.uiMapID = incomingMapID
+    end
+    if incomingDetailText ~= "" then
+      local currentDetailText = trimText(lastNode.detailText) -- 旧节点明细
+      if currentDetailText ~= "" and currentDetailText ~= incomingDetailText then
+        lastNode.detailText = currentDetailText .. " -> " .. incomingDetailText
+      else
+        lastNode.detailText = incomingDetailText
+      end
+    end
+    return
+  end
+  nodeList[#nodeList + 1] = {
+    text = trimText(displayText),
+    kind = trimText(nodeKind) ~= "" and nodeKind or "map",
+    uiMapID = tonumber(type(nodeMeta) == "table" and nodeMeta.uiMapID) or nil,
+    detailText = trimText(type(nodeMeta) == "table" and nodeMeta.detailText or nil),
+  }
+end
+
+--- 向节点链补入一段路线中的中间地图级节点。
+---@param nodeList table 节点列表
+---@param segment table|nil 路线段
+local function appendIntermediateTraversedMapNodes(nodeList, segment)
+  local traversedNameList = type(segment) == "table" and segment.traversedUiMapNames or nil -- 原始经过地图名列表
+  local traversedMapIDList = type(segment) == "table" and segment.traversedUiMapIDs or nil -- 原始经过地图 ID 列表
+  local lastInteriorIndex = type(traversedNameList) == "table" and (#traversedNameList - 1) or 0 -- 最后一个中间节点索引
+  if type(traversedNameList) ~= "table" or lastInteriorIndex < 2 then
+    return
+  end
+  for traversedIndex = 2, lastInteriorIndex do
+    appendDisplayNode(nodeList, extractMapLevelName(traversedNameList[traversedIndex]), "map", {
+      uiMapID = type(traversedMapIDList) == "table" and traversedMapIDList[traversedIndex] or nil,
+    })
+  end
+end
+
+--- 基于路线段构建玩家可见的地图 / 枢纽节点链。
+---@param routeResult table|nil 路线结果
+---@param routeTarget table|nil 路线目标
+---@param startLocationSnapshot table|nil 规划起点快照
+---@return table
+local function buildRouteDisplayNodes(routeResult, routeTarget, startLocationSnapshot)
+  local segmentList = type(routeResult) == "table" and routeResult.segments or nil -- 路线分段列表
+  if type(segmentList) ~= "table" or #segmentList == 0 then
+    return {}
+  end
+
+  local nodeList = {} -- 玩家可见节点链
+  local firstSegment = segmentList[1] or nil -- 第一段路线
+  local startUiMapID = startLocationSnapshot and startLocationSnapshot.currentUiMapID or (firstSegment and firstSegment.fromUiMapID) -- 规划起点地图 ID
+  local startPositionText = buildPositionDisplayText(
+    startUiMapID,
+    startLocationSnapshot and startLocationSnapshot.currentX,
+    startLocationSnapshot and startLocationSnapshot.currentY,
+    buildSegmentMapName(firstSegment, false)
+  ) -- 规划起点节点文案
+  appendDisplayNode(nodeList, startPositionText, "map", {
+    uiMapID = startUiMapID,
+  })
+
+  for segmentIndex, segment in ipairs(segmentList) do
+    local modeText = tostring(type(segment) == "table" and segment.mode or "") -- 当前段方式
+    local nextSegment = segmentList[segmentIndex + 1] -- 下一段路线
+    if modeText == "walk_local" then
+      appendIntermediateTraversedMapNodes(nodeList, segment)
+      if type(nextSegment) == "table" and isTransportMode(tostring(nextSegment.mode or "")) then
+        local hubName = extractMapLevelName(segment.toName) -- 步行段落点
+        if hubName == "" then
+          local fallbackHubName, fallbackHubKind = buildTransportHubDisplay(nextSegment) -- 下一段的交通枢纽名
+          appendDisplayNode(nodeList, fallbackHubName, fallbackHubKind, {
+            uiMapID = segment.toUiMapID,
+          })
+        else
+          local fallbackHubName, fallbackHubKind = buildTransportHubDisplay(nextSegment) -- 交通枢纽兜底类型
+          appendDisplayNode(nodeList, hubName, fallbackHubKind, {
+            uiMapID = segment.toUiMapID,
+          })
+          if fallbackHubName ~= "" then
+            appendDisplayNode(nodeList, fallbackHubName, fallbackHubKind, {
+              uiMapID = segment.toUiMapID,
+            })
+          end
+        end
+      elseif nextSegment == nil then
+        local destinationPositionText = buildPositionDisplayText(
+          routeTarget and routeTarget.uiMapID or segment.toUiMapID,
+          routeTarget and routeTarget.x,
+          routeTarget and routeTarget.y,
+          extractMapLevelName(buildTargetDisplayName(routeTarget, routeResult))
+        ) -- 最终终点节点文案
+        appendDisplayNode(nodeList, destinationPositionText, "map", {
+          uiMapID = routeTarget and routeTarget.uiMapID or segment.toUiMapID,
+        })
+      end
+    else
+      local hubName, hubKind = buildTransportHubDisplay(segment) -- 当前交通枢纽节点
+      if hubName ~= "" and (modeText == "hearthstone" or modeText == "class_teleport" or modeText == "class_portal") then
+        appendDisplayNode(nodeList, hubName, hubKind, {
+          uiMapID = segment.fromUiMapID,
+        })
+      end
+      local mergesIntoFinalWalkTarget = type(nextSegment) == "table"
+        and segmentIndex + 1 == #segmentList
+        and tostring(nextSegment.mode or "") == "walk_local"
+        and tonumber(segment.toUiMapID) ~= nil
+        and tonumber(segment.toUiMapID) == tonumber(nextSegment.toUiMapID) -- 是否会并入最后一步本地目标
+      if not mergesIntoFinalWalkTarget then
+        local destinationMapName = buildSegmentMapName(segment, true) -- 当前段落点地图名
+        appendDisplayNode(nodeList, destinationMapName, "map", {
+          uiMapID = segment.toUiMapID,
+        })
+      end
+    end
+  end
+
+  local finalTargetPositionText = buildPositionDisplayText(
+    type(routeTarget) == "table" and routeTarget.uiMapID,
+    type(routeTarget) == "table" and routeTarget.x,
+    type(routeTarget) == "table" and routeTarget.y,
+    extractMapLevelName(buildTargetDisplayName(routeTarget, routeResult))
+  ) -- 最终目标节点文案
+  appendDisplayNode(nodeList, finalTargetPositionText, "map", {
+    uiMapID = type(routeTarget) == "table" and routeTarget.uiMapID,
+  })
+  return nodeList
+end
+
+--- 将节点链格式化为一行路线摘要。
+---@param routeResult table|nil 路线结果
+---@param routeTarget table|nil 路线目标
+---@param startLocationSnapshot table|nil 规划起点快照
+---@return string
+local function buildRouteNodePathText(routeResult, routeTarget, startLocationSnapshot)
+  local displayNodeList = buildRouteDisplayNodes(routeResult, routeTarget, startLocationSnapshot) -- 玩家可见节点链
+  if #displayNodeList == 0 then
+    return getLocaleText("NAVIGATION_ROUTE_EMPTY", "暂无路线")
+  end
+  local textList = {} -- 节点文本列表
+  for _, nodeInfo in ipairs(displayNodeList) do
+    textList[#textList + 1] = nodeInfo.text
+  end
+  return table.concat(textList, " -> ")
+end
+
+--- 将节点链格式化为一行路线摘要。
+---@param routeResult table|nil 路线结果
+---@param routeTarget table|nil 路线目标
+---@param startLocationSnapshot table|nil 规划起点快照
+---@return string
+local function buildRouteNodeSummaryText(routeResult, routeTarget, startLocationSnapshot)
+  return string.format(
+    "%s步 | %s",
+    tostring(tonumber(routeResult and routeResult.totalSteps) or 0),
+    buildRouteNodePathText(routeResult, routeTarget, startLocationSnapshot)
+  )
+end
+
 --- 清理边标签里导出用的后缀节点补充，仅保留玩家需要执行的动作。
 ---@param rawLabel any
 ---@return string
-local function cleanPlayerFacingLabel(rawLabel)
+cleanPlayerFacingLabel = function(rawLabel)
   local cleanedLabel = trimText(rawLabel) -- 原始显示标签
   if cleanedLabel == "" then
     return ""
@@ -291,20 +585,7 @@ end
 ---@param routeResult table|nil 路线结果
 ---@return string
 local function buildRouteText(routeResult)
-  local segmentList = type(routeResult) == "table" and routeResult.segments or nil -- 路线分段列表
-  if type(segmentList) ~= "table" or #segmentList == 0 then
-    return getLocaleText("NAVIGATION_ROUTE_EMPTY", "暂无路线")
-  end
-  local textParts = {
-    string.format("%s步", tostring(tonumber(routeResult.totalSteps) or #segmentList)),
-  } -- 可显示步骤文本
-  for _, segment in ipairs(segmentList) do
-    local segmentText = buildSegmentText(segment) -- 路线段文本
-    if segmentText ~= "" then
-      textParts[#textParts + 1] = segmentText
-    end
-  end
-  return table.concat(textParts, "  |  ")
+  return buildRouteNodeSummaryText(routeResult, nil, nil)
 end
 
 --- 将目标快照编码为去重签名。
@@ -321,7 +602,7 @@ end
 ---@param routeTarget table|nil 路线目标
 ---@param routeResult table|nil 路线结果
 ---@return string
-local function buildTargetDisplayName(routeTarget, routeResult)
+buildTargetDisplayName = function(routeTarget, routeResult)
   local targetName = trimText(type(routeTarget) == "table" and routeTarget.name or nil) -- 外部传入的终点名
   if targetName ~= "" then
     return targetName
@@ -338,7 +619,7 @@ end
 --- 将当前路线记录进最近历史；同目标重新规划时移动到最前面。
 ---@param routeTarget table|nil 路线目标
 ---@param routeResult table|nil 路线结果
-local function pushRouteHistory(routeTarget, routeResult)
+local function pushRouteHistory(routeTarget, routeResult, startLocationSnapshot)
   local numericMapID = tonumber(type(routeTarget) == "table" and routeTarget.uiMapID) -- 目标地图 ID
   if not numericMapID or numericMapID <= 0 then
     return
@@ -364,7 +645,7 @@ local function pushRouteHistory(routeTarget, routeResult)
     targetX = tonumber(type(routeTarget) == "table" and routeTarget.x) or 0,
     targetY = tonumber(type(routeTarget) == "table" and routeTarget.y) or 0,
     targetName = buildTargetDisplayName(routeTarget, routeResult),
-    summaryText = RouteBar.BuildRouteText(routeResult),
+    summaryText = buildRouteNodeSummaryText(routeResult, routeTarget, startLocationSnapshot),
   })
 
   while #routeHistory > DEFAULT_HISTORY_LIMIT do
@@ -467,93 +748,275 @@ local function buildStatusText(routeState)
   return getLocaleText("NAVIGATION_ROUTE_WIDGET_STATUS_READY", "按当前路线前进")
 end
 
---- 刷新精简胶囊文案。
----@param frame table 路线图根 Frame
+--- 构建胶囊步骤进度文案。
 ---@param routeState table 路线状态
-local function refreshCapsuleText(frame, routeState)
+---@return string
+local function buildStepProgressText(routeState)
   local segmentList = type(routeState.routeResult) == "table" and routeState.routeResult.segments or {} -- 路线分段列表
   local totalSteps = tonumber(routeState.routeResult and routeState.routeResult.totalSteps) or #segmentList -- 总步数
   local stepIndex = math.max(1, math.min(tonumber(routeState.currentStepIndex) or 1, math.max(totalSteps, 1))) -- 当前步骤索引
-  local currentSegment = segmentList[stepIndex] or segmentList[1] or nil -- 当前高亮段
-  local stepLabel = string.format(getLocaleText("NAVIGATION_ROUTE_WIDGET_STEP_FMT", "第%d/%d步"), stepIndex, math.max(totalSteps, 1)) -- 胶囊步骤文案
-  local summaryText = buildSegmentText(currentSegment) -- 当前步骤摘要
-  if summaryText == "" then
-    summaryText = buildTargetDisplayName(routeState.routeTarget, routeState.routeResult)
-  end
-  frame._capsuleSummary:SetText(stepLabel .. "  |  " .. summaryText)
-  frame._capsuleStatus:SetText(buildStatusText(routeState))
+  return string.format(getLocaleText("NAVIGATION_ROUTE_WIDGET_STEP_FMT", "第%d/%d步"), stepIndex, math.max(totalSteps, 1))
 end
 
---- 刷新展开态时间线文案。
----@param frame table 路线图根 Frame
+--- 构建胶囊起始位置文案。
 ---@param routeState table 路线状态
----@param locationSnapshot table|nil 当前位置快照
-local function refreshTimelineText(frame, routeState, locationSnapshot)
+---@return string
+local function buildStartPositionText(routeState)
   local segmentList = type(routeState.routeResult) == "table" and routeState.routeResult.segments or {} -- 路线分段列表
-  local totalSteps = #segmentList -- 路线段数
-  local currentSegment = segmentList[routeState.currentStepIndex] or segmentList[1] or nil -- 当前高亮段
-  local firstSegment = segmentList[1] or nil -- 第一段
-  local startName = trimText(firstSegment and firstSegment.fromName) -- 起始位置名
-  local targetName = buildTargetDisplayName(routeState.routeTarget, routeState.routeResult) -- 目标位置名
+  local firstSegment = segmentList[1] or nil -- 第一段路线
   local startLocationSnapshot = type(routeState.startLocationSnapshot) == "table" and routeState.startLocationSnapshot or nil -- 规划起点快照
-  local startPositionText = buildPositionDisplayText(
-    startLocationSnapshot and startLocationSnapshot.currentUiMapID,
+  local fallbackName = buildSegmentMapName(firstSegment, false) -- 起点地图名
+  local positionText = buildPositionDisplayText(
+    startLocationSnapshot and startLocationSnapshot.currentUiMapID or (firstSegment and firstSegment.fromUiMapID),
     startLocationSnapshot and startLocationSnapshot.currentX,
     startLocationSnapshot and startLocationSnapshot.currentY,
-    startName
+    fallbackName
   ) -- 起始位置文案
-  local targetPositionText = buildPositionDisplayText(
+  if positionText ~= "" then
+    return positionText
+  end
+  if fallbackName ~= "" then
+    return fallbackName
+  end
+  return getLocaleText("NAVIGATION_ROUTE_WIDGET_START", "起始位置")
+end
+
+--- 构建胶囊终点位置文案。
+---@param routeState table 路线状态
+---@return string
+local function buildTargetPositionText(routeState)
+  local targetName = buildTargetDisplayName(routeState.routeTarget, routeState.routeResult) -- 终点显示名
+  local positionText = buildPositionDisplayText(
     routeState.routeTarget and routeState.routeTarget.uiMapID,
     routeState.routeTarget and routeState.routeTarget.x,
     routeState.routeTarget and routeState.routeTarget.y,
     targetName
   ) -- 终点位置文案
-  local currentPositionText = targetPositionText ~= "" and targetPositionText or targetName -- 当前所处位置文案
+  if positionText ~= "" then
+    return positionText
+  end
+  return extractMapLevelName(targetName)
+end
+
+--- 构建胶囊当前位置文案。
+---@param routeState table 路线状态
+---@param locationSnapshot table|nil 当前位置快照
+---@return string
+local function buildCurrentPositionText(routeState, locationSnapshot)
+  local segmentList = type(routeState.routeResult) == "table" and routeState.routeResult.segments or {} -- 路线分段列表
+  local currentSegment = segmentList[routeState.currentStepIndex] or segmentList[1] or nil -- 当前高亮段
   local livePositionText = buildPositionDisplayText(
     locationSnapshot and locationSnapshot.currentUiMapID,
     locationSnapshot and locationSnapshot.currentX,
     locationSnapshot and locationSnapshot.currentY,
-    trimText(currentSegment and currentSegment.fromName)
-  ) -- 实时位置文案
+    buildSegmentMapName(currentSegment, false)
+  ) -- 当前实时位置文案
   if livePositionText ~= "" then
-    currentPositionText = livePositionText
-  elseif routeState.deviated then
-    currentPositionText = string.format("UiMap %s", tostring(tonumber(locationSnapshot and locationSnapshot.currentUiMapID) or "?"))
-  elseif routeState.arrived then
-    currentPositionText = targetPositionText ~= "" and targetPositionText or targetName
-  elseif trimText(currentSegment and currentSegment.fromName) ~= "" then
-    currentPositionText = trimText(currentSegment.fromName)
+    return livePositionText
   end
-  if startPositionText == "" then
-    startPositionText = startName ~= "" and startName or "当前位置"
+  if routeState.arrived then
+    return buildTargetPositionText(routeState)
   end
-  if targetPositionText == "" then
-    targetPositionText = targetName
+  local fallbackName = buildSegmentMapName(currentSegment, false) -- 当前路线所在地图
+  if fallbackName ~= "" then
+    return fallbackName
   end
+  return buildTargetPositionText(routeState)
+end
 
-  local lineList = {
-    string.format(getLocaleText("NAVIGATION_ROUTE_WIDGET_HEADER_FMT", "%s -> %s"), startPositionText, targetPositionText),
-    string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_START", "起始位置"), startPositionText),
-    string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_NEXT", "下一步"), buildSegmentText(currentSegment)),
-    string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_END", "终点位置"), targetPositionText),
-    string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_CURRENT", "当前位置"), currentPositionText),
-    string.format("%s：%s", getLocaleText("NAVIGATION_ROUTE_WIDGET_STATUS_LABEL", "路线状态"), buildStatusText(routeState)),
-    getLocaleText("NAVIGATION_ROUTE_WIDGET_CHAIN", "路线链路") .. "：",
-  } -- 展开态时间线文本
+--- 刷新精简胶囊文案。
+---@param frame table 路线图根 Frame
+---@param routeState table 路线状态
+---@param locationSnapshot table|nil 当前位置快照
+local function refreshCapsuleText(frame, routeState, locationSnapshot)
+  frame._capsuleHeaderStatus:SetText(buildStatusText(routeState))
+  frame._capsuleHeaderProgress:SetText(buildStepProgressText(routeState))
+  frame._capsuleStartLabel:SetText(getLocaleText("NAVIGATION_ROUTE_WIDGET_START", "起始位置"))
+  frame._capsuleCurrentLabel:SetText(getLocaleText("NAVIGATION_ROUTE_WIDGET_CURRENT", "当前位置"))
+  frame._capsuleTargetLabel:SetText(getLocaleText("NAVIGATION_ROUTE_WIDGET_END", "终点位置"))
+  frame._capsuleStartValue:SetText(buildStartPositionText(routeState))
+  frame._capsuleCurrentValue:SetText(buildCurrentPositionText(routeState, locationSnapshot))
+  frame._capsuleTargetValue:SetText(buildTargetPositionText(routeState))
+  if frame._capsuleSummary then
+    frame._capsuleSummary:SetText("")
+  end
+  if frame._capsuleStatus then
+    frame._capsuleStatus:SetText("")
+  end
+end
 
-  for segmentIndex, segment in ipairs(segmentList) do
-    local prefixText = "[ ]" -- 时间线状态前缀
-    if routeState.arrived and segmentIndex == totalSteps then
-      prefixText = "[完成]"
-    elseif routeState.deviated and segmentIndex == routeState.currentStepIndex then
-      prefixText = "[偏离]"
-    elseif segmentIndex == routeState.currentStepIndex then
-      prefixText = "[当前]"
+--- 按节点类型选择一个可落地的通用图标。
+---@param nodeKind string|nil 节点类型
+---@return string
+local function getNodeIconTexture(nodeKind)
+  if nodeKind == "portal" then
+    return "Interface\\Icons\\Spell_Arcane_PortalShattrath"
+  end
+  if nodeKind == "transport" then
+    return "Interface\\Icons\\INV_Misc_Toy_10"
+  end
+  if nodeKind == "hearthstone" then
+    return "Interface\\Icons\\INV_Misc_Rune_01"
+  end
+  if nodeKind == "teleport" then
+    return "Interface\\Icons\\Spell_Arcane_TeleportOrgrimmar"
+  end
+  return "Interface\\Icons\\INV_Misc_Map_01"
+end
+
+--- 根据当前位置推导当前应高亮的显示节点。
+---@param displayNodeList table 节点链
+---@param routeState table 路线状态
+---@param locationSnapshot table|nil 当前位置快照
+---@return number
+local function resolveActiveDisplayNodeIndex(displayNodeList, routeState, locationSnapshot)
+  local currentUiMapID = tonumber(type(locationSnapshot) == "table" and locationSnapshot.currentUiMapID) -- 当前地图 ID
+  if currentUiMapID then
+    local matchedIndex = nil -- 命中的节点序号
+    for nodeIndex, nodeInfo in ipairs(displayNodeList) do
+      if tostring(nodeInfo.kind or "") == "map" and tonumber(nodeInfo.uiMapID) == currentUiMapID then
+        matchedIndex = nodeIndex
+      end
     end
-    lineList[#lineList + 1] = string.format("%s %d. %s", prefixText, segmentIndex, buildSegmentText(segment))
+    if matchedIndex then
+      return matchedIndex
+    end
   end
 
-  frame._timelineText:SetText(table.concat(lineList, "\n"))
+  local stepIndex = tonumber(type(routeState) == "table" and routeState.currentStepIndex) or 1 -- 当前步骤序号
+  if stepIndex < 1 then
+    stepIndex = 1
+  end
+  if stepIndex > #displayNodeList then
+    stepIndex = #displayNodeList
+  end
+  return math.max(stepIndex, 1)
+end
+
+--- 创建一个竖向节点行。
+---@param parentFrame table 父容器
+---@param nodeIndex number 节点序号
+---@return table
+local function createNodeRow(parentFrame, nodeIndex)
+  local rowFrame = CreateFrame("Frame", nil, parentFrame, "BackdropTemplate") -- 节点行容器
+  rowFrame:SetSize(DEFAULT_WIDGET_WIDTH - 28, DEFAULT_NODE_ROW_HEIGHT)
+  rowFrame:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 8, -8 - ((nodeIndex - 1) * (DEFAULT_NODE_ROW_HEIGHT + 6)))
+  if type(rowFrame.SetBackdrop) == "function" then
+    rowFrame:SetBackdrop({
+      bgFile = "Interface\\Buttons\\WHITE8x8",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+      tile = true,
+      tileSize = 8,
+      edgeSize = 10,
+      insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    rowFrame:SetBackdropColor(0.08, 0.07, 0.06, 0.92)
+    rowFrame:SetBackdropBorderColor(0.52, 0.41, 0.2, 0.88)
+  end
+
+  local activeGlow = rowFrame:CreateTexture(nil, "BACKGROUND") -- 当前节点高亮底色
+  activeGlow:SetPoint("TOPLEFT", rowFrame, "TOPLEFT", 3, -3)
+  activeGlow:SetPoint("BOTTOMRIGHT", rowFrame, "BOTTOMRIGHT", -3, 3)
+  activeGlow:SetColorTexture(0.86, 0.73, 0.3, 0.14)
+  activeGlow:Hide()
+  rowFrame._activeGlow = activeGlow
+
+  local connectorTop = rowFrame:CreateTexture(nil, "BACKGROUND") -- 上方连线
+  connectorTop:SetPoint("TOPLEFT", rowFrame, "TOPLEFT", 14, 0)
+  connectorTop:SetSize(3, math.floor(DEFAULT_NODE_ROW_HEIGHT / 2))
+  connectorTop:SetColorTexture(0.72, 0.58, 0.3, 0.95)
+  rowFrame._connectorTop = connectorTop
+
+  local connectorBottom = rowFrame:CreateTexture(nil, "BACKGROUND") -- 下方连线
+  connectorBottom:SetPoint("TOPLEFT", rowFrame, "TOPLEFT", 14, -math.floor(DEFAULT_NODE_ROW_HEIGHT / 2))
+  connectorBottom:SetSize(3, math.floor(DEFAULT_NODE_ROW_HEIGHT / 2))
+  connectorBottom:SetColorTexture(0.72, 0.58, 0.3, 0.95)
+  rowFrame._connectorBottom = connectorBottom
+
+  local nodeMarker = rowFrame:CreateTexture(nil, "ARTWORK") -- 节点圆点标记
+  nodeMarker:SetPoint("TOPLEFT", rowFrame, "TOPLEFT", 9, -math.floor((DEFAULT_NODE_ROW_HEIGHT - 12) / 2))
+  nodeMarker:SetSize(12, 12)
+  nodeMarker:SetColorTexture(0.82, 0.67, 0.29, 1)
+  rowFrame._nodeMarker = nodeMarker
+
+  local iconTexture = rowFrame:CreateTexture(nil, "ARTWORK") -- 节点类型图标
+  iconTexture:SetPoint("LEFT", rowFrame, "LEFT", 28, 0)
+  iconTexture:SetSize(18, 18)
+  rowFrame._iconTexture = iconTexture
+
+  local labelText = rowFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight") -- 节点标签
+  labelText:SetPoint("TOPLEFT", iconTexture, "TOPRIGHT", 12, -2)
+  labelText:SetPoint("TOPRIGHT", rowFrame, "TOPRIGHT", -12, -2)
+  labelText:SetJustifyH("CENTER")
+  labelText:SetWordWrap(false)
+  labelText:SetText("")
+  rowFrame._labelText = labelText
+
+  local detailText = rowFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 起终点坐标明细
+  detailText:SetPoint("TOPLEFT", labelText, "BOTTOMLEFT", 0, -3)
+  detailText:SetPoint("TOPRIGHT", labelText, "BOTTOMRIGHT", 0, -3)
+  detailText:SetJustifyH("CENTER")
+  detailText:SetWordWrap(false)
+  detailText:SetText("")
+  detailText:Hide()
+  rowFrame._detailText = detailText
+  return rowFrame
+end
+
+--- 刷新展开态竖向节点链。
+---@param frame table 路线图根 Frame
+---@param routeState table 路线状态
+---@param locationSnapshot table|nil 当前位置快照
+local function refreshTimelineText(frame, routeState, locationSnapshot)
+  local displayNodeList = buildRouteDisplayNodes(routeState.routeResult, routeState.routeTarget, routeState.startLocationSnapshot) -- 玩家可见节点链
+  local activeNodeIndex = resolveActiveDisplayNodeIndex(displayNodeList, routeState, locationSnapshot) -- 当前高亮节点
+  frame._timelineText:SetText("")
+  frame._nodeRows = frame._nodeRows or {}
+
+  for nodeIndex, nodeInfo in ipairs(displayNodeList) do
+    local rowFrame = frame._nodeRows[nodeIndex] -- 当前节点行
+    if not rowFrame then
+      rowFrame = createNodeRow(frame._nodeListContainer, nodeIndex)
+      frame._nodeRows[nodeIndex] = rowFrame
+    end
+    local isActiveNode = nodeIndex == activeNodeIndex -- 当前节点是否为高亮节点
+    local detailText = trimText(nodeInfo.detailText) -- 当前节点明细
+    rowFrame._iconTexture:SetTexture(getNodeIconTexture(nodeInfo.kind))
+    rowFrame._labelText:SetText(nodeInfo.text)
+    rowFrame._detailText:SetText(detailText)
+    rowFrame._detailText:SetShown(detailText ~= "")
+    rowFrame._activeGlow:SetShown(isActiveNode)
+    rowFrame._connectorTop:SetShown(nodeIndex > 1)
+    rowFrame._connectorBottom:SetShown(nodeIndex < #displayNodeList)
+    rowFrame._nodeMarker:SetShown(true)
+    rowFrame._nodeMarker:SetColorTexture(
+      isActiveNode and 0.95 or 0.82,
+      isActiveNode and 0.82 or 0.67,
+      isActiveNode and 0.39 or 0.29,
+      1
+    )
+    if type(rowFrame.SetBackdropColor) == "function" then
+      if isActiveNode then
+        rowFrame:SetBackdropColor(0.16, 0.12, 0.06, 0.96)
+        rowFrame:SetBackdropBorderColor(0.9, 0.74, 0.31, 0.96)
+      else
+        rowFrame:SetBackdropColor(0.08, 0.07, 0.06, 0.92)
+        rowFrame:SetBackdropBorderColor(0.52, 0.41, 0.2, 0.88)
+      end
+    end
+    rowFrame:Show()
+  end
+
+  for nodeIndex = #displayNodeList + 1, #frame._nodeRows do
+    local rowFrame = frame._nodeRows[nodeIndex] -- 多余的旧节点行
+    if rowFrame then
+      rowFrame._labelText:SetText("")
+      rowFrame._detailText:SetText("")
+      rowFrame._detailText:Hide()
+      rowFrame._activeGlow:Hide()
+      rowFrame:Hide()
+    end
+  end
 end
 
 --- 刷新历史记录按钮区。
@@ -567,20 +1030,22 @@ local function refreshHistoryButtons(frame)
   for historyIndex, buttonFrame in ipairs(frame._historyButtons) do
     local entry = routeHistory[historyIndex] -- 当前历史项
     if type(entry) == "table" then
-      local buttonText = trimText(entry.targetName) -- 按钮目标名
-      if buttonText == "" then
-        buttonText = trimText(entry.summaryText)
+      local titleText = trimText(entry.targetName) -- 按钮目标名
+      if titleText == "" then
+        titleText = string.format("UiMap %s", tostring(entry.targetUiMapID or "?"))
       end
-      if buttonText == "" then
-        buttonText = string.format("UiMap %s", tostring(entry.targetUiMapID or "?"))
-      end
+      local summaryText = trimText(entry.summaryText) -- 历史一行摘要
       buttonFrame._historyIndex = historyIndex
-      buttonFrame:SetText(string.format("%d. %s", historyIndex, buttonText))
+      buttonFrame:SetText("")
+      buttonFrame._titleText:SetText(titleText)
+      buttonFrame._summaryText:SetText(summaryText)
       buttonFrame:Show()
       hasHistory = true
     else
       buttonFrame._historyIndex = nil
       buttonFrame:SetText("")
+      buttonFrame._titleText:SetText("")
+      buttonFrame._summaryText:SetText("")
       buttonFrame:Hide()
     end
   end
@@ -590,6 +1055,20 @@ local function refreshHistoryButtons(frame)
   else
     frame._historyEmptyText:SetText(getLocaleText("NAVIGATION_ROUTE_WIDGET_HISTORY_EMPTY", "暂无历史路线"))
     frame._historyEmptyText:Show()
+  end
+end
+
+--- 应用历史抽屉展开 / 收起状态。
+---@param frame table 路线图根 Frame
+---@param isExpanded boolean 是否展开
+local function applyHistoryDrawerState(frame, isExpanded)
+  local moduleDb = ensureWidgetDbFields(getModuleDb()) -- navigation 模块存档
+  local shouldExpand = isExpanded == true -- 当前是否展开历史抽屉
+  moduleDb.routeHistoryExpanded = shouldExpand
+  if shouldExpand then
+    frame._historyDrawer:Show()
+  else
+    frame._historyDrawer:Hide()
   end
 end
 
@@ -616,10 +1095,11 @@ local function refreshRouteBar(locationSnapshot)
   if not routeBarFrame or not activeRouteState then
     return
   end
-  refreshCapsuleText(routeBarFrame, activeRouteState)
+  refreshCapsuleText(routeBarFrame, activeRouteState, locationSnapshot)
   refreshTimelineText(routeBarFrame, activeRouteState, locationSnapshot)
   refreshHistoryButtons(routeBarFrame)
   applyExpandedState(routeBarFrame, ensureWidgetDbFields(getModuleDb()).routeWidgetExpanded)
+  applyHistoryDrawerState(routeBarFrame, ensureWidgetDbFields(getModuleDb()).routeHistoryExpanded)
 end
 
 --- 根据当前光标位置更新拖动中的路线图位置。
@@ -685,10 +1165,27 @@ end
 ---@return table
 local function createHistoryButton(parentFrame, historyIndex)
   local buttonFrame = CreateFrame("Button", nil, parentFrame, "UIPanelButtonTemplate") -- 历史路线按钮
-  buttonFrame:SetSize(DEFAULT_WIDGET_WIDTH - 36, 18)
-  buttonFrame:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 12, -210 - ((historyIndex - 1) * 20))
+  buttonFrame:SetSize(DEFAULT_HISTORY_DRAWER_WIDTH - 24, 34)
+  buttonFrame:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 12, -36 - ((historyIndex - 1) * 38))
   buttonFrame:SetText("")
   buttonFrame:Hide()
+
+  local titleText = buttonFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight") -- 历史项标题
+  titleText:SetPoint("TOPLEFT", buttonFrame, "TOPLEFT", 8, -6)
+  titleText:SetPoint("TOPRIGHT", buttonFrame, "TOPRIGHT", -8, -6)
+  titleText:SetJustifyH("LEFT")
+  titleText:SetWordWrap(false)
+  titleText:SetText("")
+  buttonFrame._titleText = titleText
+
+  local summaryText = buttonFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 历史项摘要
+  summaryText:SetPoint("TOPLEFT", titleText, "BOTTOMLEFT", 0, -4)
+  summaryText:SetPoint("TOPRIGHT", titleText, "BOTTOMRIGHT", 0, -4)
+  summaryText:SetJustifyH("LEFT")
+  summaryText:SetWordWrap(false)
+  summaryText:SetText("")
+  buttonFrame._summaryText = summaryText
+
   buttonFrame:SetScript("OnClick", function(self)
     if type(self._historyIndex) == "number" then
       RouteBar.TriggerHistoryEntry(self._historyIndex)
@@ -760,6 +1257,30 @@ local function ensureRouteBarFrame()
   capsuleButton:SetScript("OnDragStop", stopWidgetDrag)
   routeBarFrame._capsuleButton = capsuleButton
 
+  local historyToggleButton = CreateFrame("Button", nil, capsuleButton, "UIPanelButtonTemplate") -- 历史抽屉开关按钮
+  historyToggleButton:SetSize(76, 20)
+  historyToggleButton:SetPoint("TOPRIGHT", capsuleButton, "TOPRIGHT", -10, -8)
+  historyToggleButton:SetText(getLocaleText("NAVIGATION_ROUTE_WIDGET_HISTORY_BUTTON", "最近路线"))
+  historyToggleButton:SetScript("OnClick", function()
+    RouteBar.ToggleHistoryExpanded()
+  end)
+  routeBarFrame._historyToggleButton = historyToggleButton
+
+  local capsuleHeaderStatus = capsuleButton:CreateFontString(nil, "OVERLAY", "GameFontHighlight") -- 胶囊标题状态
+  capsuleHeaderStatus:SetPoint("TOPLEFT", capsuleButton, "TOPLEFT", 12, -10)
+  capsuleHeaderStatus:SetPoint("TOPRIGHT", historyToggleButton, "TOPLEFT", -10, 0)
+  capsuleHeaderStatus:SetJustifyH("LEFT")
+  capsuleHeaderStatus:SetWordWrap(false)
+  capsuleHeaderStatus:SetText("")
+  routeBarFrame._capsuleHeaderStatus = capsuleHeaderStatus
+
+  local capsuleHeaderProgress = capsuleButton:CreateFontString(nil, "OVERLAY", "GameFontHighlight") -- 胶囊标题进度
+  capsuleHeaderProgress:SetPoint("TOPRIGHT", historyToggleButton, "TOPLEFT", -10, 0)
+  capsuleHeaderProgress:SetJustifyH("RIGHT")
+  capsuleHeaderProgress:SetWordWrap(false)
+  capsuleHeaderProgress:SetText("")
+  routeBarFrame._capsuleHeaderProgress = capsuleHeaderProgress
+
   local capsuleSummary = capsuleButton:CreateFontString(nil, "OVERLAY", "GameFontHighlight") -- 胶囊主摘要
   capsuleSummary:SetPoint("TOPLEFT", capsuleButton, "TOPLEFT", 12, -8)
   capsuleSummary:SetPoint("TOPRIGHT", capsuleButton, "TOPRIGHT", -12, -8)
@@ -776,31 +1297,85 @@ local function ensureRouteBarFrame()
   capsuleStatus:SetText("")
   routeBarFrame._capsuleStatus = capsuleStatus
 
+  local function createCapsuleColumn(anchorPoint, offsetX)
+    local labelText = capsuleButton:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall") -- 胶囊列标题
+    labelText:SetPoint(anchorPoint, capsuleButton, anchorPoint, offsetX, -38)
+    labelText:SetJustifyH("CENTER")
+    labelText:SetWordWrap(false)
+    labelText:SetText("")
+
+    local valueText = capsuleButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 胶囊列值
+    valueText:SetPoint("TOP", labelText, "BOTTOM", 0, -4)
+    valueText:SetJustifyH("CENTER")
+    valueText:SetWordWrap(false)
+    valueText:SetText("")
+    return labelText, valueText
+  end
+
+  routeBarFrame._capsuleStartLabel, routeBarFrame._capsuleStartValue = createCapsuleColumn("TOPLEFT", 48)
+  routeBarFrame._capsuleCurrentLabel, routeBarFrame._capsuleCurrentValue = createCapsuleColumn("TOP", 0)
+  routeBarFrame._capsuleTargetLabel, routeBarFrame._capsuleTargetValue = createCapsuleColumn("TOPRIGHT", -48)
+
+  local capsuleDividerLeft = capsuleButton:CreateTexture(nil, "BORDER") -- 左中分隔线
+  capsuleDividerLeft:SetPoint("TOP", capsuleButton, "TOP", -70, -34)
+  capsuleDividerLeft:SetSize(1, 40)
+  capsuleDividerLeft:SetColorTexture(0.78, 0.64, 0.31, 0.72)
+  routeBarFrame._capsuleDividerLeft = capsuleDividerLeft
+
+  local capsuleDividerRight = capsuleButton:CreateTexture(nil, "BORDER") -- 中右分隔线
+  capsuleDividerRight:SetPoint("TOP", capsuleButton, "TOP", 70, -34)
+  capsuleDividerRight:SetSize(1, 40)
+  capsuleDividerRight:SetColorTexture(0.78, 0.64, 0.31, 0.72)
+  routeBarFrame._capsuleDividerRight = capsuleDividerRight
+
   local expandedContent = CreateFrame("Frame", nil, routeBarFrame, "BackdropTemplate") -- 展开态内容容器
-  expandedContent:SetPoint("TOPLEFT", capsuleButton, "BOTTOMLEFT", 0, -4)
-  expandedContent:SetPoint("TOPRIGHT", capsuleButton, "BOTTOMRIGHT", 0, -4)
-  expandedContent:SetHeight(DEFAULT_EXPANDED_HEIGHT - DEFAULT_CAPSULE_HEIGHT - 4)
+  expandedContent:SetPoint("TOPLEFT", capsuleButton, "BOTTOMLEFT", 0, -6)
+  expandedContent:SetPoint("TOPRIGHT", capsuleButton, "BOTTOMRIGHT", 0, -6)
+  expandedContent:SetHeight(DEFAULT_EXPANDED_HEIGHT - DEFAULT_CAPSULE_HEIGHT - 6)
   expandedContent:Hide()
   routeBarFrame._expandedContent = expandedContent
 
   local timelineText = expandedContent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 时间线文本
-  timelineText:SetPoint("TOPLEFT", expandedContent, "TOPLEFT", 12, -12)
-  timelineText:SetPoint("TOPRIGHT", expandedContent, "TOPRIGHT", -12, -12)
+  timelineText:SetPoint("TOPLEFT", expandedContent, "TOPLEFT", 0, 0)
   timelineText:SetJustifyH("LEFT")
-  timelineText:SetJustifyV("TOP")
-  timelineText:SetWordWrap(true)
   timelineText:SetText("")
   routeBarFrame._timelineText = timelineText
 
-  local historyTitle = expandedContent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall") -- 历史标题
-  historyTitle:SetPoint("TOPLEFT", expandedContent, "TOPLEFT", 12, -190)
+  local nodeListContainer = CreateFrame("Frame", nil, expandedContent, "BackdropTemplate") -- 节点链容器
+  nodeListContainer:SetPoint("TOPLEFT", expandedContent, "TOPLEFT", 0, 0)
+  nodeListContainer:SetPoint("TOPRIGHT", expandedContent, "TOPRIGHT", 0, 0)
+  nodeListContainer:SetHeight(DEFAULT_EXPANDED_HEIGHT - DEFAULT_CAPSULE_HEIGHT - 6)
+  routeBarFrame._nodeListContainer = nodeListContainer
+  routeBarFrame._nodeRows = {}
+
+  local historyDrawer = CreateFrame("Frame", nil, routeBarFrame, "BackdropTemplate") -- 侧贴历史抽屉
+  historyDrawer:SetPoint("TOPLEFT", routeBarFrame, "TOPRIGHT", 8, 0)
+  historyDrawer:SetSize(DEFAULT_HISTORY_DRAWER_WIDTH, 420)
+  historyDrawer:Hide()
+  routeBarFrame._historyDrawer = historyDrawer
+  if type(historyDrawer.SetBackdrop) == "function" then
+    historyDrawer:SetBackdrop({
+      bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+      tile = true,
+      tileSize = 16,
+      edgeSize = 12,
+      insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    historyDrawer:SetBackdropColor(0.05, 0.04, 0.03, 0.92)
+    historyDrawer:SetBackdropBorderColor(0.78, 0.64, 0.31, 0.88)
+  end
+
+  local historyTitle = historyDrawer:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 历史标题
+  historyTitle:SetPoint("TOPLEFT", historyDrawer, "TOPLEFT", 12, -12)
+  historyTitle:SetPoint("TOPRIGHT", historyDrawer, "TOPRIGHT", -12, -12)
   historyTitle:SetJustifyH("LEFT")
   historyTitle:SetText("")
   routeBarFrame._historyTitle = historyTitle
 
-  local historyEmptyText = expandedContent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 空历史提示
-  historyEmptyText:SetPoint("TOPLEFT", historyTitle, "BOTTOMLEFT", 0, -8)
-  historyEmptyText:SetPoint("TOPRIGHT", expandedContent, "TOPRIGHT", -12, -8)
+  local historyEmptyText = historyDrawer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 空历史提示
+  historyEmptyText:SetPoint("TOPLEFT", historyTitle, "BOTTOMLEFT", 0, -10)
+  historyEmptyText:SetPoint("TOPRIGHT", historyDrawer, "TOPRIGHT", -12, -10)
   historyEmptyText:SetJustifyH("LEFT")
   historyEmptyText:SetWordWrap(true)
   historyEmptyText:SetText("")
@@ -808,11 +1383,12 @@ local function ensureRouteBarFrame()
 
   routeBarFrame._historyButtons = {}
   for historyIndex = 1, DEFAULT_HISTORY_LIMIT do
-    routeBarFrame._historyButtons[historyIndex] = createHistoryButton(expandedContent, historyIndex)
+    routeBarFrame._historyButtons[historyIndex] = createHistoryButton(historyDrawer, historyIndex)
   end
 
   refreshHistoryButtons(routeBarFrame)
   applyExpandedState(routeBarFrame, ensureWidgetDbFields(getModuleDb()).routeWidgetExpanded)
+  applyHistoryDrawerState(routeBarFrame, ensureWidgetDbFields(getModuleDb()).routeHistoryExpanded)
   return routeBarFrame
 end
 
@@ -821,6 +1397,25 @@ end
 ---@return string
 function RouteBar.BuildRouteText(routeResult)
   return buildRouteText(routeResult)
+end
+
+--- 复用 RouteBar 的地图与坐标格式化规则。
+---@param uiMapID any 地图 ID
+---@param pointX any 坐标 X
+---@param pointY any 坐标 Y
+---@param fallbackText any 兜底名称
+---@return string
+function RouteBar.BuildPositionDisplayText(uiMapID, pointX, pointY, fallbackText)
+  return buildPositionDisplayText(uiMapID, pointX, pointY, fallbackText)
+end
+
+--- 复用 RouteBar 的节点链摘要规则，仅返回节点路径文本。
+---@param routeResult table|nil 路线结果
+---@param routeTarget table|nil 路线目标
+---@param startLocationSnapshot table|nil 规划起点快照
+---@return string
+function RouteBar.BuildRouteNodePathText(routeResult, routeTarget, startLocationSnapshot)
+  return buildRouteNodePathText(routeResult, routeTarget, startLocationSnapshot)
 end
 
 --- 切换展开 / 收起状态。
@@ -833,22 +1428,74 @@ function RouteBar.ToggleExpanded()
   applyExpandedState(frame, moduleDb.routeWidgetExpanded ~= true)
 end
 
---- 触发一条历史记录的重规划。
----@param historyIndex number 历史序号（1 为最近一次）
-function RouteBar.TriggerHistoryEntry(historyIndex)
+--- 切换历史抽屉展开 / 收起状态。
+function RouteBar.ToggleHistoryExpanded()
+  local frame = ensureRouteBarFrame() -- 路线图根 Frame
+  if not frame then
+    return
+  end
   local moduleDb = ensureWidgetDbFields(getModuleDb()) -- navigation 模块存档
-  local historyEntry = type(moduleDb.routeHistory) == "table" and moduleDb.routeHistory[historyIndex] or nil -- 历史记录项
+  applyHistoryDrawerState(frame, moduleDb.routeHistoryExpanded ~= true)
+end
+
+--- 真正执行一条历史记录的重规划。
+---@param historyEntry table|nil 历史记录项
+local function replanHistoryEntry(historyEntry)
   local worldMap = Toolbox.NavigationModule and Toolbox.NavigationModule.WorldMap or nil -- 世界地图入口模块
   if type(historyEntry) ~= "table" or type(worldMap) ~= "table" or type(worldMap.PlanRouteToTarget) ~= "function" then
     return
   end
-
   worldMap.PlanRouteToTarget({
     uiMapID = tonumber(historyEntry.targetUiMapID) or 0,
     x = tonumber(historyEntry.targetX) or 0,
     y = tonumber(historyEntry.targetY) or 0,
     name = trimText(historyEntry.targetName),
   })
+end
+
+--- 确保历史重规划确认弹框定义已注册。
+---@return table|nil
+local function ensureHistoryConfirmDialog()
+  if type(StaticPopupDialogs) ~= "table" then
+    return nil
+  end
+  local dialogDef = StaticPopupDialogs[HISTORY_CONFIRM_DIALOG_KEY] -- 已注册弹框定义
+  if type(dialogDef) ~= "table" then
+    dialogDef = {}
+    StaticPopupDialogs[HISTORY_CONFIRM_DIALOG_KEY] = dialogDef
+  end
+  dialogDef.text = getLocaleText("NAVIGATION_ROUTE_WIDGET_HISTORY_CONFIRM", "是否重新规划到%s？")
+  dialogDef.button1 = rawget(_G, "ACCEPT") or "确认"
+  dialogDef.button2 = rawget(_G, "CANCEL") or "取消"
+  dialogDef.OnAccept = function(_, dataObject)
+    replanHistoryEntry(dataObject)
+  end
+  dialogDef.OnCancel = function() end
+  dialogDef.hideOnEscape = 1
+  dialogDef.whileDead = 1
+  return dialogDef
+end
+
+--- 触发一条历史记录的重规划。
+---@param historyIndex number 历史序号（1 为最近一次）
+function RouteBar.TriggerHistoryEntry(historyIndex)
+  local moduleDb = ensureWidgetDbFields(getModuleDb()) -- navigation 模块存档
+  local historyEntry = type(moduleDb.routeHistory) == "table" and moduleDb.routeHistory[historyIndex] or nil -- 历史记录项
+  if type(historyEntry) ~= "table" then
+    return
+  end
+
+  local dialogDef = ensureHistoryConfirmDialog() -- 历史重规划确认弹框
+  if type(dialogDef) == "table" and type(StaticPopup_Show) == "function" then
+    StaticPopup_Show(
+      HISTORY_CONFIRM_DIALOG_KEY,
+      trimText(historyEntry.targetName),
+      getLocaleText("NAVIGATION_ROUTE_WIDGET_HISTORY_CONFIRM_DETAIL", "将以你的当前位置为起点重新规划。"),
+      historyEntry
+    )
+    return
+  end
+  replanHistoryEntry(historyEntry)
 end
 
 --- 显示并刷新当前路线。
@@ -872,7 +1519,7 @@ function RouteBar.ShowRoute(routeResult, routeTarget)
   }
   ensureWidgetDbFields(getModuleDb())
   applyWidgetPosition(frame)
-  pushRouteHistory(routeTarget, routeResult)
+  pushRouteHistory(routeTarget, routeResult, startLocationSnapshot)
   frame._elapsedSeconds = 0
   frame:Show()
   RouteBar.RefreshLiveState()
@@ -907,8 +1554,26 @@ function RouteBar.ClearRoute()
     if routeBarFrame._capsuleStatus then
       routeBarFrame._capsuleStatus:SetText("")
     end
+    if routeBarFrame._capsuleHeaderStatus then
+      routeBarFrame._capsuleHeaderStatus:SetText("")
+    end
+    if routeBarFrame._capsuleHeaderProgress then
+      routeBarFrame._capsuleHeaderProgress:SetText("")
+    end
+    if routeBarFrame._capsuleStartValue then
+      routeBarFrame._capsuleStartValue:SetText("")
+    end
+    if routeBarFrame._capsuleCurrentValue then
+      routeBarFrame._capsuleCurrentValue:SetText("")
+    end
+    if routeBarFrame._capsuleTargetValue then
+      routeBarFrame._capsuleTargetValue:SetText("")
+    end
     if routeBarFrame._timelineText then
       routeBarFrame._timelineText:SetText("")
+    end
+    if routeBarFrame._historyDrawer then
+      routeBarFrame._historyDrawer:Hide()
     end
     routeBarFrame:Hide()
   end

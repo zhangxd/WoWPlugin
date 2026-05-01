@@ -10,6 +10,21 @@ describe("Navigation WorldMap integration", function()
   local chatMessages = nil -- 聊天提示记录
   local moduleDb = nil -- navigation 模块存档
 
+  local function assertPlanningDiagnostics(messageList)
+    assert.equals(3, #messageList)
+    assert.equals("规划成功 | 起点：杜隆塔尔 61.0, 44.0 | 终点：北风苔原 52.0, 43.0 | 总步数：2 | 节点：杜隆塔尔 -> 奥格瑞玛 -> 北风苔原", messageList[1])
+    assert.equals("第1段 | mode=class_teleport | from=当前位置 | to=奥格瑞玛 | traversedUiMapNames=奥格瑞玛", messageList[2])
+    assert.equals("第2段 | mode=walk_local | from=奥格瑞玛 | to=北风苔原目标点 | traversedUiMapNames=北风苔原", messageList[3])
+  end
+
+  local function assertTaxiHubPlanningDiagnostics(messageList)
+    assert.equals("规划成功 | 起点：银月城 64.1, 65.2 | 终点：辛特兰 57.1, 48.1 | 总步数：4 | 节点：银月城 -> 永歌森林 -> 塔奎林，永歌森林 -> 东瘟疫之地 -> 圣光之愿礼拜堂，东瘟疫之地 -> 辛特兰 -> 恶齿村，辛特兰 -> 辛特兰", messageList[1])
+    assert.equals("第1段 | mode=walk_local | from=当前位置 | to=塔奎林，永歌森林 | traversedUiMapNames=银月城 -> 永歌森林 -> 塔奎林，永歌森林", messageList[2])
+    assert.equals("第2段 | mode=taxi | from=塔奎林，永歌森林 | to=圣光之愿礼拜堂，东瘟疫之地 | traversedUiMapNames=永歌森林 -> 祖阿曼 -> 东瘟疫之地", messageList[3])
+    assert.equals("第3段 | mode=taxi | from=圣光之愿礼拜堂，东瘟疫之地 | to=恶齿村，辛特兰 | traversedUiMapNames=东瘟疫之地 -> 辛特兰", messageList[4])
+    assert.equals("第4段 | mode=walk_local | from=恶齿村，辛特兰 | to=辛特兰 | traversedUiMapNames=恶齿村，辛特兰 -> 辛特兰", messageList[5])
+  end
+
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
     originalWorldMapFrame = rawget(_G, "WorldMapFrame")
@@ -66,6 +81,9 @@ describe("Navigation WorldMap integration", function()
           return {
             classFile = "MAGE",
             faction = "Horde",
+            currentUiMapID = 1,
+            currentX = 0.61,
+            currentY = 0.44,
             knownSpellByID = {
               [spellIDList[1]] = true,
             },
@@ -101,6 +119,21 @@ describe("Navigation WorldMap integration", function()
             shownRoute = routeResult
             shownTarget = target
           end,
+          BuildPositionDisplayText = function(uiMapID, pointX, pointY, fallbackText)
+            local mapNameByID = {
+              [1] = "杜隆塔尔",
+              [85] = "奥格瑞玛",
+              [114] = "北风苔原",
+            }
+            local mapName = mapNameByID[tonumber(uiMapID)] or tostring(fallbackText or "")
+            if type(pointX) == "number" and type(pointY) == "number" then
+              return string.format("%s %.1f, %.1f", mapName, pointX * 100, pointY * 100)
+            end
+            return mapName
+          end,
+          BuildRouteNodePathText = function()
+            return "杜隆塔尔 -> 奥格瑞玛 -> 北风苔原"
+          end,
           BuildRouteText = function(routeResult)
             return string.format("%d步 | %s", tonumber(routeResult and routeResult.totalSteps) or 0, tostring(routeResult and routeResult.segments and routeResult.segments[1] and routeResult.segments[1].mode or ""))
           end,
@@ -116,6 +149,15 @@ describe("Navigation WorldMap integration", function()
         GetModule = function()
           return moduleDb
         end,
+      },
+      Data = {
+        NavigationMapNodes = {
+          nodes = {
+            [1] = { Name_lang = "杜隆塔尔" },
+            [85] = { Name_lang = "奥格瑞玛" },
+            [114] = { Name_lang = "北风苔原" },
+          },
+        },
       },
       L = {
         NAVIGATION_WORLD_MAP_BUTTON = "规划路线",
@@ -157,9 +199,7 @@ describe("Navigation WorldMap integration", function()
     assert.equals("class_teleport", shownRoute.segments[1].mode)
     assert.equals(114, shownTarget.uiMapID)
     assert.equals(0.52, shownTarget.x)
-    assert.equals(1, #chatMessages)
-    assert.is_true(string.find(chatMessages[1], "2步", 1, true) ~= nil)
-    assert.is_true(string.find(chatMessages[1], "class_teleport", 1, true) ~= nil)
+    assertPlanningDiagnostics(chatMessages)
   end)
 
   it("supports_replanning_to_an_explicit_history_target_without_reading_the_user_waypoint", function()
@@ -181,8 +221,75 @@ describe("Navigation WorldMap integration", function()
     assert.equals(114, moduleDb.lastTargetUiMapID)
     assert.equals(0.52, moduleDb.lastTargetX)
     assert.equals(0.43, moduleDb.lastTargetY)
-    assert.equals(1, #chatMessages)
-    assert.is_nil(string.find(chatMessages[1], "请先在世界地图上放置目标标记。", 1, true))
+    assertPlanningDiagnostics(chatMessages)
+  end)
+
+  it("builds_planning_node_summary_from_segment_hubs_instead_of_the_player_facing_routebar_summary", function()
+    Toolbox.Navigation.BuildCurrentCharacterAvailability = function()
+      return {
+        classFile = "PALADIN",
+        faction = "Horde",
+        currentUiMapID = 94,
+        currentX = 0.641,
+        currentY = 0.652,
+        knownSpellByID = {},
+      }
+    end
+    Toolbox.Navigation.PlanRouteToMapTarget = function()
+      return {
+        totalSteps = 4,
+        segments = {
+          {
+            mode = "walk_local",
+            fromName = "当前位置",
+            toName = "塔奎林，永歌森林",
+            traversedUiMapNames = { "银月城", "永歌森林", "塔奎林，永歌森林" },
+          },
+          {
+            mode = "taxi",
+            fromName = "塔奎林，永歌森林",
+            toName = "圣光之愿礼拜堂，东瘟疫之地",
+            traversedUiMapNames = { "永歌森林", "祖阿曼", "东瘟疫之地" },
+          },
+          {
+            mode = "taxi",
+            fromName = "圣光之愿礼拜堂，东瘟疫之地",
+            toName = "恶齿村，辛特兰",
+            traversedUiMapNames = { "东瘟疫之地", "辛特兰" },
+          },
+          {
+            mode = "walk_local",
+            fromName = "恶齿村，辛特兰",
+            toName = "辛特兰",
+            traversedUiMapNames = { "恶齿村，辛特兰", "辛特兰" },
+          },
+        },
+      }, nil
+    end
+    Toolbox.NavigationModule.RouteBar.BuildPositionDisplayText = function(uiMapID, pointX, pointY, fallbackText)
+      local mapNameByID = {
+        [26] = "辛特兰",
+        [94] = "银月城",
+      }
+      local mapName = mapNameByID[tonumber(uiMapID)] or tostring(fallbackText or "")
+      if type(pointX) == "number" and type(pointY) == "number" then
+        return string.format("%s %.1f, %.1f", mapName, pointX * 100, pointY * 100)
+      end
+      return mapName
+    end
+    Toolbox.NavigationModule.RouteBar.BuildRouteNodePathText = function()
+      return "银月城 -> 东瘟疫之地 -> 辛特兰"
+    end
+
+    Toolbox.NavigationModule.WorldMap.PlanRouteToTarget({
+      uiMapID = 26,
+      x = 0.571,
+      y = 0.481,
+      name = "辛特兰",
+    })
+
+    assert.equals(5, #chatMessages)
+    assertTaxiHubPlanningDiagnostics(chatMessages)
   end)
 
   it("shows_disabled_button_and_chat_hint_when_user_waypoint_is_missing", function()

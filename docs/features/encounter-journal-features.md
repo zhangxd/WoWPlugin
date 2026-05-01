@@ -43,7 +43,7 @@
 ### 3.3 副本入口导航
 
 - 在副本列表条目右下角提供图钉按钮；点击后打开世界地图到该副本入口所在地图，创建系统用户导航点并开始追踪。
-- 当 Blizzard 运行时入口数据缺少当前条目的精确 `journalInstanceID` 时，会使用 DB 契约导出的静态入口表补足；例如 `厄运之槌 - 戈多克议会` 不再因只返回聚合入口而提示找不到入口。
+- 运行时入口数据源固定为 DB 契约导出的 `Toolbox.Data.NavigationInstanceEntrances`；即便 Blizzard 运行时入口 API 只返回聚合副本 ID，列表图钉也仍可按当前条目的精确 `journalInstanceID` 直接导航，例如 `厄运之槌 - 戈多克议会` 与 `斯坦索姆 - 仆从入口`。
 - 若当前副本没有可用入口数据，点击后给出不可用提示，不抛 Lua 错误。
 
 ### 3.4 外部入口与锁定摘要联动
@@ -87,7 +87,7 @@
 - 副本锁定信息依赖游戏原生 `GetSavedInstanceInfo` API。
 - 坐骑筛选依赖静态数据表；若静态数据缺失或过期，结果会受影响。
 - 部分增强行为需要 `Blizzard_EncounterJournal` 已加载后才会显示或刷新。
-- “导航入口”按冒险指南条目的 `journalInstanceID` 直接读取 DB 导出的 `Toolbox.Data.InstanceEntrances`；静态入口数据采用精确 `areapoi` 优先、缺失时使用 `journalinstanceentrance` 的口径。Blizzard 运行时入口 API 只作为静态表缺失时的兜底；最终仍依赖系统 waypoint API，特殊入口或不允许设置 waypoint 的地图可能无法导航。
+- “导航入口”按冒险指南条目的 `journalInstanceID` 直接读取 DB 导出的 `Toolbox.Data.NavigationInstanceEntrances`；导出层已负责把共享物理入口展开为多个独立副本记录，运行时不再追加旧静态表或 Blizzard 入口 API 兜底。最终仍依赖系统 waypoint API，特殊入口或不允许设置 waypoint 的地图可能无法导航。
 - `encounter_journal` 不再承载任务浏览与任务查询能力；这部分能力已经迁移到 `quest` 模块。
 
 ## 7. 关联文档
