@@ -315,4 +315,55 @@ describe("Navigation data", function()
     assert.is_nil(firstAssignment.RegionX1)
     assert.is_nil(firstAssignment.RegionY1)
   end)
+
+  it("exports_walk_components_with_component_membership_and_display_proxy_metadata", function()
+    dofile("Toolbox/Data/NavigationWalkComponents.lua")
+
+    local exportedData = Toolbox.Data.NavigationWalkComponents -- 步行组件正式导出数据
+    local componentCount = 0 -- 已检查组件数量
+    local assignmentCount = 0 -- 已检查归属数量
+    local proxyCount = 0 -- 已检查代理数量
+
+    assert.is_table(exportedData.components)
+    assert.is_table(exportedData.nodeAssignments)
+    assert.is_table(exportedData.displayProxies)
+
+    for componentID, componentDef in pairs(exportedData.components) do
+      componentCount = componentCount + 1
+      assert.equals(componentID, componentDef.ComponentID)
+      assert.is_string(componentDef.DisplayName)
+      assert.is_table(componentDef.MemberNodeIDs)
+      assert.is_table(componentDef.EntryNodeIDs)
+      assert.is_true(#componentDef.MemberNodeIDs > 0)
+      assert.is_true(#componentDef.EntryNodeIDs > 0)
+      assert.is_number(tonumber(componentDef.PreferredAnchorNodeID))
+    end
+
+    for nodeID, assignmentDef in pairs(exportedData.nodeAssignments) do
+      assignmentCount = assignmentCount + 1
+      assert.equals(tonumber(nodeID), tonumber(assignmentDef.NodeID))
+      assert.is_string(assignmentDef.ComponentID)
+      assert.is_string(assignmentDef.Role)
+      assert.is_boolean(assignmentDef.HiddenInSemanticChain)
+      if assignmentDef.DisplayProxyNodeID ~= nil then
+        assert.is_number(tonumber(assignmentDef.DisplayProxyNodeID))
+      end
+      if assignmentDef.VisibleName ~= nil then
+        assert.is_string(assignmentDef.VisibleName)
+      end
+    end
+
+    for proxyNodeID, proxyDef in pairs(exportedData.displayProxies) do
+      proxyCount = proxyCount + 1
+      assert.equals(tonumber(proxyNodeID), tonumber(proxyDef.NodeID))
+      assert.is_string(proxyDef.ComponentID)
+      assert.is_number(tonumber(proxyDef.DisplayProxyNodeID))
+      assert.is_string(proxyDef.VisibleName)
+      assert.is_table(exportedData.components[proxyDef.ComponentID])
+    end
+
+    assert.is_true(componentCount > 0)
+    assert.is_true(assignmentCount > 0)
+    assert.is_true(proxyCount > 0)
+  end)
 end)

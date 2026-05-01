@@ -269,16 +269,16 @@
 
 ### 5.7.2 `WalkComponent` 契约与首批覆盖
 
-为避免继续把 `WalkClusterNodeID / WalkClusterKey` 当成 world walk truth，后续 `walk component` 需要独立成正式导出契约，而不是继续在 runtime 里临时归并。
+为避免继续把 `WalkClusterNodeID / WalkClusterKey` 当成 world walk truth，本轮已经把 `walk component` 拆成独立正式导出契约，并让 runtime 优先消费正式组件归属，而不是继续只靠临时归并。
 
-建议新增的正式出口：
+当前已落地的正式出口：
 
 | 文件 | 职责 |
 |------|------|
 | `DataContracts/navigation_walk_components.json` | 定义 `WalkComponent` 与节点归属 / 代理规则的正式契约。 |
 | `Toolbox/Data/NavigationWalkComponents.lua` | runtime 只读的步行组件数据出口。 |
 
-导出链路采用三层来源：
+当前导出链路采用三层来源：
 
 1. `wow.db` 自动候选
    - 复用当前已有的 `navigation_map_nodes / navigation_route_edges / waypoint / transport / portal` 来源，先生成“哪些节点大概率属于同一局部步行组件”的候选集。
@@ -291,9 +291,9 @@
      - `preferred_anchor`：同一组件对外应该使用哪个锚点 / 到站点；
      - `uimap / visible_name`：自动归属或自动命名不符合玩家语义的节点。
 3. 正式导出
-   - 最终只把确认后的 `WalkComponent` 真值、节点归属和代理信息写入 `NavigationWalkComponents.lua`，供 `Toolbox.Navigation` 与展示层统一消费。
+   - 当前只把首批确认后的 `WalkComponent` 局部真值、节点归属和代理信息写入 `NavigationWalkComponents.lua`，供 `Toolbox.Navigation` 与展示层统一消费。
 
-首批覆盖范围只落高价值局部区域，不承诺一口气闭合全世界：
+当前首批覆盖范围只落高价值局部区域，不承诺一口气闭合全世界：
 
 - 主城
 - 传送门房
@@ -536,3 +536,4 @@
 | 2026-05-01 | 语义路线链定稿：玩家可见链路改为 `地图节点 / 动作节点` 分层表达，`walk_local` 只作隐藏接入，`taxi` 不单独生成动作节点，规划摘要与节点链禁止泄漏返程技术节点名 |
 | 2026-05-01 | `walk component` 方案定稿：新增正式契约与 runtime 出口方向，首批覆盖主城、传送门房、飞艇塔 / 港口与常用交通落点；人工修正只允许存在于源侧 override |
 | 2026-05-02 | 路线图布局补充：精简胶囊宽度改为随文本长度自适应；展开态节点区底框必须随节点范围自动扩展，禁止尾部节点超框 |
+| 2026-05-02 | `walk component` 首批实现：`navigation_walk_components` 契约、源侧 override 与 `NavigationWalkComponents.lua` 已落地；runtime 本地接入优先读取 formal component，缺失时继续 fallback 到 `WalkClusterNodeID / WalkClusterKey` |

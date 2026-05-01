@@ -7,7 +7,7 @@ describe("Navigation API", function()
   local originalCTaxiMap = nil -- 原始 C_TaxiMap 全局
   local originalGetBindLocation = nil -- 原始 GetBindLocation 全局
 
-  local function setNavigationData(routeNodes, routeEdges, mapNodes, abilityTemplates)
+  local function setNavigationData(routeNodes, routeEdges, mapNodes, abilityTemplates, walkComponentData)
     Toolbox.Data.NavigationRouteEdges = {
       nodes = routeNodes or {},
       edges = routeEdges or {},
@@ -18,6 +18,7 @@ describe("Navigation API", function()
     Toolbox.Data.NavigationAbilityTemplates = {
       templates = abilityTemplates or {},
     }
+    Toolbox.Data.NavigationWalkComponents = walkComponentData
   end
 
   local function buildAllKnownTaxiNodeByID()
@@ -1196,5 +1197,140 @@ describe("Navigation API", function()
     assert.is_true(usedNewSilvermoonChain)
     assert.is_true(usedNewZulamanTaxiChain)
     assert.is_false(usedLegacySilvermoonTaxi)
+  end)
+
+  it("prefers_formal_walk_components_for_local_access_and_semantic_proxy_names", function()
+    setNavigationData({
+      [1000] = { NodeID = 1000, Kind = "map_anchor", Source = "uimap", SourceID = 10, UiMapID = 10, Name_lang = "起点地图", WalkClusterNodeID = 1000 },
+      [1001] = { NodeID = 1001, Kind = "taxi", Source = "taxi", SourceID = 5001, UiMapID = 10, Name_lang = "起点技术飞行点", WalkClusterNodeID = 9999, TaxiNodeID = 5001 },
+      [2000] = { NodeID = 2000, Kind = "map_anchor", Source = "uimap", SourceID = 20, UiMapID = 20, Name_lang = "目标地图", WalkClusterNodeID = 2000 },
+      [2001] = { NodeID = 2001, Kind = "taxi", Source = "taxi", SourceID = 6001, UiMapID = 20, Name_lang = "目标技术飞行点", WalkClusterNodeID = 9998, TaxiNodeID = 6001 },
+    }, {
+      {
+        ID = 1,
+        FromNodeID = 1001,
+        ToNodeID = 2001,
+        FromUiMapID = 10,
+        ToUiMapID = 20,
+        FromTaxiNodeID = 5001,
+        ToTaxiNodeID = 6001,
+        fromUiMapID = 10,
+        toUiMapID = 20,
+        fromTaxiNodeID = 5001,
+        toTaxiNodeID = 6001,
+        StepCost = 1,
+        Mode = "taxi",
+        Label = "飞往目标地图",
+        TraversedUiMapIDs = { 10, 20 },
+        TraversedUiMapNames = { "起点地图", "目标地图" },
+      },
+    }, {
+      [10] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
+      [20] = { Name_lang = "目标地图", MapType = 3, ParentUiMapID = 0 },
+    }, {}, {
+      components = {
+        [1] = {
+          ComponentID = 1,
+          DisplayName = "起点组件",
+          MemberNodeIDs = { 1000, 1001 },
+          EntryNodeIDs = { 1000, 1001 },
+          PreferredAnchorNodeID = 1000,
+        },
+        [2] = {
+          ComponentID = 2,
+          DisplayName = "目标组件",
+          MemberNodeIDs = { 2000, 2001 },
+          EntryNodeIDs = { 2000, 2001 },
+          PreferredAnchorNodeID = 2000,
+        },
+      },
+      nodeAssignments = {
+        [1000] = { NodeID = 1000, ComponentID = 1, Role = "anchor" },
+        [1001] = { NodeID = 1001, ComponentID = 1, Role = "hub", VisibleName = "起点飞行点" },
+        [2000] = { NodeID = 2000, ComponentID = 2, Role = "anchor" },
+        [2001] = { NodeID = 2001, ComponentID = 2, Role = "hub", VisibleName = "目标飞行点" },
+      },
+    })
+
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 20,
+      x = 0.50,
+      y = 0.50,
+    }, {
+      classFile = "WARRIOR",
+      faction = "Horde",
+      currentUiMapID = 10,
+      knownSpellByID = {},
+      knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
+    })
+
+    assert.is_nil(errorObject)
+    assert.is_table(routeResult)
+    assert.is_true(rawPathUsesResolvedEdge(routeResult.rawEdgePath, {
+      source = "taxi",
+      sourceID = 5001,
+      kind = "taxi",
+    }, {
+      source = "taxi",
+      sourceID = 6001,
+      kind = "taxi",
+    }, "taxi"))
+    assert.equals("目标飞行点", routeResult.segments[3].fromName)
+    assert.same({ "目标飞行点", "目标地图" }, routeResult.segments[3].traversedUiMapNames)
+  end)
+
+  it("keeps_the_legacy_walk_cluster_fallback_when_formal_walk_components_are_missing", function()
+    setNavigationData({
+      [1000] = { NodeID = 1000, Kind = "map_anchor", Source = "uimap", SourceID = 10, UiMapID = 10, Name_lang = "起点地图", WalkClusterNodeID = 1000 },
+      [1001] = { NodeID = 1001, Kind = "taxi", Source = "taxi", SourceID = 5001, UiMapID = 10, Name_lang = "起点飞行点", WalkClusterNodeID = 1000, TaxiNodeID = 5001 },
+      [2000] = { NodeID = 2000, Kind = "map_anchor", Source = "uimap", SourceID = 20, UiMapID = 20, Name_lang = "目标地图", WalkClusterNodeID = 2000 },
+      [2001] = { NodeID = 2001, Kind = "taxi", Source = "taxi", SourceID = 6001, UiMapID = 20, Name_lang = "目标飞行点", WalkClusterNodeID = 2000, TaxiNodeID = 6001 },
+    }, {
+      {
+        ID = 1,
+        FromNodeID = 1001,
+        ToNodeID = 2001,
+        FromUiMapID = 10,
+        ToUiMapID = 20,
+        FromTaxiNodeID = 5001,
+        ToTaxiNodeID = 6001,
+        fromUiMapID = 10,
+        toUiMapID = 20,
+        fromTaxiNodeID = 5001,
+        toTaxiNodeID = 6001,
+        StepCost = 1,
+        Mode = "taxi",
+        Label = "飞往目标地图",
+        TraversedUiMapIDs = { 10, 20 },
+        TraversedUiMapNames = { "起点地图", "目标地图" },
+      },
+    }, {
+      [10] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
+      [20] = { Name_lang = "目标地图", MapType = 3, ParentUiMapID = 0 },
+    }, {})
+
+    local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
+      uiMapID = 20,
+      x = 0.50,
+      y = 0.50,
+    }, {
+      classFile = "WARRIOR",
+      faction = "Horde",
+      currentUiMapID = 10,
+      knownSpellByID = {},
+      knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
+    })
+
+    assert.is_nil(errorObject)
+    assert.is_table(routeResult)
+    assert.is_true(rawPathUsesResolvedEdge(routeResult.rawEdgePath, {
+      source = "taxi",
+      sourceID = 5001,
+      kind = "taxi",
+    }, {
+      source = "taxi",
+      sourceID = 6001,
+      kind = "taxi",
+    }, "taxi"))
   end)
 end)

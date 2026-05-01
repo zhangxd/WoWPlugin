@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+import json
 import os
 import re
 import sqlite3
@@ -52,6 +53,12 @@ def default_data_dir() -> Path:
     """返回默认输出 Data 目录。"""
 
     return default_wowplugin_root() / "Toolbox" / "Data"
+
+
+def default_navigation_walk_component_override_path() -> Path:
+    """返回 walk component 源侧 override 文件路径。"""
+
+    return Path(__file__).resolve().with_name("navigation_walk_component_overrides.json")
 
 
 def to_workspace_relative(path_value: Path) -> Path:
@@ -2235,6 +2242,160 @@ def enrich_navigation_route_datasets(
     return dataset_rows_by_name
 
 
+def load_navigation_walk_component_override_document() -> dict[str, Any]:
+    """读取 walk component 源侧 override 定义。"""
+
+    override_path = default_navigation_walk_component_override_path()
+    require(override_path.exists(), f"missing navigation walk component override file: {override_path}")
+    return json.loads(override_path.read_text(encoding="utf-8"))
+
+
+def build_navigation_walk_component_route_nodes(
+    sqlite_conn: sqlite3.Connection,
+) -> list[dict[str, Any]]:
+    """复用 navigation_route_edges 导出链生成 runtime 路线节点。"""
+
+    route_contract = load_contract("navigation_route_edges", default_contract_dir())
+    _, _, route_datasets, _ = execute_contract_queries(sqlite_conn, route_contract)
+    require(route_datasets is not None, "navigation_route_edges must export datasets")
+    enriched_route_datasets = apply_supplemental_sources(
+        sqlite_conn,
+        route_contract,
+        route_datasets,
+        questcompletist_dir=None,
+    )
+    return list(enriched_route_datasets.get("nodes", []))
+
+
+def build_navigation_walk_component_node_index(
+    route_node_rows: Iterable[Mapping[str, Any]],
+) -> dict[tuple[str, str, int], dict[str, Any]]:
+    """按 Kind + Source + SourceID 为 walk component 建立节点索引。"""
+
+    node_index: dict[tuple[str, str, int], dict[str, Any]] = {}
+    for route_node_row in route_node_rows:
+        node_kind = str(route_node_row.get("node_kind") or "")
+        route_source = str(route_node_row.get("route_source") or "")
+        source_id = int(route_node_row.get("source_id") or 0)
+        if node_kind == "" or route_source == "" or source_id <= 0:
+            continue
+        node_index[(node_kind, route_source, source_id)] = dict(route_node_row)
+    return node_index
+
+
+def resolve_navigation_walk_component_ref(
+    node_index: Mapping[tuple[str, str, int], Mapping[str, Any]],
+    ref_data: Mapping[str, Any],
+) -> dict[str, Any]:
+    """把 override 中的节点引用解析成 runtime 节点行。"""
+
+    node_kind = str(ref_data.get("kind") or "")
+    route_source = str(ref_data.get("source") or "")
+    source_id = int(ref_data.get("source_id") or 0)
+    require(node_kind != "", "walk component ref.kind must be non-empty")
+    require(route_source != "", "walk component ref.source must be non-empty")
+    require(source_id > 0, "walk component ref.source_id must be positive")
+    matched_node = node_index.get((node_kind, route_source, source_id))
+    require(
+        matched_node is not None,
+        f"missing walk component node ref kind={node_kind} source={route_source} source_id={source_id}",
+    )
+    return dict(matched_node)
+
+
+def enrich_navigation_walk_component_datasets(
+    sqlite_conn: sqlite3.Connection,
+    dataset_rows_by_name: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    """生成 walk component 正式导出 datasets。"""
+
+    override_document = load_navigation_walk_component_override_document()
+    component_specs = override_document.get("components", [])
+    require(isinstance(component_specs, list) and component_specs, "walk component override must contain components")
+
+    route_node_rows = build_navigation_walk_component_route_nodes(sqlite_conn)
+    node_index = build_navigation_walk_component_node_index(route_node_rows)
+    component_rows: list[dict[str, Any]] = []
+    assignment_rows: list[dict[str, Any]] = []
+    display_proxy_rows: list[dict[str, Any]] = []
+    assigned_node_ids: set[int] = set()
+
+    for component_spec in component_specs:
+        require(isinstance(component_spec, dict), "walk component override component must be object")
+        component_id = str(component_spec.get("component_id") or "").strip()
+        display_name = str(component_spec.get("display_name") or "").strip()
+        require(component_id != "", "walk component component_id must be non-empty")
+        require(display_name != "", f"{component_id}: display_name must be non-empty")
+
+        preferred_anchor_row = resolve_navigation_walk_component_ref(node_index, dict(component_spec.get("preferred_anchor") or {}))
+        member_specs = component_spec.get("members", [])
+        entry_specs = component_spec.get("entry_nodes", [])
+        require(isinstance(member_specs, list) and member_specs, f"{component_id}: members must be non-empty array")
+        require(isinstance(entry_specs, list) and entry_specs, f"{component_id}: entry_nodes must be non-empty array")
+
+        member_node_ids: list[int] = []
+        entry_node_ids: list[int] = []
+        for entry_spec in entry_specs:
+            entry_row = resolve_navigation_walk_component_ref(node_index, dict(entry_spec or {}))
+            entry_node_ids.append(int(entry_row["node_id"]))
+
+        for member_spec in member_specs:
+            require(isinstance(member_spec, dict), f"{component_id}: member must be object")
+            member_row = resolve_navigation_walk_component_ref(node_index, member_spec)
+            member_node_id = int(member_row["node_id"])
+            require(member_node_id not in assigned_node_ids, f"{component_id}: duplicate node assignment for NodeID {member_node_id}")
+            assigned_node_ids.add(member_node_id)
+            member_node_ids.append(member_node_id)
+
+            role_text = str(member_spec.get("role") or "").strip()
+            require(role_text != "", f"{component_id}: member role must be non-empty")
+            hidden_in_semantic_chain = bool(member_spec.get("hidden_in_semantic_chain") is True)
+            visible_name = str(member_spec.get("visible_name") or "").strip() or None
+            display_proxy_node_id = None
+            display_proxy_ref = member_spec.get("display_proxy")
+            if isinstance(display_proxy_ref, dict):
+                display_proxy_row = resolve_navigation_walk_component_ref(node_index, display_proxy_ref)
+                display_proxy_node_id = int(display_proxy_row["node_id"])
+                if visible_name is None:
+                    visible_name = str(display_proxy_row.get("node_name") or "").strip() or None
+
+            assignment_rows.append(
+                {
+                    "node_id": member_node_id,
+                    "component_id": component_id,
+                    "role": role_text,
+                    "hidden_in_semantic_chain": hidden_in_semantic_chain,
+                    "display_proxy_node_id": display_proxy_node_id,
+                    "visible_name": visible_name,
+                }
+            )
+
+            if display_proxy_node_id is not None and visible_name is not None:
+                display_proxy_rows.append(
+                    {
+                        "node_id": member_node_id,
+                        "component_id": component_id,
+                        "display_proxy_node_id": display_proxy_node_id,
+                        "visible_name": visible_name,
+                    }
+                )
+
+        component_rows.append(
+            {
+                "component_id": component_id,
+                "display_name": display_name,
+                "member_node_ids": sorted(member_node_ids),
+                "entry_node_ids": sorted(set(entry_node_ids)),
+                "preferred_anchor_node_id": int(preferred_anchor_row["node_id"]),
+            }
+        )
+
+    dataset_rows_by_name["components"] = component_rows
+    dataset_rows_by_name["node_assignments"] = assignment_rows
+    dataset_rows_by_name["display_proxies"] = display_proxy_rows
+    return dataset_rows_by_name
+
+
 def apply_supplemental_sources(
     sqlite_conn: sqlite3.Connection,
     contract_document,
@@ -2279,6 +2440,8 @@ def apply_supplemental_sources(
             merged_datasets = enrich_navigation_route_datasets(sqlite_conn, merged_datasets)
         elif source_type == "navigation_ability_enrichment":
             merged_datasets = enrich_navigation_ability_datasets(sqlite_conn, merged_datasets)
+        elif source_type == "navigation_walk_component_enrichment":
+            merged_datasets = enrich_navigation_walk_component_datasets(sqlite_conn, merged_datasets)
     if (
         contract_document.contract.contract_id == "instance_questlines"
         and int(contract_document.contract.schema_version) >= 6

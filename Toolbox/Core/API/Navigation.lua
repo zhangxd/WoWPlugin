@@ -93,6 +93,10 @@ end
 ---@param normalizeTransportHub boolean 是否将交通节点归一化为枢纽名
 ---@return string
 local function buildRouteNodeDisplayName(nodeDef, fallbackNodeId, normalizeTransportHub)
+  local visibleName = trimText(type(nodeDef) == "table" and nodeDef.visibleName or nil) -- 正式步行组件提供的玩家可见名
+  if visibleName ~= "" then
+    return visibleName
+  end
   local rawName = trimText(type(nodeDef) == "table" and nodeDef.name or fallbackNodeId) -- 原始节点名
   if normalizeTransportHub and type(nodeDef) == "table" and tostring(nodeDef.kind or "") == "transport" then
     local transportHubName = extractTransportHubName(rawName) -- 交通枢纽名
@@ -1324,6 +1328,77 @@ local function findRouteNodeIDBySourceID(lookupBySource, routeSource, sourceID, 
   return sourceEntry.any
 end
 
+--- 按组件 ID 读取正式步行组件定义，兼容数字/字符串键。
+---@param componentTable table|nil 正式步行组件表
+---@param componentID any 组件 ID
+---@return table|nil
+local function findFormalWalkComponent(componentTable, componentID)
+  if type(componentTable) ~= "table" or componentID == nil then
+    return nil
+  end
+  local directComponent = componentTable[componentID] -- 直接按原始键读取的组件
+  if type(directComponent) == "table" then
+    return directComponent
+  end
+  local numericComponentID = tonumber(componentID) -- 数字组件键
+  if numericComponentID ~= nil and type(componentTable[numericComponentID]) == "table" then
+    return componentTable[numericComponentID]
+  end
+  local stringComponentID = tostring(componentID) -- 字符串组件键
+  if stringComponentID ~= "" and type(componentTable[stringComponentID]) == "table" then
+    return componentTable[stringComponentID]
+  end
+  return nil
+end
+
+--- 读取节点的正式步行组件归属与显示代理信息。
+---@param runtimeNodeID any 运行时节点 ID
+---@return table
+local function readFormalWalkNodeMetadata(runtimeNodeID)
+  local walkComponentData = Toolbox.Data and Toolbox.Data.NavigationWalkComponents or nil -- 正式步行组件导出
+  local assignmentTable = type(walkComponentData) == "table" and walkComponentData.nodeAssignments or nil -- 节点归属表
+  local displayProxyTable = type(walkComponentData) == "table" and walkComponentData.displayProxies or nil -- 显示代理表
+  local assignmentDef = type(assignmentTable) == "table" and assignmentTable[runtimeNodeID] or nil -- 当前节点归属
+  if type(assignmentDef) ~= "table" and type(assignmentTable) == "table" then
+    assignmentDef = assignmentTable[tonumber(runtimeNodeID)] or assignmentTable[tostring(runtimeNodeID)]
+  end
+  if type(assignmentDef) ~= "table" then
+    return {}
+  end
+
+  local componentDef = findFormalWalkComponent(
+    type(walkComponentData) == "table" and walkComponentData.components or nil,
+    assignmentDef.ComponentID or assignmentDef.componentID
+  ) -- 节点所属正式组件
+  local proxyNodeID = tonumber(assignmentDef.DisplayProxyNodeID or assignmentDef.displayProxyNodeID) -- 归属里指定的显示代理节点
+  local proxyDef = type(displayProxyTable) == "table" and displayProxyTable[runtimeNodeID] or nil -- 以当前节点为键的显示代理定义
+  if type(proxyDef) ~= "table" and type(displayProxyTable) == "table" then
+    proxyDef = displayProxyTable[tostring(runtimeNodeID)]
+  end
+  if type(proxyDef) ~= "table" and type(displayProxyTable) == "table" and proxyNodeID then
+    proxyDef = displayProxyTable[proxyNodeID] or displayProxyTable[tostring(proxyNodeID)]
+  end
+
+  local preferredAnchorNodeID = tonumber(
+    type(componentDef) == "table" and (componentDef.PreferredAnchorNodeID or componentDef.preferredAnchorNodeID) or nil
+  ) -- 正式组件首选锚点
+  local hiddenInSemanticChain = assignmentDef.HiddenInSemanticChain -- 是否在语义链路中隐藏
+  if type(hiddenInSemanticChain) ~= "boolean" then
+    hiddenInSemanticChain = false
+  end
+  local visibleName = assignmentDef.VisibleName or assignmentDef.visibleName -- 归属层显式可见名
+  if trimText(visibleName) == "" then
+    visibleName = type(proxyDef) == "table" and (proxyDef.VisibleName or proxyDef.visibleName) or nil
+  end
+
+  return {
+    componentID = assignmentDef.ComponentID or assignmentDef.componentID,
+    preferredAnchorNodeID = preferredAnchorNodeID,
+    hiddenInSemanticChain = hiddenInSemanticChain,
+    visibleName = trimText(visibleName),
+  }
+end
+
 --- 向路径图写入一组节点定义。
 ---@param routeGraph table 正在构建的路径图
 ---@param nodeTable table|nil 节点定义表
@@ -1334,6 +1409,7 @@ local function addRouteGraphNodes(routeGraph, nodeTable)
       local runtimeNodeID = numericNodeID or nodeId -- 运行时节点 ID
       local walkClusterNodeID = tonumber(nodeDef.WalkClusterNodeID or nodeDef.walkClusterNodeID) -- 新版本地步行锚点数字节点 ID
       local walkClusterKey = nodeDef.WalkClusterKey or nodeDef.walkClusterKey -- 旧版本地步行锚点字符串键
+      local formalWalkMetadata = readFormalWalkNodeMetadata(runtimeNodeID) -- 正式步行组件归属与显示代理
       routeGraph.nodes[runtimeNodeID] = {
         id = runtimeNodeID,
         name = nodeDef.Name_lang or tostring(runtimeNodeID),
@@ -1344,6 +1420,10 @@ local function addRouteGraphNodes(routeGraph, nodeTable)
         walkClusterNodeID = walkClusterNodeID,
         walkClusterKey = type(walkClusterKey) == "string" and walkClusterKey or nil,
         taxiNodeID = tonumber(nodeDef.TaxiNodeID or nodeDef.taxiNodeID),
+        walkComponentID = formalWalkMetadata.componentID,
+        preferredWalkAnchorNodeID = formalWalkMetadata.preferredAnchorNodeID,
+        hiddenInSemanticChain = formalWalkMetadata.hiddenInSemanticChain,
+        visibleName = formalWalkMetadata.visibleName,
       }
     end
   end
@@ -1442,7 +1522,10 @@ end
 ---@param routeGraph table 正在构建的路径图
 local function addDynamicWalkLocalEdges(routeGraph)
   for nodeId, nodeDef in pairs(routeGraph.nodes or {}) do
-    local walkClusterTargetID = tonumber(nodeDef and nodeDef.walkClusterNodeID) -- 新版节点所属本地步行连通域锚点
+    local walkClusterTargetID = type(nodeDef) == "table" and nodeDef.preferredWalkAnchorNodeID or nil -- 正式步行组件首选锚点
+    if walkClusterTargetID == nil then
+      walkClusterTargetID = tonumber(nodeDef and nodeDef.walkClusterNodeID) -- 旧版数字步行锚点
+    end
     if walkClusterTargetID == nil then
       local legacyWalkClusterKey = type(nodeDef) == "table" and nodeDef.walkClusterKey or nil -- 旧版字符串锚点键
       if type(legacyWalkClusterKey) == "string" and legacyWalkClusterKey ~= "" then

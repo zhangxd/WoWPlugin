@@ -618,12 +618,13 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
   - `waypointnode / waypointedge` 中带 `WaypointMapVolumeID` 的样本过少，只适合作为“显式连接器”候选，不足以覆盖全世界步行组件
   - 因此：
     - [x] 不把 `UiMap` 父链、矩形或 `WalkClusterKey` 启发式写成 world walk truth
-    - [ ] 后续需要独立的离线几何 / 导航资产管线来导出真正的 `navigation_walk_components`
-    - [ ] 在那之前，只继续补 `portal / volume / areatrigger` 这类显式连接器
+    - [x] 已补首批 `navigation_walk_components` 正式导出链（主城 / 传送门房 / 港口与飞艇塔 / 常用交通落点）
+    - [ ] 后续仍需要独立的离线几何 / 导航资产管线来导出真正的全世界 `navigation_walk_components`
+    - [ ] 在全世界真值闭合前，继续补 `portal / volume / areatrigger` 这类显式连接器
 
 **V2 待推进（单人导航，不含需多人协助的模态）：**
 - `areatrigger`
-- 全世界 `WalkComponent`
+- 全世界 `WalkComponent` 真值闭合
 - “只能飞 / 只能传送 / 没有公共路径”一类强结论（需等所有 V2 模态闭合后引入）
 
 ## 6.3 路线图组件改造（已确认，可执行）
@@ -662,9 +663,9 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 - 不影响 `navigation` 之外的模块。
 - 若发现当前未提交的导航改动与路线图组件直接冲突，先局部避让，不主动回退别人的未提交修改。
 
-## 6.4 语义路线链与 `WalkComponent` 根治（已确认，待执行）
+## 6.4 语义路线链与 `WalkComponent` 根治（已实现首批出口，待继续扩世界真值）
 
-这部分的目标不是“再加一层 UI 过滤”，而是把技术路径、语义路径和展示消费正式拆开，并为后续 `walk component` 真值导出建立固定出口。
+这部分的目标不是“再加一层 UI 过滤”，而是把技术路径、语义路径和展示消费正式拆开，并为全世界 `walk component` 真值导出建立固定出口。当前已完成 formal component 首批出口与 runtime 优先消费；未完成的是全世界闭合。
 
 **目标：**
 
@@ -702,8 +703,9 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
    - 逐段日志中的 `from / to` 也要先过 semantic 代理。
    - RouteBar 布局同步改成“胶囊宽度自适应 + 节点区底框按内容高度撑开”。
 4. 新增 `navigation_walk_components` 契约与导出文件：
-   - 先导出首批覆盖的组件、节点归属和显示代理；
-   - 再把 runtime 接入点从纯启发式 `WalkClusterNodeID` 迁到正式数据。
+   - [x] 已导出首批覆盖的组件、节点归属和显示代理；
+   - [x] runtime 已优先读取正式 `PreferredAnchorNodeID / VisibleName / DisplayProxyNodeID`；
+   - [x] formal 数据缺失时继续保留 `WalkClusterNodeID / WalkClusterKey` fallback。
 5. 用源侧 override 锁定以下人工修正类型：
    - `merge`
    - `split`
@@ -745,3 +747,4 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 | 2026-05-01 | 根治方向确认：路线显示改为 `raw path -> semantic path -> display` 三层；玩家链路显式区分地图节点与动作节点，`taxi` 不单独生成动作节点 |
 | 2026-05-01 | `walk component` 计划补充：新增正式契约 / 导出 / runtime 出口方向，首批覆盖主城、传送门房、飞艇塔 / 港口与常用交通落点，人工修正只允许留在源侧 override |
 | 2026-05-02 | 路线图布局修复补充：实现范围新增胶囊宽度自适应与展开态节点区底框按节点范围自动撑开两项回归要求 |
+| 2026-05-02 | `walk component` 首批出口落地：新增 `navigation_walk_components` 契约、源侧 override、`NavigationWalkComponents.lua`、runtime 优先消费与 fallback 回归测试；全世界真值闭合继续留在后续阶段 |

@@ -62,6 +62,11 @@ EXPECTED_GENERATED_CONTRACTS = {
         "lua_table": "Toolbox.Data.NavigationAbilityTemplates",
         "root_type": "document",
     },
+    "navigation_walk_components": {
+        "lua_file": "Toolbox/Data/NavigationWalkComponents.lua",
+        "lua_table": "Toolbox.Data.NavigationWalkComponents",
+        "root_type": "document",
+    },
     "instance_entrances": {
         "lua_file": "Toolbox/Data/InstanceEntrances.lua",
         "lua_table": "Toolbox.Data.InstanceEntrances",
