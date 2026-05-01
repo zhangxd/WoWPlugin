@@ -1,7 +1,7 @@
 # 冒险指南设计
 
 - 文档类型：设计
-- 状态：已落地
+- 状态：已确认
 - 主题：encounter-journal
 - 适用范围：`encounter_journal`、`minimap_button`、`Toolbox.EJ`、冒险指南副本列表入口导航
 - 关联模块：`encounter_journal`、`minimap_button`
@@ -12,7 +12,7 @@
   - `docs/tests/encounter-journal-test.md`
   - `docs/features/quest-features.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-04-29
+- 最后更新：2026-05-01
 
 ## 1. 背景
 
@@ -22,6 +22,8 @@
 - 2026-04-27 新增已确认交互增强：副本列表图钉按钮支持“悬停显示”与“常驻显示”两种模式，并将现有图钉替换为更高辨识度的高亮版资源。
 - 2026-04-27 入口覆盖调查确认：运行时 `C_EncounterJournal.GetDungeonEntrancesForMap` 与 `areapoi` 对厄运之槌只返回聚合入口 `230`，不能覆盖 `1276 / 1277` 分翼；`journalinstanceentrance` 在 `wow.db` 中提供分翼精确世界坐标。用户确认新增 DB 静态入口导出，并在点击图钉时按 `journalInstanceID` 读取静态表。
 - 2026-04-29 用户确认收口 `encounter_journal` 设置页：移除“在冒险指南中筛选坐骑”“在冒险指南中显示副本CD”“仅坐骑”3 个设置项；副本列表“仅坐骑”按钮与功能保留且继续记忆状态；列表 CD 叠加固定开启；详情页“仅坐骑”按钮与功能整段移除。
+- 2026-05-01 只读审查确认另一类旧副本分入口缺口：`斯坦索姆 - 仆从入口`（`journalInstanceID = 1292`）在 `wow.db` 中有 `journalinstanceentrance` 行，但该行 `MapID = 0`、且无精确 `areapoi`；因此会同时被 `instance_entrances` 与 `navigation_instance_entrances` 契约过滤掉，现有运行时三级查找链也无法稳定补回。
+- 2026-05-01 用户确认下一阶段根治方向：不在业务代码里为 `1292` / `236` 一类条目做特判，而是把共享物理入口的归并、地图上下文补全与冲突校验全部前移到导出层；运行时收口到单一规范化入口目标表直读，不再依赖运行时入口 API 兜底。
 
 ## 2. 设计目标
 
@@ -31,6 +33,8 @@
 - 增加副本入口导航设计：选中 / 点击冒险指南条目时直接按 `journalInstanceID` 使用 DB 导出的静态入口数据，并通过系统 waypoint / super tracking 创建导航目标；运行时入口 API 只作为静态表缺失时的兜底。
 - 在不移除副本列表“仅坐骑”体验的前提下，删除多余设置项与对应残留代码，让模块设置和实际可配置能力重新对齐。
 - 在不新增模块的前提下，让副本列表图钉显隐与 Blizzard 原生“单击进入详情页”行为兼容，不再依赖自定义双击进入逻辑。
+- 从导出层根治共享物理入口的多 `journalInstanceID` 缺失问题，例如 `236 / 1292` 这类共用同一物理入口但需要独立导航目标行的条目。
+- 将副本入口运行时消费收口为单一规范化导出表，避免 `Toolbox.EJ` 同时读取多张入口表并在运行时做级联兜底。
 
 ## 3. 非目标
 
@@ -39,6 +43,8 @@
 - 不讨论任务静态数据导出流程本身。
 - 不提供副本内部 boss、楼层、门、传送点或路径规划坐标。
 - 不维护手写副本入口静态坐标表；静态入口必须由 `wow.db` 契约导出生成。
+- 不在 `Toolbox.EJ`、`DetailEnhancer` 或其它业务代码中为单个旧副本 ID 补硬编码映射。
+- 不保留“静态入口表 -> 导航入口表 -> 运行时入口 API”三级查找链作为长期方案。
 
 ## 4. 方案对比
 
@@ -109,6 +115,31 @@
 - 选定方案：方案 C。
 - 选择原因：它是目前唯一既不猜测入口、又能补足运行时 API 缺口的方案。
 
+### 4.6 入口数据根治方案对比
+
+#### 方案 A：继续修补现有两张入口表，并保留运行时兜底
+
+- 做法：延续 `InstanceEntrances -> NavigationInstanceEntrances -> C_EncounterJournal.GetDungeonEntrancesForMap` 的现状，只针对漏项继续补契约口径。
+- 优点：短期改动小，不需要立刻调整 `Toolbox.EJ` 入口查找结构。
+- 风险 / 缺点：运行时仍需级联查找多张表与 API；像 `1292` 这类 `MapID = 0` / 无 `areapoi` 的条目仍可能反复漏出，且未来继续依赖兜底链排错。
+
+#### 方案 B：统一为单一规范化运行时入口目标表
+
+- 做法：把当前 `navigation_instance_entrances` 升级为唯一运行时入口表；导出阶段先按物理入口簇归并入口候选，再把簇内每个 `journalInstanceID` 展开为独立目标行，运行时只读这张表。
+- 优点：运行时逻辑最简单；共享物理入口的条目在导出阶段一次性补齐；导出失败能提前暴露缺口或冲突，不必等到游戏内“未找到该副本入口位置”。
+- 风险 / 缺点：需要提升契约 schema、重写导出 SQL 与回归测试，并调整 `Toolbox.EJ` 对入口数据的消费口径。
+
+#### 方案 C：手工维护共享入口映射
+
+- 做法：为 `1292 -> 236`、未来其它旧副本分入口建立手工 alias / fallback 映射。
+- 优点：最快看到单点效果。
+- 风险 / 缺点：违反导航数据走契约导出的原则；后续每出现一个类似 ID 都要补业务特判，维护成本最高。
+
+#### 选型结论
+
+- 选定方案：方案 B。
+- 选择原因：它是唯一同时满足“导出数据直接映射”“不兜底”“不做特殊判断”的方案。
+
 ## 5. 选定方案
 
 ### 5.1 模块归属
@@ -140,12 +171,20 @@
 |------------|------|------|
 | `Toolbox.Data.MountDrops` | 静态数据 | 判断副本是否掉落坐骑，并驱动副本列表“仅坐骑”筛选。 |
 | `Toolbox.Data.InstanceMapIDs` | 静态数据 | 提供 `journalInstanceID -> mapID` 单向映射，仅作为运行时 API 不可用时的兜底。 |
-| `Toolbox.Data.InstanceEntrances` | DB 生成静态数据 | 提供 `journalInstanceID -> 多入口世界坐标`；精确 `areapoi` 优先，缺失时使用 `journalinstanceentrance` 分翼入口；选中 / 点击冒险指南条目时作为主来源。 |
+| `Toolbox.Data.InstanceEntrances` | DB 生成静态数据 | 保留为入口追溯 / 审计数据：提供 `journalInstanceID -> 多入口世界坐标`、来源字段与 `HintUiMapID`；不再作为运行时 EJ 图钉导航的直接查表来源。 |
+| `Toolbox.Data.NavigationInstanceEntrances` | DB 生成规范化运行时入口目标数据 | 当前唯一运行时入口表：对每个可导航 `journalInstanceID` 直接提供 `TargetUiMapID + TargetX + TargetY`，包括共享物理入口展开后的多 ID 目标行。 |
 | `Toolbox.EJ` | 领域对外 API | 提供锁定查询、锁定摘要与坐骑掉落集合查询；锁定匹配优先走 `C_EncounterJournal.GetInstanceForGameMap(mapID)`，其次对齐 `EJ_GetInstanceInfo(journalInstanceID)` 的 mapID；若 SavedInstances 的 mapID 不可判定，则按副本名做兜底匹配。详情页读取当前副本时优先 `EJ_GetCurrentInstance()`，无效时回退 `EncounterJournal.instanceID`。 |
 | `GetSavedInstanceInfo` / `GetNumSavedInstances` | WoW 原生 API | 构建列表叠加文本、详情页重置标签与两处锁定摘要；`GetSavedInstanceInfo` 第 14 个返回值按 mapID 处理。 |
-| `C_EncounterJournal.GetDungeonEntrancesForMap(uiMapID)` | WoW 原生 API | 仅作为 DB 静态入口缺失时的兜底；不得优先于 `Toolbox.Data.InstanceEntrances[journalInstanceID]`。 |
-| `C_Map.GetMapPosFromWorldPos(continentID, worldPosition, overrideUiMapID)` | WoW 原生 API | 将静态表中的世界坐标转换为 `UiMapPoint.CreateFromVector2D` 需要的 `uiMapID + 0..1 坐标`。 |
+| `C_EncounterJournal.GetDungeonEntrancesForMap(uiMapID)` | WoW 原生 API | 仅保留为历史问题背景与覆盖率核对来源；EJ 副本列表图钉导航运行时不再调用它。 |
+| `C_Map.GetMapPosFromWorldPos(continentID, worldPosition, overrideUiMapID)` | WoW 原生 API | 仅保留给历史追溯 / 审计链路使用；当前 EJ 副本入口导航运行时不再依赖它做世界坐标转换。 |
 | `C_Map.SetUserWaypoint` / `UiMapPoint.CreateFromVector2D` / `C_SuperTrack.SetSuperTrackedUserWaypoint` | WoW 原生 API | 打开入口地图后创建系统用户 waypoint，并启用系统导航追踪。 |
+
+规范化导出规则：
+
+- 先构建“物理入口簇”，按 `journalinstance.MapID`、`AreaTableID`、入口世界坐标和阵营字段聚合同一物理入口候选。
+- 簇内优先选用带精确 `areapoi` 或有效外部地图上下文的候选，统一解出 `TargetUiMapID + TargetX + TargetY`。
+- 对同一物理入口簇中的每个 `journalInstanceID`，都展开一条独立运行时目标记录；例如 `236` 与 `1292` 应同时存在且目标一致。
+- 若某个入口簇无法解出唯一目标，或解出多个冲突目标，导出必须失败，不允许静默丢行留给运行时兜底。
 
 ### 5.4 用户可见行为
 
@@ -157,6 +196,7 @@
 - 详情页不再出现“仅坐骑”按钮，也不再提供详情页掉落列表的坐骑专用过滤。
 - 副本列表条目右下角显示图钉按钮；点击后打开世界地图到入口地图，创建系统用户导航目标并开始追踪。
 - 若运行时入口 API 没有当前条目的精确入口，但静态入口表存在该 `journalInstanceID`，点击图钉时使用静态表入口；例如 `厄运之槌 - 戈多克议会` 不再因运行时只返回聚合入口 `230` 而失败。
+- 下一阶段落地后，`斯坦索姆 - 正门`（`236`）与 `斯坦索姆 - 仆从入口`（`1292`）等共享物理入口的条目都应直接命中规范化运行时入口表，不再因契约过滤或运行时共享入口 exact-match 失败而提示“未找到该副本的入口位置”。
 - 未勾选“定位图标常驻显示”时，只有当前鼠标悬停的可导航条目显示图钉；移开后恢复隐藏。
 - 勾选“定位图标常驻显示”后，所有可导航列表行都显示图钉。
 - 单击某个副本列表行时，继续沿用 Blizzard 当前默认进入详情页行为；插件不再依赖自定义双击进入。
@@ -181,13 +221,13 @@
 ## 6. 影响面
 
 - 数据与存档：
-  `ToolboxDB.modules.encounter_journal` 收敛为副本列表和详情页增强专用字段；`listPinAlwaysVisible` 继续控制图钉是否常驻显示。新增 DB 生成静态数据 `Toolbox/Data/InstanceEntrances.lua`，不新增其它存档键。
+  `ToolboxDB.modules.encounter_journal` 收敛为副本列表和详情页增强专用字段；`listPinAlwaysVisible` 继续控制图钉是否常驻显示。下一阶段不新增新的 SavedVariables 键，但会调整运行时入口数据来源：`NavigationInstanceEntrances` 升级为唯一运行时入口表，`InstanceEntrances` 回退为追溯 / 审计用途。
 - API 与模块边界：
-  `encounter_journal` 只消费 `Toolbox.EJ`；任务浏览与任务运行时接口由 `quest` / `Toolbox.Questlines` 承接。副本入口查找与 waypoint 设置作为 `Toolbox.EJ` 的冒险指南领域能力暴露给副本列表 UI。
+  `encounter_journal` 只消费 `Toolbox.EJ`；任务浏览与任务运行时接口由 `quest` / `Toolbox.Questlines` 承接。下一阶段 `Toolbox.EJ` 的副本入口查找将从“多表 + 运行时 API 级联兜底”收口为“规范化导出表单点直读”。
 - 文件与目录：
-  关键代码文件为 `Toolbox/Modules/EncounterJournal.lua`、`Toolbox/Modules/EncounterJournal/DetailEnhancer.lua`、`Toolbox/Modules/EncounterJournal/LockoutOverlay.lua`、`Toolbox/Modules/MinimapButton.lua`、`Toolbox/Core/API/EncounterJournal.lua`。新增 `DataContracts/instance_entrances.json` 与 `Toolbox/Data/InstanceEntrances.lua`，并在 `Toolbox/Toolbox.toc` 中按 Data 加载顺序声明。
+  关键代码文件为 `Toolbox/Modules/EncounterJournal.lua`、`Toolbox/Modules/EncounterJournal/DetailEnhancer.lua`、`Toolbox/Modules/EncounterJournal/LockoutOverlay.lua`、`Toolbox/Modules/MinimapButton.lua`、`Toolbox/Core/API/EncounterJournal.lua`。下一阶段重点调整 `DataContracts/navigation_instance_entrances.json`、`Toolbox/Data/NavigationInstanceEntrances.lua`、`tests/validate_data_contracts.py` 与 `tests/logic/spec/encounter_journal_navigation_spec.lua`；如 `InstanceEntrances` 仍保留，则仅作为追溯数据，不再承担运行时导航主路径。
 - 文档回写：
-  需要同步更新 `encounter-journal-features/spec/plan/test`、`quest-*` 文档、`FEATURES.md` 与 `Toolbox-addon-design.md`。
+  需要同步更新 `encounter-journal-features/spec/plan/test`；待代码真正落地后，再回写 `Toolbox-addon-design.md` 的运行时入口数据口径。
 
 ## 7. 风险与回退
 
@@ -196,9 +236,9 @@
 - 风险：
   锁定信息依赖原生 API，若 API 返回语义变化，列表叠加和摘要文本可能失准。
 - 风险：
-  `C_EncounterJournal.GetDungeonEntrancesForMap` 的入口覆盖率和 `journalInstanceID` 匹配在部分旧副本或特殊入口上可能不完整。
+  物理入口簇归并条件过宽时，可能把不同物理入口错误并到同一簇；归并条件过窄时，又可能错失 `236 / 1292` 这类应共享的入口。
 - 风险：
-  `areapoi` / `journalinstanceentrance` 给出的是世界坐标，必须经 `C_Map.GetMapPosFromWorldPos` 转换；若客户端无法转换某条入口，应保守失败提示，不手搓地图坐标。
+  `journalinstanceentrance.MapID = 0` 的来源行缺少直接外部地图上下文；当前导出依赖 `uimapassignment.MapID = 0` 的全局覆盖关系完成目标解析，若源表或覆盖关系变化，导出必须阻塞而不是继续生成缺口数据。
 - 风险：
   部分 `journalinstance` 是资料片页、活动页、赛季页或特殊页，不应被当作缺失副本入口。
 - 风险：
@@ -210,10 +250,14 @@
 
 - 逻辑验证：
   运行 `python tests/run_all.py --ci`，确认自动化校验继续通过。
+- 数据验证：
+  新增 `236 / 1292` 共享入口回归样本：两条 `journalInstanceID` 都必须导出，且目标地图与坐标一致。
+- 运行时验证：
+  `Toolbox.EJ` 的副本入口导航逻辑应只命中单一规范化导出表；导航逻辑测试中不再依赖运行时 `C_EncounterJournal.GetDungeonEntrancesForMap` 返回精确 `journalInstanceID`。
 - 游戏内验证：
-  检查副本列表“仅坐骑”、列表单击进入详情页、列表图钉悬停 / 常驻显示、CD 叠加、tooltip 详情、详情页重置标签、小地图与 `EJMicroButton` 锁定摘要是否均可用。
+  检查副本列表“仅坐骑”、列表单击进入详情页、列表图钉悬停 / 常驻显示、CD 叠加、tooltip 详情、详情页重置标签、小地图与 `EJMicroButton` 锁定摘要是否均可用；重点补验 `斯坦索姆 - 仆从入口` 图钉导航不再失败。
 - 文档验证：
-  `encounter-journal-features/spec/plan/test`、`quest-*`、`FEATURES.md` 与 `Toolbox-addon-design.md` 的模块边界必须一致。
+  `encounter-journal-features/spec/plan/test` 与总设计对“导出层归一化入口目标表 + 运行时单表直读”的表述必须一致。
 
 ## 9. 修订记录
 
@@ -232,3 +276,5 @@
 | 2026-04-28 | `instance_entrances` 升级到 schema v3：为 `areapoi` 来源补充实例地图父 UiMap 推导的 `HintUiMapID`，确保打开对应区域地图 |
 | 2026-04-29 | 用户确认设置页精简：仅保留并记忆列表“仅坐骑”；列表 CD 叠加固定开启；详情页“仅坐骑”删除；状态回到 `已确认` 待本轮代码落地 |
 | 2026-04-29 | 本轮代码与文档已落地：设置页删除 3 个旧选项，详情页仅保留重置标签，并通过全量自动化验证 |
+| 2026-05-01 | 只读审查确认 `1292` 因契约过滤与运行时 exact-match 兜底失效而漏导航；用户确认下一阶段改为“规范化运行时入口表 + 导出层物理入口簇归并 + 运行时单表直读”方案 |
+| 2026-05-01 | `navigation_instance_entrances` 升级到 schema v2，运行时入口导航正式切到 `Toolbox.Data.NavigationInstanceEntrances` 单表直读；`236 / 1292` 共享入口回归已落地并通过自动化验证 |

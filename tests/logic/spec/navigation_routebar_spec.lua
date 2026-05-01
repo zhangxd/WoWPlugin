@@ -5,33 +5,88 @@ describe("Navigation RouteBar", function()
   local originalCreateFrame = nil -- 原始 CreateFrame 全局
   local originalUIParent = nil -- 原始 UIParent 全局
   local originalGetCursorPosition = nil -- 原始光标位置函数
+  local originalStaticPopupDialogs = nil -- 原始 StaticPopupDialogs
+  local originalStaticPopupShow = nil -- 原始 StaticPopup_Show
+  local originalAcceptText = nil -- 原始 ACCEPT 文案
+  local originalCancelText = nil -- 原始 CANCEL 文案
   local createdFrameByName = nil -- 已创建命名 Frame
   local moduleDb = nil -- navigation 模块存档
   local cursorX = 0 -- 当前测试光标 X
   local cursorY = 0 -- 当前测试光标 Y
   local locationSnapshot = nil -- 当前角色位置快照
-  local replannedTargetList = nil -- 历史记录重规划目标
+  local replannedTargetList = nil -- 历史确认后的重规划目标
+  local popupRequestList = nil -- 弹框请求记录
 
-  local function buildSampleRouteResult()
+  local function buildRouteNodeTable()
     return {
-      totalSteps = 2,
+      [8500] = { NodeID = 8500, Kind = "map_anchor", Source = "uimap", SourceID = 85, UiMapID = 85, Name_lang = "奥格瑞玛", WalkClusterNodeID = 8500 },
+      [8501] = { NodeID = 8501, Kind = "portal", Source = "portal", SourceID = 437, UiMapID = 85, Name_lang = "奥格瑞玛传送门", WalkClusterNodeID = 8500 },
+      [6261] = { NodeID = 6261, Kind = "map_anchor", Source = "uimap", SourceID = 626, UiMapID = 626, Name_lang = "达拉然", WalkClusterNodeID = 6261 },
+      [6262] = { NodeID = 6262, Kind = "taxi", Source = "taxi", SourceID = 1774, UiMapID = 626, Name_lang = "达拉然飞行点", WalkClusterNodeID = 6261 },
+      [1201] = { NodeID = 1201, Kind = "map_anchor", Source = "uimap", SourceID = 120, UiMapID = 120, Name_lang = "风暴峭壁", WalkClusterNodeID = 1201 },
+    }
+  end
+
+  local function buildComplexRouteResult()
+    return {
+      totalSteps = 4,
+      rawNodePath = { "current", 8500, 8501, 6261, 6262, 1201, "target" },
       segments = {
         {
-          mode = "class_teleport",
-          label = "传送：奥格瑞玛",
-          fromName = "当前位置",
-          toName = "奥格瑞玛",
-          fromUiMapID = 1,
+          mode = "walk_local",
+          label = "步行：奥格瑞玛 -> 奥格瑞玛传送门",
+          fromName = "奥格瑞玛",
+          toName = "奥格瑞玛传送门",
+          fromUiMapID = 85,
           toUiMapID = 85,
           traversedUiMapIDs = { 85 },
           traversedUiMapNames = { "奥格瑞玛" },
         },
         {
-          mode = "walk_local",
-          label = "步行：奥格瑞玛 -> 北风苔原目标点",
-          fromName = "奥格瑞玛",
-          toName = "北风苔原目标点",
+          mode = "public_portal",
+          label = "使用奥格瑞玛的传送门前往达拉然",
+          fromName = "奥格瑞玛传送门",
+          toName = "达拉然",
           fromUiMapID = 85,
+          toUiMapID = 626,
+          traversedUiMapIDs = { 85, 626 },
+          traversedUiMapNames = { "奥格瑞玛", "达拉然" },
+        },
+        {
+          mode = "taxi",
+          label = "飞行前往K3，风暴峭壁",
+          fromName = "达拉然飞行点",
+          toName = "K3，风暴峭壁",
+          fromUiMapID = 626,
+          toUiMapID = 120,
+          traversedUiMapIDs = { 626, 127, 120 },
+          traversedUiMapNames = { "达拉然", "晶歌森林", "风暴峭壁" },
+        },
+        {
+          mode = "walk_local",
+          label = "目标位置：风暴峭壁 41.8, 84.7",
+          fromName = "风暴峭壁",
+          toName = "风暴峭壁目标点",
+          fromUiMapID = 120,
+          toUiMapID = 120,
+          traversedUiMapIDs = { 120 },
+          traversedUiMapNames = { "风暴峭壁" },
+        },
+      },
+    }
+  end
+
+  local function buildSameMapRouteResult()
+    return {
+      totalSteps = 1,
+      rawNodePath = { "current", 110, "target" },
+      segments = {
+        {
+          mode = "walk_local",
+          label = "目标位置：北风苔原 52.0, 43.0",
+          fromName = "当前位置",
+          toName = "北风苔原目标点",
+          fromUiMapID = 114,
           toUiMapID = 114,
           traversedUiMapIDs = { 114 },
           traversedUiMapNames = { "北风苔原" },
@@ -40,16 +95,95 @@ describe("Navigation RouteBar", function()
     }
   end
 
+  local function buildTaxiMapChainRouteResult()
+    return {
+      totalSteps = 4,
+      rawNodePath = { "current", 9400, 2200, 2600, "target" },
+      segments = {
+        {
+          mode = "walk_local",
+          label = "步行：银月城 -> 塔奎林，永歌森林",
+          fromName = "当前位置",
+          toName = "塔奎林，永歌森林",
+          fromUiMapID = 94,
+          toUiMapID = 95,
+          traversedUiMapIDs = { 94, 95 },
+          traversedUiMapNames = { "银月城", "永歌森林", "塔奎林，永歌森林" },
+        },
+        {
+          mode = "taxi",
+          label = "飞行前往圣光之愿礼拜堂，东瘟疫之地",
+          fromName = "塔奎林，永歌森林",
+          toName = "圣光之愿礼拜堂，东瘟疫之地",
+          fromUiMapID = 95,
+          toUiMapID = 22,
+          traversedUiMapIDs = { 95, 22 },
+          traversedUiMapNames = { "永歌森林", "祖阿曼", "东瘟疫之地" },
+        },
+        {
+          mode = "taxi",
+          label = "飞行前往恶齿村，辛特兰",
+          fromName = "圣光之愿礼拜堂，东瘟疫之地",
+          toName = "恶齿村，辛特兰",
+          fromUiMapID = 22,
+          toUiMapID = 26,
+          traversedUiMapIDs = { 22, 26 },
+          traversedUiMapNames = { "东瘟疫之地", "辛特兰" },
+        },
+        {
+          mode = "walk_local",
+          label = "目标位置：辛特兰 57.1, 48.1",
+          fromName = "恶齿村，辛特兰",
+          toName = "辛特兰目标点",
+          fromUiMapID = 26,
+          toUiMapID = 26,
+          traversedUiMapIDs = { 26 },
+          traversedUiMapNames = { "恶齿村，辛特兰", "辛特兰" },
+        },
+      },
+    }
+  end
+
+  local function buildHistoryTarget(index)
+    return {
+      uiMapID = 100 + index,
+      x = 0.1 + (index / 100),
+      y = 0.2 + (index / 100),
+      name = "目标" .. tostring(index),
+    }
+  end
+
+  local function collectNodeLabelList(routeBarFrame)
+    local labelList = {} -- 节点标签列表
+    for rowIndex, rowFrame in ipairs(routeBarFrame._nodeRows or {}) do
+      labelList[rowIndex] = rowFrame._labelText and rowFrame._labelText:GetText() or nil
+    end
+    return labelList
+  end
+
+  local function collectNodeDetailList(routeBarFrame)
+    local detailList = {} -- 节点明细列表
+    for rowIndex, rowFrame in ipairs(routeBarFrame._nodeRows or {}) do
+      detailList[rowIndex] = rowFrame._detailText and rowFrame._detailText:GetText() or nil
+    end
+    return detailList
+  end
+
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
     originalCreateFrame = rawget(_G, "CreateFrame")
     originalUIParent = rawget(_G, "UIParent")
     originalGetCursorPosition = rawget(_G, "GetCursorPosition")
+    originalStaticPopupDialogs = rawget(_G, "StaticPopupDialogs")
+    originalStaticPopupShow = rawget(_G, "StaticPopup_Show")
+    originalAcceptText = rawget(_G, "ACCEPT")
+    originalCancelText = rawget(_G, "CANCEL")
     createdFrameByName = {}
     moduleDb = {
       enabled = true,
       debug = false,
       routeWidgetExpanded = false,
+      routeHistoryExpanded = false,
       routeWidgetPosition = {
         point = "TOP",
         x = 0,
@@ -61,6 +195,7 @@ describe("Navigation RouteBar", function()
     cursorY = 0
     locationSnapshot = nil
     replannedTargetList = {}
+    popupRequestList = {}
 
     rawset(_G, "UIParent", FakeFrame.new({ frameType = "Frame", frameName = "UIParent" }))
     rawset(_G, "CreateFrame", function(frameType, frameName, parentFrame, templateName)
@@ -79,6 +214,20 @@ describe("Navigation RouteBar", function()
     rawset(_G, "GetCursorPosition", function()
       return cursorX, cursorY
     end)
+    rawset(_G, "StaticPopupDialogs", {})
+    rawset(_G, "StaticPopup_Show", function(dialogKey, textArg1, textArg2, dataObject)
+      local requestObject = {
+        dialogKey = dialogKey,
+        textArg1 = textArg1,
+        textArg2 = textArg2,
+        data = dataObject,
+        dialogDef = rawget(_G, "StaticPopupDialogs") and rawget(_G, "StaticPopupDialogs")[dialogKey] or nil,
+      } -- 当前弹框请求
+      popupRequestList[#popupRequestList + 1] = requestObject
+      return requestObject
+    end)
+    rawset(_G, "ACCEPT", "确认")
+    rawset(_G, "CANCEL", "取消")
     rawset(_G, "Toolbox", {
       Config = {
         GetModule = function(moduleId)
@@ -103,7 +252,16 @@ describe("Navigation RouteBar", function()
           nodes = {
             [85] = { Name_lang = "奥格瑞玛" },
             [114] = { Name_lang = "北风苔原" },
+            [120] = { Name_lang = "风暴峭壁" },
+            [626] = { Name_lang = "达拉然" },
+            [94] = { Name_lang = "银月城" },
+            [95] = { Name_lang = "永歌森林" },
+            [22] = { Name_lang = "东瘟疫之地" },
+            [26] = { Name_lang = "辛特兰" },
           },
+        },
+        NavigationRouteEdges = {
+          nodes = buildRouteNodeTable(),
         },
       },
       L = {
@@ -112,10 +270,14 @@ describe("Navigation RouteBar", function()
         NAVIGATION_ROUTE_WIDGET_STATUS_READY = "按当前路线前进",
         NAVIGATION_ROUTE_WIDGET_STATUS_DEVIATED = "你已偏离路线",
         NAVIGATION_ROUTE_WIDGET_STATUS_ARRIVED = "已到达终点",
-        NAVIGATION_ROUTE_WIDGET_HEADER_FMT = "%s -> %s",
+        NAVIGATION_ROUTE_WIDGET_START = "起始位置",
+        NAVIGATION_ROUTE_WIDGET_END = "终点位置",
+        NAVIGATION_ROUTE_WIDGET_CURRENT = "当前位置",
         NAVIGATION_ROUTE_WIDGET_HISTORY_TITLE = "最近路线",
         NAVIGATION_ROUTE_WIDGET_HISTORY_EMPTY = "暂无历史路线",
-        NAVIGATION_ROUTE_WIDGET_REPLAN = "重规划",
+        NAVIGATION_ROUTE_WIDGET_HISTORY_BUTTON = "最近路线",
+        NAVIGATION_ROUTE_WIDGET_HISTORY_CONFIRM = "是否重新规划到%s？",
+        NAVIGATION_ROUTE_WIDGET_HISTORY_CONFIRM_DETAIL = "将以你的当前位置为起点重新规划。",
       },
     })
 
@@ -128,34 +290,326 @@ describe("Navigation RouteBar", function()
     rawset(_G, "CreateFrame", originalCreateFrame)
     rawset(_G, "UIParent", originalUIParent)
     rawset(_G, "GetCursorPosition", originalGetCursorPosition)
+    rawset(_G, "StaticPopupDialogs", originalStaticPopupDialogs)
+    rawset(_G, "StaticPopup_Show", originalStaticPopupShow)
+    rawset(_G, "ACCEPT", originalAcceptText)
+    rawset(_G, "CANCEL", originalCancelText)
     rawset(_G, "ToolboxNavigationRouteBar", nil)
   end)
 
-  it("shows_a_compact_capsule_by_default_and_toggles_the_expanded_timeline_on_click", function()
-    Toolbox.NavigationModule.RouteBar.ShowRoute(buildSampleRouteResult(), {
-      uiMapID = 114,
-      x = 0.52,
-      y = 0.43,
-      name = "北风苔原目标点",
+  it("shows_status_and_progress_in_the_capsule_header_and_triptych_positions_by_default", function()
+    locationSnapshot = {
+      currentUiMapID = 85,
+      currentX = 0.45,
+      currentY = 0.632,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildComplexRouteResult(), {
+      uiMapID = 120,
+      x = 0.418,
+      y = 0.847,
+      name = "风暴峭壁",
     })
 
     local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
     assert.is_table(routeBarFrame)
     assert.is_true(routeBarFrame:IsShown())
-    assert.equals("TOP", routeBarFrame._points[1].point)
     assert.is_false(routeBarFrame._expandedContent:IsShown())
-    assert.is_true(string.find(routeBarFrame._capsuleSummary:GetText(), "第1/2步", 1, true) ~= nil)
-    assert.is_true(string.find(routeBarFrame._capsuleSummary:GetText(), "传送：奥格瑞玛", 1, true) ~= nil)
+    assert.is_table(routeBarFrame._capsuleHeaderStatus)
+    assert.is_table(routeBarFrame._capsuleHeaderProgress)
+    assert.is_table(routeBarFrame._capsuleStartLabel)
+    assert.is_table(routeBarFrame._capsuleStartValue)
+    assert.is_table(routeBarFrame._capsuleCurrentValue)
+    assert.is_table(routeBarFrame._capsuleTargetValue)
+    assert.is_table(routeBarFrame._capsuleDividerLeft)
+    assert.is_table(routeBarFrame._capsuleDividerRight)
+    assert.equals("按当前路线前进", routeBarFrame._capsuleHeaderStatus:GetText())
+    assert.equals("第1/4步", routeBarFrame._capsuleHeaderProgress:GetText())
+    assert.equals("起始位置", routeBarFrame._capsuleStartLabel:GetText())
+    assert.equals("奥格瑞玛 45.0, 63.2", routeBarFrame._capsuleStartValue:GetText())
+    assert.equals("奥格瑞玛 45.0, 63.2", routeBarFrame._capsuleCurrentValue:GetText())
+    assert.equals("风暴峭壁 41.8, 84.7", routeBarFrame._capsuleTargetValue:GetText())
+  end)
 
+  it("toggles_the_expanded_navigation_page_and_renders_only_map_and_hub_nodes", function()
+    locationSnapshot = {
+      currentUiMapID = 85,
+      currentX = 0.45,
+      currentY = 0.632,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildComplexRouteResult(), {
+      uiMapID = 120,
+      x = 0.418,
+      y = 0.847,
+      name = "风暴峭壁",
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
     routeBarFrame._capsuleButton:RunScript("OnClick")
+
     assert.is_true(routeBarFrame._expandedContent:IsShown())
+    assert.is_table(routeBarFrame._nodeRows)
     assert.is_true(moduleDb.routeWidgetExpanded)
-    assert.is_true(string.find(routeBarFrame._timelineText:GetText(), "起始位置", 1, true) ~= nil)
-    assert.is_true(string.find(routeBarFrame._timelineText:GetText(), "终点位置", 1, true) ~= nil)
+    assert.is_true(routeBarFrame._timelineText == nil or routeBarFrame._timelineText:GetText() == "")
+    assert.same({
+      "奥格瑞玛 45.0, 63.2",
+      "奥格瑞玛传送门",
+      "达拉然",
+      "风暴峭壁 41.8, 84.7",
+    }, collectNodeLabelList(routeBarFrame))
+    assert.is_nil(string.find(table.concat(collectNodeLabelList(routeBarFrame), "\n"), "飞行前往", 1, true))
+    assert.is_nil(string.find(table.concat(collectNodeLabelList(routeBarFrame), "\n"), "K3", 1, true))
+    assert.is_nil(string.find(table.concat(collectNodeLabelList(routeBarFrame), "\n"), "前往", 1, true))
 
     routeBarFrame._capsuleButton:RunScript("OnClick")
     assert.is_false(routeBarFrame._expandedContent:IsShown())
     assert.is_false(moduleDb.routeWidgetExpanded)
+  end)
+
+  it("renders_intermediate_map_nodes_in_the_expanded_chain_without_promoting_flight_point_details", function()
+    locationSnapshot = {
+      currentUiMapID = 94,
+      currentX = 0.638,
+      currentY = 0.653,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildTaxiMapChainRouteResult(), {
+      uiMapID = 26,
+      x = 0.571,
+      y = 0.481,
+      name = "辛特兰",
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    routeBarFrame._capsuleButton:RunScript("OnClick")
+
+    assert.same({
+      "银月城 63.8, 65.3",
+      "永歌森林",
+      "东瘟疫之地",
+      "辛特兰 57.1, 48.1",
+    }, collectNodeLabelList(routeBarFrame))
+    assert.is_nil(string.find(table.concat(collectNodeLabelList(routeBarFrame), "\n"), "塔奎林", 1, true))
+    assert.is_nil(string.find(table.concat(collectNodeLabelList(routeBarFrame), "\n"), "圣光之愿礼拜堂", 1, true))
+    assert.is_nil(string.find(table.concat(collectNodeLabelList(routeBarFrame), "\n"), "恶齿村", 1, true))
+  end)
+
+  it("styles_the_expanded_node_chain_with_connectors_current_highlight_and_single_line_endpoint_positions", function()
+    locationSnapshot = {
+      currentUiMapID = 85,
+      currentX = 0.45,
+      currentY = 0.632,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildComplexRouteResult(), {
+      uiMapID = 120,
+      x = 0.418,
+      y = 0.847,
+      name = "风暴峭壁",
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    routeBarFrame._capsuleButton:RunScript("OnClick")
+
+    local nodeRowList = routeBarFrame._nodeRows -- 当前节点行列表
+    local firstRow = nodeRowList[1] -- 起点节点
+    local secondRow = nodeRowList[2] -- 第二个节点
+    local thirdRow = nodeRowList[3] -- 当前位置切换后的中间节点
+    local lastRow = nodeRowList[4] -- 终点节点
+    local labelList = collectNodeLabelList(routeBarFrame) -- 节点标签文本
+    local detailList = collectNodeDetailList(routeBarFrame) -- 节点明细文本
+
+    assert.is_truthy(firstRow._backdrop)
+    assert.equals("CENTER", firstRow._labelText._justifyH)
+    assert.is_table(firstRow._nodeMarker)
+    assert.is_table(firstRow._activeGlow)
+    assert.is_true(firstRow._activeGlow:IsShown())
+    assert.is_false(secondRow._activeGlow:IsShown())
+    assert.is_false(firstRow._connectorTop:IsShown())
+    assert.is_true(firstRow._connectorBottom:IsShown())
+    assert.is_true(secondRow._connectorTop:IsShown())
+    assert.is_true(secondRow._connectorBottom:IsShown())
+    assert.is_false(lastRow._connectorBottom:IsShown())
+    assert.equals("奥格瑞玛 45.0, 63.2", labelList[1])
+    assert.equals("风暴峭壁 41.8, 84.7", labelList[4])
+    assert.equals("", detailList[1] or "")
+    assert.equals("", detailList[2] or "")
+    assert.equals("", detailList[3] or "")
+    assert.equals("", detailList[4] or "")
+
+    locationSnapshot = {
+      currentUiMapID = 626,
+      currentX = 0.526,
+      currentY = 0.478,
+    }
+    Toolbox.NavigationModule.RouteBar.RefreshLiveState()
+
+    assert.is_false(firstRow._activeGlow:IsShown())
+    assert.is_true(thirdRow._activeGlow:IsShown())
+  end)
+
+  it("toggles_the_history_drawer_from_the_history_button_and_persists_the_state", function()
+    locationSnapshot = {
+      currentUiMapID = 85,
+      currentX = 0.45,
+      currentY = 0.632,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildComplexRouteResult(), {
+      uiMapID = 120,
+      x = 0.418,
+      y = 0.847,
+      name = "风暴峭壁",
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    assert.is_table(routeBarFrame._historyDrawer)
+    assert.is_table(routeBarFrame._historyToggleButton)
+    assert.is_false(routeBarFrame._historyDrawer:IsShown())
+    assert.is_false(moduleDb.routeHistoryExpanded)
+
+    routeBarFrame._historyToggleButton:RunScript("OnClick")
+    assert.is_true(routeBarFrame._historyDrawer:IsShown())
+    assert.is_true(moduleDb.routeHistoryExpanded)
+
+    routeBarFrame._historyToggleButton:RunScript("OnClick")
+    assert.is_false(routeBarFrame._historyDrawer:IsShown())
+    assert.is_false(moduleDb.routeHistoryExpanded)
+  end)
+
+  it("stores_the_latest_ten_history_entries_and_replans_only_after_confirmation", function()
+    locationSnapshot = {
+      currentUiMapID = 85,
+      currentX = 0.45,
+      currentY = 0.632,
+    }
+
+    for index = 1, 12 do
+      Toolbox.NavigationModule.RouteBar.ShowRoute(buildComplexRouteResult(), buildHistoryTarget(index))
+    end
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    assert.is_table(routeBarFrame._historyToggleButton)
+    routeBarFrame._historyToggleButton:RunScript("OnClick")
+
+    assert.equals(10, #moduleDb.routeHistory)
+    assert.equals(112, moduleDb.routeHistory[1].targetUiMapID)
+    assert.equals("目标12", moduleDb.routeHistory[1].targetName)
+    assert.equals(103, moduleDb.routeHistory[10].targetUiMapID)
+
+    routeBarFrame._historyButtons[2]:RunScript("OnClick")
+    assert.equals(0, #replannedTargetList)
+    assert.equals(1, #popupRequestList)
+    assert.is_not_nil(popupRequestList[1].dialogDef)
+
+    popupRequestList[1].dialogDef.OnAccept(nil, popupRequestList[1].data)
+    assert.equals(1, #replannedTargetList)
+    assert.equals(111, replannedTargetList[1].uiMapID)
+    assert.equals("目标11", replannedTargetList[1].name)
+  end)
+
+  it("does_not_replan_when_history_confirmation_is_canceled", function()
+    locationSnapshot = {
+      currentUiMapID = 85,
+      currentX = 0.45,
+      currentY = 0.632,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildComplexRouteResult(), {
+      uiMapID = 120,
+      x = 0.418,
+      y = 0.847,
+      name = "风暴峭壁",
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    assert.is_table(routeBarFrame._historyToggleButton)
+    routeBarFrame._historyToggleButton:RunScript("OnClick")
+    routeBarFrame._historyButtons[1]:RunScript("OnClick")
+
+    assert.equals(1, #popupRequestList)
+    if type(popupRequestList[1].dialogDef) == "table" and type(popupRequestList[1].dialogDef.OnCancel) == "function" then
+      popupRequestList[1].dialogDef.OnCancel(nil, popupRequestList[1].data)
+    end
+    assert.equals(0, #replannedTargetList)
+  end)
+
+  it("refreshes_live_progress_status_and_current_position_in_the_capsule_body", function()
+    locationSnapshot = {
+      currentUiMapID = 85,
+      currentX = 0.45,
+      currentY = 0.632,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildComplexRouteResult(), {
+      uiMapID = 120,
+      x = 0.418,
+      y = 0.847,
+      name = "风暴峭壁",
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    assert.is_table(routeBarFrame._capsuleHeaderProgress)
+    assert.is_table(routeBarFrame._capsuleCurrentValue)
+    assert.is_table(routeBarFrame._capsuleHeaderStatus)
+
+    locationSnapshot = {
+      currentUiMapID = 626,
+      currentX = 0.526,
+      currentY = 0.478,
+    }
+    Toolbox.NavigationModule.RouteBar.RefreshLiveState()
+    assert.equals("第3/4步", routeBarFrame._capsuleHeaderProgress:GetText())
+    assert.equals("达拉然 52.6, 47.8", routeBarFrame._capsuleCurrentValue:GetText())
+
+    locationSnapshot = {
+      currentUiMapID = 999,
+      currentX = 0.1,
+      currentY = 0.1,
+    }
+    Toolbox.NavigationModule.RouteBar.RefreshLiveState()
+    assert.equals("你已偏离路线", routeBarFrame._capsuleHeaderStatus:GetText())
+
+    locationSnapshot = {
+      currentUiMapID = 120,
+      currentX = 0.418,
+      currentY = 0.847,
+    }
+    Toolbox.NavigationModule.RouteBar.RefreshLiveState()
+    assert.equals("已到达终点", routeBarFrame._capsuleHeaderStatus:GetText())
+    assert.equals("风暴峭壁 41.8, 84.7", routeBarFrame._capsuleCurrentValue:GetText())
+  end)
+
+  it("renders_same_map_start_current_and_target_with_real_map_coordinates_in_the_capsule_body", function()
+    locationSnapshot = {
+      currentUiMapID = 114,
+      currentX = 0.41,
+      currentY = 0.51,
+    }
+
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildSameMapRouteResult(), {
+      uiMapID = 114,
+      x = 0.52,
+      y = 0.43,
+    })
+
+    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
+    assert.is_table(routeBarFrame._capsuleStartValue)
+    assert.is_table(routeBarFrame._capsuleCurrentValue)
+    assert.is_table(routeBarFrame._capsuleTargetValue)
+    assert.equals("北风苔原 41.0, 51.0", routeBarFrame._capsuleStartValue:GetText())
+    assert.equals("北风苔原 41.0, 51.0", routeBarFrame._capsuleCurrentValue:GetText())
+    assert.equals("北风苔原 52.0, 43.0", routeBarFrame._capsuleTargetValue:GetText())
+
+    locationSnapshot = {
+      currentUiMapID = 114,
+      currentX = 0.45,
+      currentY = 0.55,
+    }
+    Toolbox.NavigationModule.RouteBar.RefreshLiveState()
+    assert.equals("北风苔原 41.0, 51.0", routeBarFrame._capsuleStartValue:GetText())
+    assert.equals("北风苔原 45.0, 55.0", routeBarFrame._capsuleCurrentValue:GetText())
   end)
 
   it("restores_the_saved_anchor_and_persists_dragged_position", function()
@@ -164,12 +618,17 @@ describe("Navigation RouteBar", function()
       x = 24,
       y = -30,
     }
+    locationSnapshot = {
+      currentUiMapID = 85,
+      currentX = 0.45,
+      currentY = 0.632,
+    }
 
-    Toolbox.NavigationModule.RouteBar.ShowRoute(buildSampleRouteResult(), {
-      uiMapID = 114,
-      x = 0.52,
-      y = 0.43,
-      name = "北风苔原目标点",
+    Toolbox.NavigationModule.RouteBar.ShowRoute(buildComplexRouteResult(), {
+      uiMapID = 120,
+      x = 0.418,
+      y = 0.847,
+      name = "风暴峭壁",
     })
 
     local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
@@ -190,137 +649,16 @@ describe("Navigation RouteBar", function()
     assert.equals(20, routeBarFrame._points[#routeBarFrame._points].y)
   end)
 
-  it("stores_the_latest_ten_history_entries_and_replans_from_the_saved_destination", function()
-    for index = 1, 12 do
-      Toolbox.NavigationModule.RouteBar.ShowRoute(buildSampleRouteResult(), {
-        uiMapID = 100 + index,
-        x = 0.1 + (index / 100),
-        y = 0.2 + (index / 100),
-        name = "目标" .. tostring(index),
-      })
-    end
+  it("builds_map_path_summary_without_flight_point_details_or_action_verbs", function()
+    local routeText = Toolbox.NavigationModule.RouteBar.BuildRouteText(buildComplexRouteResult())
 
-    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
-    routeBarFrame._capsuleButton:RunScript("OnClick")
-
-    assert.equals(10, #moduleDb.routeHistory)
-    assert.equals(112, moduleDb.routeHistory[1].targetUiMapID)
-    assert.equals("目标12", moduleDb.routeHistory[1].targetName)
-    assert.equals(103, moduleDb.routeHistory[10].targetUiMapID)
-
-    routeBarFrame._historyButtons[2]:RunScript("OnClick")
-
-    assert.equals(1, #replannedTargetList)
-    assert.equals(111, replannedTargetList[1].uiMapID)
-    assert.equals("目标11", replannedTargetList[1].name)
-  end)
-
-  it("refreshes_live_progress_and_deviation_status_from_the_current_location_snapshot", function()
-    Toolbox.NavigationModule.RouteBar.ShowRoute(buildSampleRouteResult(), {
-      uiMapID = 114,
-      x = 0.52,
-      y = 0.43,
-      name = "北风苔原目标点",
-    })
-
-    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
-    routeBarFrame._capsuleButton:RunScript("OnClick")
-
-    locationSnapshot = {
-      currentUiMapID = 85,
-      currentX = 0.4,
-      currentY = 0.5,
-    }
-    Toolbox.NavigationModule.RouteBar.RefreshLiveState()
-    assert.is_true(string.find(routeBarFrame._capsuleSummary:GetText(), "第2/2步", 1, true) ~= nil)
-
-    locationSnapshot = {
-      currentUiMapID = 999,
-      currentX = 0.1,
-      currentY = 0.1,
-    }
-    Toolbox.NavigationModule.RouteBar.RefreshLiveState()
-    assert.is_true(string.find(routeBarFrame._capsuleStatus:GetText(), "偏离路线", 1, true) ~= nil)
-
-    locationSnapshot = {
-      currentUiMapID = 114,
-      currentX = 0.52,
-      currentY = 0.43,
-    }
-    Toolbox.NavigationModule.RouteBar.RefreshLiveState()
-    assert.is_true(string.find(routeBarFrame._capsuleStatus:GetText(), "已到达终点", 1, true) ~= nil)
-  end)
-
-  it("shows_same_map_start_current_and_target_with_real_map_coordinates", function()
-    locationSnapshot = {
-      currentUiMapID = 114,
-      currentX = 0.41,
-      currentY = 0.51,
-    }
-
-    Toolbox.NavigationModule.RouteBar.ShowRoute({
-      totalSteps = 1,
-      segments = {
-        {
-          mode = "walk_local",
-          label = "目标位置：北风苔原 52.0, 43.0",
-          fromName = "当前位置",
-          toName = "北风苔原目标点",
-          fromUiMapID = 114,
-          toUiMapID = 114,
-          traversedUiMapIDs = { 114 },
-          traversedUiMapNames = { "北风苔原" },
-        },
-      },
-    }, {
-      uiMapID = 114,
-      x = 0.52,
-      y = 0.43,
-    })
-
-    local routeBarFrame = createdFrameByName.ToolboxNavigationRouteBar -- 路线图根 Frame
-    routeBarFrame._capsuleButton:RunScript("OnClick")
-
-    local timelineText = routeBarFrame._timelineText:GetText() -- 展开态时间线文本
-    assert.is_true(string.find(timelineText, "起始位置：北风苔原 41.0, 51.0", 1, true) ~= nil)
-    assert.is_true(string.find(timelineText, "终点位置：北风苔原 52.0, 43.0", 1, true) ~= nil)
-    assert.is_true(string.find(timelineText, "当前位置：北风苔原 41.0, 51.0", 1, true) ~= nil)
-
-    locationSnapshot = {
-      currentUiMapID = 114,
-      currentX = 0.45,
-      currentY = 0.55,
-    }
-    Toolbox.NavigationModule.RouteBar.RefreshLiveState()
-
-    timelineText = routeBarFrame._timelineText:GetText()
-    assert.is_true(string.find(timelineText, "起始位置：北风苔原 41.0, 51.0", 1, true) ~= nil)
-    assert.is_true(string.find(timelineText, "当前位置：北风苔原 45.0, 55.0", 1, true) ~= nil)
-  end)
-
-  it("prefers_cleaned_segment_labels_for_player_facing_route_text", function()
-    local routeText = Toolbox.NavigationModule.RouteBar.BuildRouteText({
-      totalSteps = 2,
-      segments = {
-        {
-          mode = "public_portal",
-          label = "使用西部大地神殿的传送门前往海加尔山→海加尔山",
-          fromName = "奥格瑞玛",
-          toName = "海加尔山",
-          traversedUiMapNames = { "奥格瑞玛", "海加尔山" },
-        },
-        {
-          mode = "hearthstone",
-          label = "炉石",
-          fromName = "海加尔山",
-          toName = "奥格瑞玛",
-          traversedUiMapNames = { "海加尔山", "奥格瑞玛" },
-        },
-      },
-    })
-
-    assert.is_true(string.find(routeText, "使用西部大地神殿的传送门前往海加尔山", 1, true) ~= nil)
-    assert.is_nil(string.find(routeText, "→海加尔山", 1, true))
-    assert.is_true(string.find(routeText, "炉石：奥格瑞玛", 1, true) ~= nil)
+    assert.is_true(string.find(routeText, "奥格瑞玛", 1, true) ~= nil)
+    assert.is_true(string.find(routeText, "奥格瑞玛传送门", 1, true) ~= nil)
+    assert.is_true(string.find(routeText, "达拉然", 1, true) ~= nil)
+    assert.is_true(string.find(routeText, "风暴峭壁", 1, true) ~= nil)
+    assert.is_nil(string.find(routeText, "达拉然飞行点", 1, true))
+    assert.is_nil(string.find(routeText, "K3", 1, true))
+    assert.is_nil(string.find(routeText, "飞行前往", 1, true))
+    assert.is_nil(string.find(routeText, "前往", 1, true))
   end)
 end)

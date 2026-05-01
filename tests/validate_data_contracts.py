@@ -191,6 +191,43 @@ def validate_navigation_instance_entrance_regressions() -> None:
     require("TargetX = 0.762069" in razorfen_downs_row, "navigation_instance_entrances: Razorfen Downs target X mismatch")
     require("TargetY = 0.521909" in razorfen_downs_row, "navigation_instance_entrances: Razorfen Downs target Y mismatch")
 
+    stratholme_main_gate_match = re.search(r"\[236\]\s*=\s*\{([^}]+)\}", lua_text)
+    require(
+        stratholme_main_gate_match is not None,
+        "navigation_instance_entrances: missing Stratholme main gate journalInstanceID 236",
+    )
+    stratholme_service_gate_match = re.search(r"\[1292\]\s*=\s*\{([^}]+)\}", lua_text)
+    require(
+        stratholme_service_gate_match is not None,
+        "navigation_instance_entrances: missing Stratholme service entrance journalInstanceID 1292",
+    )
+    stratholme_main_gate_row = stratholme_main_gate_match.group(1)
+    stratholme_service_gate_row = stratholme_service_gate_match.group(1)
+    require(
+        "Name_lang = \"斯坦索姆 - 正门\"" in stratholme_main_gate_row,
+        "navigation_instance_entrances: Stratholme main gate name mismatch",
+    )
+    require(
+        "Name_lang = \"斯坦索姆 - 仆从入口\"" in stratholme_service_gate_row,
+        "navigation_instance_entrances: Stratholme service entrance name mismatch",
+    )
+    main_gate_target_match = re.search(
+        r"TargetUiMapID = (\d+).+?TargetX = ([0-9.]+).+?TargetY = ([0-9.]+)",
+        stratholme_main_gate_row,
+        re.S,
+    )
+    service_gate_target_match = re.search(
+        r"TargetUiMapID = (\d+).+?TargetX = ([0-9.]+).+?TargetY = ([0-9.]+)",
+        stratholme_service_gate_row,
+        re.S,
+    )
+    require(main_gate_target_match is not None, "navigation_instance_entrances: Stratholme main gate target missing")
+    require(service_gate_target_match is not None, "navigation_instance_entrances: Stratholme service entrance target missing")
+    require(
+        main_gate_target_match.groups() == service_gate_target_match.groups(),
+        "navigation_instance_entrances: Stratholme main gate and service entrance must resolve to the same target",
+    )
+
 
 def validate_instance_entrance_regressions() -> None:
     lua_text = read_text("Toolbox", "Data", "InstanceEntrances.lua")

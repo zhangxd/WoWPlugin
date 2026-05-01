@@ -216,33 +216,27 @@ describe("EncounterJournal entrance navigation", function()
     assert.equals(convertedPosition.y, waypointCalls[1].position.y)
   end)
 
-  it("uses_static_db_entrance_when_runtime_entrance_is_missing_exact_journal_id", function()
-    local conversionCalls = {} -- 世界坐标转换调用
+  it("uses_exported_navigation_entry_when_runtime_only_returns_aggregate_id", function()
+    local runtimeCallCount = 0 -- 运行时入口 API 调用次数
     local waypointCalls = {} -- waypoint 设置调用
     local openedMapIDs = {} -- 打开的地图 ID
-    local convertedPosition = { x = 0.59518843889236, y = 0.403237074613 } -- 转换后的地图坐标
 
-    Toolbox.Data.InstanceEntrances = {
-      entrances = {
+    Toolbox.Data.NavigationInstanceEntrances = {
+      entrancesByJournalInstanceID = {
         [1277] = {
-          {
-            Source = "journalinstanceentrance",
-            EntranceID = 209,
-            JournalInstanceID = 1277,
-            InstanceName = "厄运之槌 - 戈多克议会",
-            AreaName = "巨槌竞技场",
-            WorldMapID = 1,
-            HintUiMapID = 69,
-            WorldX = -3519.95,
-            WorldY = 1089.93,
-            WorldZ = 161.065,
-          },
+          JournalInstanceID = 1277,
+          EntranceID = 209,
+          Name_lang = "厄运之槌 - 戈多克议会",
+          TargetUiMapID = 69,
+          TargetX = 0.59518843889236,
+          TargetY = 0.403237074613,
         },
       },
     }
 
     _G.C_EncounterJournal = {
       GetDungeonEntrancesForMap = function(uiMapID)
+        runtimeCallCount = runtimeCallCount + 1
         if uiMapID == 69 then
           return {
             {
@@ -257,14 +251,6 @@ describe("EncounterJournal entrance navigation", function()
       end,
     }
     _G.C_Map = {
-      GetMapPosFromWorldPos = function(worldMapID, worldPosition, overrideUiMapID)
-        conversionCalls[#conversionCalls + 1] = {
-          worldMapID = worldMapID,
-          worldPosition = worldPosition,
-          overrideUiMapID = overrideUiMapID,
-        }
-        return 69, convertedPosition
-      end,
       CanSetUserWaypointOnMap = function(uiMapID)
         return uiMapID == 69
       end,
@@ -292,38 +278,46 @@ describe("EncounterJournal entrance navigation", function()
     })
 
     assert.is_true(success)
-    assert.equals("static", result.source)
+    assert.equals(0, runtimeCallCount)
+    assert.equals("exported", result.source)
     assert.equals("厄运之槌 - 戈多克议会", result.name)
     assert.equals(209, result.entranceID)
     assert.same({ 69 }, openedMapIDs)
-    assert.equals(1, #conversionCalls)
-    assert.equals(1, conversionCalls[1].worldMapID)
-    assert.equals(-3519.95, conversionCalls[1].worldPosition.x)
-    assert.equals(1089.93, conversionCalls[1].worldPosition.y)
-    assert.equals(69, conversionCalls[1].overrideUiMapID)
-    assert.equals(convertedPosition, waypointCalls[1].position)
+    assert.equals(0.59518843889236, waypointCalls[1].position.x)
+    assert.equals(0.403237074613, waypointCalls[1].position.y)
   end)
 
-  it("uses_static_db_entrance_directly_without_runtime_priority", function()
+  it("uses_single_exported_navigation_table_without_static_or_runtime_fallback", function()
     local runtimeCallCount = 0 -- 运行时入口 API 调用次数
-    local conversionCalls = {} -- 世界坐标转换调用
-    local staticPosition = { x = 0.31, y = 0.62 } -- 静态数据转换后的坐标
+    local conversionCalls = {} -- 静态入口坐标转换调用
 
+    Toolbox.Data.NavigationInstanceEntrances = {
+      entrancesByJournalInstanceID = {
+        [1292] = {
+          JournalInstanceID = 1292,
+          EntranceID = 208,
+          Name_lang = "斯坦索姆 - 仆从入口",
+          InstanceMapID = 329,
+          TargetUiMapID = 23,
+          TargetX = 0.876543,
+          TargetY = 0.345678,
+        },
+      },
+    }
     Toolbox.Data.InstanceEntrances = {
       entrances = {
-        [230] = {
+        [1292] = {
           {
-            Source = "areapoi",
-            EntranceID = 6501,
-            AreaPoiID = 6501,
-            JournalInstanceID = 230,
-            InstanceName = "厄运之槌 - 中心花园",
-            AreaName = "厄运之槌",
+            Source = "journalinstanceentrance",
+            EntranceID = 208,
+            JournalInstanceID = 1292,
+            InstanceName = "静态入口不应优先",
+            AreaName = "静态入口不应优先",
             WorldMapID = 1,
-            HintUiMapID = 69,
-            WorldX = -4235.0,
-            WorldY = 1305.11,
-            WorldZ = 177.129,
+            HintUiMapID = 23,
+            WorldX = 3392.46,
+            WorldY = -3389.2,
+            WorldZ = 143.073,
           },
         },
       },
@@ -334,10 +328,10 @@ describe("EncounterJournal entrance navigation", function()
         runtimeCallCount = runtimeCallCount + 1
         return {
           {
-            journalInstanceID = 230,
-            areaPoiID = 6501,
-            name = "运行时入口不应优先",
-            position = { x = 0.99, y = 0.99 },
+            journalInstanceID = 236,
+            areaPoiID = 6724,
+            name = "运行时共享入口不应被依赖",
+            position = { x = 0.91, y = 0.82 },
           },
         }
       end,
@@ -349,25 +343,25 @@ describe("EncounterJournal entrance navigation", function()
           worldPosition = worldPosition,
           overrideUiMapID = overrideUiMapID,
         }
-        return 69, staticPosition
+        return 23, { x = 0.11, y = 0.22 }
       end,
     }
     _G.CreateVector2D = function(xValue, yValue)
       return { x = xValue, y = yValue }
     end
 
-    local entrance = Toolbox.EJ.FindDungeonEntranceForJournalInstance(230, {
-      candidateMapIDs = { 69 },
+    local entrance = Toolbox.EJ.FindDungeonEntranceForJournalInstance(1292, {
+      candidateMapIDs = { 23 },
     })
 
     assert.equals(0, runtimeCallCount)
-    assert.equals("static", entrance.source)
-    assert.equals("厄运之槌 - 中心花园", entrance.name)
-    assert.equals(6501, entrance.areaPoiID)
-    assert.equals(staticPosition, entrance.position)
-    assert.equals(1, #conversionCalls)
-    assert.equals(-4235.0, conversionCalls[1].worldPosition.x)
-    assert.equals(1305.11, conversionCalls[1].worldPosition.y)
+    assert.equals(0, #conversionCalls)
+    assert.equals("exported", entrance.source)
+    assert.equals("斯坦索姆 - 仆从入口", entrance.name)
+    assert.equals(208, entrance.entranceID)
+    assert.equals(23, entrance.uiMapID)
+    assert.equals(0.876543, entrance.position.x)
+    assert.equals(0.345678, entrance.position.y)
   end)
 
   it("list_row_pin_invokes_navigation_for_row_instance", function()

@@ -1,7 +1,7 @@
 # 冒险指南测试基线
 
 - 文档类型：测试
-- 状态：已通过
+- 状态：待执行
 - 主题：encounter-journal
 - 适用范围：`encounter_journal` 当前副本列表、详情页、入口导航与锁定摘要增强的自动化与手工验证基线
 - 关联模块：`encounter_journal`、`minimap_button`
@@ -9,7 +9,7 @@
   - `docs/specs/encounter-journal-spec.md`
   - `docs/designs/encounter-journal-design.md`
   - `docs/plans/encounter-journal-plan.md`
-- 最后更新：2026-04-29
+- 最后更新：2026-05-01
 
 ## 1. 测试背景
 
@@ -43,11 +43,13 @@
 | TC-AUTO-01 | 测试环境可运行 Python / busted | 执行 `python tests/run_all.py` | 静态校验与逻辑测试通过 |
 | TC-AUTO-02 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | `Toolbox.EJ` 能按 `journalInstanceID` 查找入口、设置 waypoint，并由副本列表行图钉调用 |
 | TC-AUTO-03 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | 覆盖列表单击仍可进入详情页、悬停显钉与常驻显示设置 |
-| TC-AUTO-04 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | 当运行时入口 API 只返回聚合副本 ID 时，`Toolbox.EJ` 使用 `Toolbox.Data.InstanceEntrances` 的精确 `journalInstanceID` 记录转换地图坐标 |
-| TC-AUTO-05 | 测试环境可运行 Python | 执行 `python tests/validate_data_contracts.py` | `instance_entrances` 契约、生成文件头和 Lua 根结构通过静态校验；`230 厄运之槌 - 中心花园` 使用 `areapoi` / `AreaPoiID=6501` / `HintUiMapID=69`，`1277` 保留 `journalinstanceentrance` |
-| TC-AUTO-06 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | 当 DB 静态入口存在时，`Toolbox.EJ` 不调用 `C_EncounterJournal.GetDungeonEntrancesForMap` 抢占静态数据 |
+| TC-AUTO-04 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | 当运行时入口 API 只返回聚合副本 ID 时，`Toolbox.EJ` 仍可直接命中 `Toolbox.Data.NavigationInstanceEntrances` 的精确 `journalInstanceID` 记录 |
+| TC-AUTO-05 | 测试环境可运行 Python | 执行 `python tests/validate_data_contracts.py` | `instance_entrances` 追溯契约、`navigation_instance_entrances` 运行时契约、生成文件头和 Lua 根结构通过静态校验 |
+| TC-AUTO-06 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | 当规范化导出入口存在时，`Toolbox.EJ` 不调用 `C_EncounterJournal.GetDungeonEntrancesForMap`，也不回退到旧静态入口转换链路 |
 | TC-AUTO-07 | 测试环境可运行 Python | 执行 `python tests/validate_settings_subcategories.py` | 设置页已删除 3 个旧选项，对应默认值 / 迁移 / 本地化 / 运行时残留均被静态校验拦截 |
 | TC-AUTO-08 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_mount_filter_spec.lua` | 副本列表“仅坐骑”状态继续记忆；详情页不再执行“仅坐骑”过滤 |
+| TC-AUTO-09 | 测试环境可运行 Python | 执行 `python tests/validate_data_contracts.py` | 规范化运行时入口导出表同时包含 `236` 与 `1292`，且两者导航目标一致 |
+| TC-AUTO-10 | 测试环境可运行 busted | 执行 `tests/logic/spec/encounter_journal_navigation_spec.lua` | `Toolbox.EJ` 在 `1292` 场景下直接命中单一规范化导出表，不再调用运行时 `C_EncounterJournal.GetDungeonEntrancesForMap` 兜底 |
 | TC-MANUAL-01 | 打开冒险指南地下城/团队副本列表 | 切换“仅坐骑”，关闭并重新打开冒险指南 | 当前列表被筛选为可掉落坐骑的副本，重开后沿用上次开关状态 |
 | TC-MANUAL-02 | 角色存在副本锁定 | 浏览副本列表 | 列表行内显示重置时间；团队副本显示进度 |
 | TC-MANUAL-03 | 角色存在副本锁定 | 悬停副本列表项 | tooltip 显示锁定详情 |
@@ -62,6 +64,7 @@
 | TC-MANUAL-12 | 打开有入口数据的副本 / 地下城列表 | 点击对应列表条目右下角图钉 | 世界地图打开到入口地图，创建系统用户导航点并开始追踪 |
 | TC-MANUAL-13 | 打开无入口数据或不允许设置 waypoint 的副本列表 | 点击对应列表条目右下角图钉 | 插件给出不可用提示，不抛 Lua 错误 |
 | TC-MANUAL-14 | 打开地下城列表并定位到“厄运之槌 - 戈多克议会” | 点击该条目右下角图钉 | 插件命中 DB 静态入口 `1277`，打开菲拉斯 / 厄运之槌入口所在地图并创建系统导航点；不得提示找不到副本入口 |
+| TC-MANUAL-15 | 打开地下城列表并定位到“斯坦索姆 - 仆从入口” | 点击该条目右下角图钉 | 插件直接命中规范化运行时入口导出表，为 `1292` 创建导航目标；不得提示“未找到该副本的入口位置” |
 
 ## 5. 执行结果
 
@@ -75,6 +78,8 @@
 | TC-AUTO-06 | `busted tests/logic/spec/encounter_journal_navigation_spec.lua`：覆盖静态入口存在时运行时入口 API 调用次数为 0 | 通过 | 2026-04-28 执行 |
 | TC-AUTO-07 | `python tests/validate_settings_subcategories.py`：OK: settings subcategories structure validated | 通过 | 2026-04-29 执行 |
 | TC-AUTO-08 | `busted tests/logic/spec/encounter_journal_mount_filter_spec.lua`：9 successes / 0 failures / 0 errors | 通过 | 2026-04-29 执行 |
+| TC-AUTO-09 | 待执行 | 待执行 | 2026-05-01 新增，用于下一阶段 `236 / 1292` 共享入口回归 |
+| TC-AUTO-10 | 待执行 | 待执行 | 2026-05-01 新增，用于下一阶段运行时单表直读回归 |
 | TC-MANUAL-01 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-02 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-03 | 待执行 | 待执行 | 需游戏内验证 |
@@ -90,18 +95,18 @@
 | TC-MANUAL-13 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-14 | 待执行 | 待执行 | 需游戏内验证 |
 | TC-MANUAL-15 | 待执行 | 待执行 | 需游戏内验证 |
-| TC-MANUAL-16 | 待执行 | 待执行 | 需游戏内验证 |
 
 ## 6. 问题与阻塞
 
 - 自动化当前通过。
+- 2026-05-01 新增的 `236 / 1292` 共享入口回归与运行时单表直读验证尚未执行，因为本轮仅完成文档落地，未进入代码实施。
 - 游戏内手工验证未在本轮执行环境中执行，因此仍需后续补齐。
 
 ## 7. 结论
 
-- 当前结论：自动化已覆盖本轮设置收口、详情页过滤移除与列表交互，游戏内手工验证待执行。
+- 当前结论：截至 2026-04-29 的已落地能力自动化已通过；2026-05-01 新增的“导出层归一化入口目标表”相关验证项已入表，待需求方明确“开动”并完成实现后执行。
 - 后续动作：
-  - 在游戏内补齐本清单中的手工验证项，重点验证列表交互、条目图钉和 `厄运之槌 - 戈多克议会` 静态入口导航
+  - 在游戏内补齐本清单中的手工验证项，重点验证列表交互、条目图钉、`厄运之槌 - 戈多克议会` 静态入口导航与 `斯坦索姆 - 仆从入口` 共享入口直导
 
 ## 8. 修订记录
 
@@ -116,3 +121,4 @@
 | 2026-04-28 | 新增入口读取优先级回归：静态入口存在时不调用运行时入口 API |
 | 2026-04-28 | 新增目标区域地图回归：`230` 必须导出 `HintUiMapID=69`，确保打开菲拉斯区域地图 |
 | 2026-04-29 | 新增设置收口与详情页过滤移除验证：覆盖 3 个旧设置项移除、列表“仅坐骑”记忆状态与详情页不再过滤掉落 |
+| 2026-05-01 | 新增下一阶段验证项：覆盖 `236 / 1292` 共享入口回归，以及运行时副本入口导航收口为单一规范化导出表 |
