@@ -1,7 +1,7 @@
 # 设置宿主重构计划
 
 - 文档类型：计划
-- 状态：待人工验证
+- 状态：执行中
 - 主题：settings-host-redesign
 - 适用范围：`Toolbox/UI/SettingsHost.lua` 的第二阶段设置控件统一、模块 `RegisterSettings(box)` 迁移、战斗内独立宿主兼容，以及相关测试 / 文档回写
 - 关联模块：`mover`、`tooltip_anchor`、`navigation`、`quest`、`encounter_journal`、`minimap_button`、`chat_notify`
@@ -9,9 +9,9 @@
   - `docs/specs/settings-host-redesign-spec.md`
   - `docs/designs/settings-host-redesign-design.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-05-01
+- 最后更新：2026-05-02
 
-> 本计划承接 `settings-host-redesign` 第一阶段已完成的纯叶子页结构重构，仅覆盖第二阶段：页内控件、交互规则与宿主 helper 层统一。当前自动化实现与回归验证已完成，剩余工作为游戏内人工验证与最终验收记录。
+> 本计划承接 `settings-host-redesign` 第一阶段已完成的纯叶子页结构重构，覆盖第二阶段页内控件统一，以及 2026-05-02 新增的“现代化视觉收口”。上一轮自动化实现虽然通过，但实机暴露出“非动作项被按钮化”的偏差，因此本计划重新进入执行中状态，先修正宿主控件观感，再做新一轮自动化与游戏内验证。
 
 ## 1. 目标
 
@@ -30,6 +30,7 @@
   - `ToolboxDB` 键名、取值语义与模块归属保持不变；非法枚举值允许在页面构建阶段归一为默认值并写回。
   - 页面注册只在宿主初始化阶段执行一次；语言切换走 `RefreshAllPages()`；局部状态变化优先局部刷新；影响显隐 / 行数 / 高度时才走 `BuildPage()`。
   - 战斗内独立宿主模式的打开优先级为：显式目标页 > `settingsLastLeafPage` > `通用`；宿主内切页后要更新 `settingsLastLeafPage`，且不得重新注册类目、不得调用 `Settings.OpenToCategory`。
+  - 用户 2026-05-02 明确确认采用“保留 helper、重写行控件观感”的方案 A；实施必须在隔离 worktree 分支 `codex/settings-ui-modernize` 中进行，避免影响当前主工作区未提交改动。
 
 ## 3. 影响文件
 
@@ -58,6 +59,7 @@
   - `python tests/validate_settings_subcategories.py`
   - `python tests/run_all.py --ci`
   - 定向：`busted tests/logic/spec/settings_host_spec.lua`
+  - 基线：在隔离 worktree 中先运行一次 `python tests/run_all.py --ci`，预期全绿后再开始改代码
 
 ## 4. 执行步骤
 
@@ -157,6 +159,42 @@
 - [x] 步骤 21：回写 `docs/Toolbox-addon-design.md`，同步第二阶段 helper 模型、控件统一口径、局部刷新规则和战斗内独立宿主约束；如某模块功能说明的设置项描述已失真，再同步对应 `docs/features/*.md`。
 - [ ] 步骤 22：补记 `docs/specs/settings-host-redesign-spec.md`、`docs/designs/settings-host-redesign-design.md`、`docs/plans/settings-host-redesign-plan.md` 执行结果与验证结论。
 
+## Chunk 5: 现代化视觉收口（2026-05-02）
+
+- [x] 步骤 23：在隔离 worktree `codex/settings-ui-modernize` 中复核基线，并把用户确认结果写回现有 spec / design / plan。
+  - 已完成：`python tests/run_all.py --ci` 基线全绿。
+- [x] 步骤 24：先写失败约束，锁定“非动作项不得再以 `UIPanelButtonTemplate` 红底按钮作为主视觉”。
+  - 修改：
+    - `tests/validate_settings_subcategories.py`
+    - 如需更细粒度行为约束：`tests/logic/spec/settings_host_spec.lua`
+  - 目标：
+    - `AddToggleRow`、`AddChoiceRow`、`AddMenuRow`、`AddMultiSelectRow` 不再以普通动作按钮模板作为主承载
+    - `AddActionRow` 继续允许使用按钮模板
+- [x] 步骤 25：按 TDD 方式重构 `Toolbox/UI/SettingsHost.lua` 行控件实现。
+  - toggle：
+    - 改为更接近 Retail Settings 的 checkbox / switch 观感
+    - 去掉 `ON / OFF` 文本按钮主视觉
+  - choice：
+    - 两项选中态改为 segmented / pill 风格
+  - menu：
+    - 触发器保留可点击入口，但观感改为现代 dropdown，而不是通用红底按钮
+  - multi-select：
+    - 改为 checkbox 列表，不再使用 `[x]` / `[ ]` 按钮文本
+  - action：
+    - 继续保留按钮观感，仅用于真正执行动作的设置行
+- [x] 步骤 26：如控件现代化只需宿主层即可完成，则不要顺手修改模块行为代码；仅在 helper 参数或短文案必须调整时，最小化修改相关模块或本地化文件。
+  - 优先保持变更集中在：
+    - `Toolbox/UI/SettingsHost.lua`
+    - `tests/validate_settings_subcategories.py`
+    - `tests/logic/spec/settings_host_spec.lua`
+    - 必要时：`Toolbox/Core/Foundation/Locales.lua`
+- [x] 步骤 27：运行现代化收口后的自动化验证。
+  - `python tests/validate_settings_subcategories.py`
+  - `busted tests/logic/spec/settings_host_spec.lua`
+  - `python tests/run_all.py --ci`
+  - 结果：已通过
+- [ ] 步骤 28：补记本轮实现结果，并把计划状态推进到“待人工验证”或“已完成”。
+
 ## 5. 验证
 
 - 自动化检查 1：
@@ -171,6 +209,9 @@
 - 自动化检查 4：
   - `python tests/run_all.py --ci`
   - 预期：全量自动化通过，无新增回归。
+- 自动化检查 5：现代化视觉约束
+  - `python tests/validate_settings_subcategories.py`
+  - 预期：toggle / choice / menu / multi-select 不再落回 `UIPanelButtonTemplate` 主视觉，只有 action row 继续允许按钮模板。
 - 游戏内验证 A：系统 Settings 路径
   - `/toolbox`、ESC 菜单按钮和小地图按钮仍会打开同一套叶子页结构。
   - 系统设置页可使用新的 toggle / 单选 / 菜单 / 多选交互。
@@ -203,6 +244,8 @@
 - 2026-05-01：第二阶段需求与设计已更新，计划已补齐并通过复审。
 - 2026-05-01：用户明确回复“开动”，需求状态已改为可执行，计划状态改为执行中，开始进入 Chunk 1。
 - 2026-05-01：自动化实现完成；`TooltipAnchor` 收口为 3 项菜单按钮，`SettingsHost` 菜单弹层抬到 `DIALOG` strata，`python tests/run_all.py --ci` 通过，当前待游戏内手工验证系统设置页与战斗内独立宿主路径。
+- 2026-05-02：用户确认继续按方案 A 收口“红底按钮”视觉偏差，并要求在隔离 worktree `codex/settings-ui-modernize` 中实施；该 worktree 基线 `python tests/run_all.py --ci` 已通过。
+- 2026-05-02：Chunk 5 自动化完成；`SettingsHost` 非动作项已改为自绘现代控件，新增“仅 action row 保留按钮模板”的测试约束，`python tests/run_all.py --ci` 再次通过。
 
 ## 8. 修订记录
 
@@ -213,4 +256,7 @@
 | 2026-05-01 | 第二阶段续写：补充宿主 helper 层、模块控件迁移、战斗内独立宿主兼容与测试先行步骤 |
 | 2026-05-01 | 根据计划评审补充行级依赖 / 局部刷新、自定义块高度回报、独立宿主切页约束与 `/reload` 保值验证 |
 | 2026-05-01 | 自动化实现完成：状态更新为待人工验证，补记菜单弹层层级修正与 `run_all.py --ci` 通过结果 |
+| 2026-05-02 | 因实机发现“非动作项被按钮化”为红底按钮墙，计划重新进入执行中，新增 Chunk 5 处理现代化视觉收口 |
+| 2026-05-02 | 记录用户确认的方案 A 与隔离 worktree 分支 `codex/settings-ui-modernize`，并补记基线测试通过 |
+| 2026-05-02 | Chunk 5 自动化完成：`SettingsHost` 非动作项改为现代自绘控件，模板约束测试与 `run_all.py --ci` 通过 |
 

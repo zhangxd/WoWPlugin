@@ -107,6 +107,22 @@ def validate_settings_host() -> None:
         if removed_needle in text:
             raise AssertionError(f"{removed_label} should be removed from SettingsHost")
 
+    for removed_needle, removed_label in [
+        ('local stateButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate")', "toggle row action button template"),
+        ('local choiceButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate")', "choice row action button template"),
+        ('local menuButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate")', "menu row action button template"),
+        ('local optionButton = CreateFrame("Button", nil, popupFrame, "UIPanelButtonTemplate")', "menu popup action button template"),
+        ('local checkButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate")', "multi-select action button template"),
+    ]:
+        if removed_needle in text:
+            raise AssertionError(f"{removed_label} should be removed from SettingsHost")
+
+    require_contains(
+        text,
+        'local actionButton = CreateFrame("Button", nil, self, "UIPanelButtonTemplate")',
+        "action row keeps button template",
+    )
+
 
 def validate_config() -> None:
     text = read_text("Toolbox", "Core", "Foundation", "Config.lua")
