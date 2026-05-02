@@ -9,7 +9,7 @@
   - `docs/specs/navigation-spec.md`
   - `docs/plans/navigation-plan.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-05-02（确认开动后补齐 semantic path、walk component 首批覆盖与 RouteBar 布局回归要求）
+- 最后更新：2026-05-02（确认开动后补齐 explicit local topology、移除 WalkCluster runtime 兼容与 RouteBar 布局回归要求）
 
 ## 1. 背景
 
@@ -104,8 +104,9 @@
    - 模式示例：`hearthstone`、`class_teleport`、`class_portal`。
 
 4. `WalkComponent`
-   - 同一片可步行连通区域的逻辑组件。
-   - 作用是限制“哪些枢纽之间理论上可走到”，而不是把每一米地形都离散成节点。
+   - 同一片本地可步行连通区域的显式局部拓扑文档，不再是“由 cluster 启发式临时猜出来”的挂接结果。
+   - 组件内部除了成员归属，还要显式导出本地 `walk_local` 接线；求解器不再根据任意共享 cluster 字段自动补边。
+   - 方向性 `transport / public_portal` 节点可以作为组件里的连接器事实存在，但它们的语义由 `Role + localEdges` 决定，不再天然等价于普通 hub。
 
 5. `QueryPoint`
    - 查询时临时生成的起点 / 终点。
@@ -136,7 +137,7 @@
 
 **public_portal 当前实现口径：**
 - 数据来源：复用 `navigation_waypoint_edges` 的 `waypointedge` + `waypointnode` 管道，筛选 Type=1→Type=2 portal 边
-- 节点类型：运行时导出为不透明数字 `NodeID`，portal 来源定位统一走 `Source = "portal"` + `SourceID = waypoint_id`；保留 waypoint 精确坐标（`PosX`/`PosY`），并通过 `WalkClusterNodeID` 接入本地步行网
+- 节点类型：运行时导出为不透明数字 `NodeID`，portal 来源定位统一走 `Source = "portal"` + `SourceID = waypoint_id`；保留 waypoint 精确坐标（`PosX`/`PosY`），本地接入改由 `navigation_walk_components.localEdges` 明确声明
 - 边模式：`mode = "public_portal"`，`stepCost = 1`
 - 可用性：`PlayerConditionID = 0` 的边无条件纳入；`924`（Alliance）/ `923`（Horde）标注 `faction`；其余 V2 暂不纳入
 - 出口：portal 边通过 enrichment 汇入 `navigation_route_edges` 统一静态边表，不新增运行时数据文件
@@ -240,7 +241,7 @@
 当前已确认的静态来源边界（2026-04-30）：
 
 - `areatrigger`：`wow.db` 当前只能稳定给出 source 点位；`areatriggeractionset` 只有 `ID / Flags`，不能恢复目标地图与目标坐标，因此不能导出完整运行时边。
-- `walk component`：当前仓库与 `wow.db` 没有现成、稳定、可直接当作“开放世界步行连通真值”的来源；现有 `WalkClusterNodeID` 只是本地归并启发式，旧 `WalkClusterKey` 仅保留为兼容字段。
+- `walk component`：当前仓库与 `wow.db` 没有现成、稳定、可直接当作“开放世界步行连通真值”的来源；旧 `WalkClusterNodeID / WalkClusterKey` 已被确认为错误方向，只适合彻底移除，不能继续保留为兼容字段或 runtime 接线真值。
 - 下一步最现实的方向不是继续猜地图邻接，而是：
   1. 继续把显式连接器静态化；
   2. 另起离线几何 / 导航资产管线生成真正的 `WalkComponent` 契约。
@@ -251,7 +252,7 @@
 
 当前以测试锁定的关键事实包括：
 
-- `Source = "portal"`、`SourceID = 117 -> 101` 的公共传送门边已导出，且 `SourceID = 101 / 115 / 120 / 122 / 129 / 132 / 140 / 144 / 203 / 218 / 285` 这些 portal 节点都稳定落到 `UiMapID = 85`、`WalkClusterNodeID = 奥格主城锚点`。
+- `Source = "portal"`、`SourceID = 117 -> 101` 的公共传送门边已导出，且 `SourceID = 101 / 115 / 120 / 122 / 129 / 132 / 140 / 144 / 203 / 218 / 285` 这些 portal 节点都稳定归入奥格本地组件，并通过显式 `localEdges` 接到奥格主城锚点。
 - `Source = "portal"`、`SourceID = 118 -> 119` 的公共传送门边已导出，可把银月城宝珠稳定接入提瑞斯法 / 幽暗城周边交通网。
 - `Source = "portal"`、`SourceID = 556 -> 557` 的公共传送门边已导出，可把东部王国北部 portal 入口稳定接入东瘟疫之地。
 - `Source = "taxi"`、`SourceID = 82` 已并入统一 taxi 图。
@@ -267,51 +268,81 @@
 
 也就是说，当前结论是“静态导出图已闭合出至少一条可证明路线”，而不是“系统已经穷尽了所有世界关系”。
 
-### 5.7.2 `WalkComponent` 契约与首批覆盖
+### 5.7.2 `WalkComponent` 契约与首批覆盖（schema v2）
 
-为避免继续把 `WalkClusterNodeID / WalkClusterKey` 当成 world walk truth，本轮已经把 `walk component` 拆成独立正式导出契约，并让 runtime 优先消费正式组件归属，而不是继续只靠临时归并。
+本轮的根因修复不是“继续修 `WalkClusterNodeID`”，而是把 direction transport/portal 节点从普通 walk 成员里剥离，改成“本地锚点 + 动作边 + 到达连接点”的分层模型。对应地，`WalkClusterNodeID / WalkClusterKey` 不再作为 runtime 真值，也不再保留兼容字段。
 
-当前已落地的正式出口：
+当前已确认的正式出口：
 
 | 文件 | 职责 |
 |------|------|
-| `DataContracts/navigation_walk_components.json` | 定义 `WalkComponent` 与节点归属 / 代理规则的正式契约。 |
-| `Toolbox/Data/NavigationWalkComponents.lua` | runtime 只读的步行组件数据出口。 |
+| `DataContracts/navigation_walk_components.json` | 定义 explicit local topology 的正式契约（schema v2）。 |
+| `Toolbox/Data/NavigationWalkComponents.lua` | runtime 只读的局部步行拓扑出口。 |
 
-当前导出链路改为“两层正式来源 + 自动归并”：
+schema v2 的核心结构固定为：
 
-1. 正式来源节点 / 边
-   - 复用当前已有的 `navigation_map_nodes / navigation_route_edges / waypoint / transport / portal` 正式来源。
-   - 先拿到 runtime 已确认存在的节点事实、节点类型、来源 ID、地图归属、落点关系和显式连接器。
-2. 规则化自动归并
-   - 导出脚本只允许基于正式来源事实自动推导 `WalkComponent`、节点归属、显示代理和首选锚点。
-   - 允许使用稳定规则，例如：同一局部交通房间、同一主城锚点、明确的 portal/transport 落点簇、技术入口与玩家可见落点之间的确定性代理关系。
-   - 若某个组件归属、`hidden / proxy`、`preferred_anchor` 或 `visible_name` 不能被稳定规则证明，就先不导出该节点或该组件；不再允许额外 override 文件补顶。
-3. 正式导出
-   - 当前只把首批自动确认后的 `WalkComponent` 局部真值、节点归属和代理信息写入 `NavigationWalkComponents.lua`，供 `Toolbox.Navigation` 与展示层统一消费。
+1. `components`
+   - 描述一个局部可步行组件。
+   - 最少包含：
+     - `ComponentID`
+     - `DisplayName`
+     - `MemberNodeIDs`
+     - `EntryNodeIDs`
+     - `PreferredAnchorNodeID`
+2. `nodeAssignments`
+   - 描述节点在组件里的语义角色，而不是“看到同 cluster 就能走”。
+   - 最少包含：
+     - `NodeID`
+     - `ComponentID`
+     - `Role`
+     - `HiddenInSemanticChain`
+     - `DisplayProxyNodeID`
+     - `VisibleName`
+   - `Role` 口径固定为：
+     - `anchor`
+     - `landmark`
+     - `departure_connector`
+     - `arrival_connector`
+     - `technical`
+3. `localEdges`
+   - 明确声明组件内部允许的 `walk_local` 接线，是 runtime 唯一的本地接线真值。
+   - 最少包含：
+     - `LocalEdgeID`
+     - `ComponentID`
+     - `FromNodeID`
+     - `ToNodeID`
+     - `Mode`（固定为 `walk_local`）
+     - `StepCost`
+     - `TraversedUiMapIDs`
+     - `TraversedUiMapNames`
+4. `displayProxies`
+   - 只负责把技术节点代理到玩家可见名或可见节点。
+   - 不再反向驱动求解，不再承担本地接线语义。
 
-当前首批覆盖范围只落高价值局部区域，不承诺一口气闭合全世界：
+导出链路改为“两层事实 + 显式局部拓扑”：
+
+1. `navigation_route_edges`
+   - 继续导出 raw route facts 与跨图动作边。
+   - 节点字段只保留 `NodeID / Kind / Source / SourceID / UiMapID / MapID / Name_lang / TaxiNodeID / PosX / PosY / PosZ` 这类事实字段。
+   - 删除 `WalkClusterNodeID`，不再混入本地接线信息。
+2. `navigation_walk_components`
+   - 复用正式来源节点事实、portal/transport 显式连接器和局部地图归属。
+   - 由导出脚本自动归并出组件、角色、显示代理与 `localEdges`。
+   - 若归并规则无法稳定证明“某节点可以从哪里步行到哪里”，就先不导出该 `localEdge`，而不是回退到 cluster 启发式。
+
+runtime 读取口径改为：
+
+- `NavigationRouteEdges` 负责跨图动作图；
+- `NavigationWalkComponents.localEdges` 负责本地步行图；
+- `addDynamicWalkLocalEdges()`、`walkClusterNodeID`、`walkClusterKey` 和所有兼容 fallback 全部删除；
+- `83 -> 3251 -> 83 -> 2805 -> 2819` 这类回环必须在数据结构上不可生成，而不是靠求解器“通常不选”。
+
+当前首批覆盖范围仍只落高价值局部区域，不承诺一口气闭合全世界：
 
 - 主城
 - 传送门房
 - 飞艇塔 / 港口
 - 常用交通落点
-
-建议的数据结构至少包含：
-
-- `components`
-  - `ComponentID`
-  - `DisplayName`
-  - `MemberNodeIDs`
-  - `EntryNodeIDs`
-  - `PreferredAnchorNodeID`
-- `nodeAssignments`
-  - `NodeID`
-  - `ComponentID`
-  - `Role`（如 `anchor / hub / technical`）
-  - `HiddenInSemanticChain`
-  - `DisplayProxyNodeID`
-  - `VisibleName`
 
 ### 5.8 路线输出
 
@@ -476,7 +507,8 @@
 - `navigation_route_edges` 继续保留为运行时唯一静态边入口，但设计语义从“当前能导出的所有可行边”升级为“统一静态骨架边”。
 - `Toolbox.Navigation` 需要显式拆出 `raw path -> semantic path -> display` 三层，不能再让 `RouteBar.lua` 或 `WorldMap.lua` 直接消费技术节点名。
 - `RouteBar.lua`、规划期节点摘要和逐段诊断输出都要统一改成消费 `semantic path` 或 semantic 代理字段，避免技术节点泄漏。
-- `navigation_walk_components` 会新增正式契约与 runtime 数据出口；walk 相关真值不再只靠 `WalkClusterNodeID` 启发式。
+- `navigation_route_edges` 会删除 `WalkClusterNodeID` 等本地接线字段；本地拓扑改由 `navigation_walk_components` schema v2 独立承载。
+- `navigation_walk_components` 会新增 `localEdges` 与 connector role 语义；walk 相关真值不再靠 `WalkClusterNodeID` 启发式，也不保留兼容 fallback。
 - 文档与后续实现必须把“世界地图关系”和“交通枢纽关系”分开描述。
 - `RouteBar.lua` 的实现重点将从“文本拼接”转向“路线图状态管理、拖动与历史记录”，对应测试也要从字符串断言扩展到组件状态断言。
 
@@ -499,7 +531,8 @@
 - 数据验证：
   - `taxi` 边继续校验经过地图序列完整性。
   - 统一运行时静态边表仍禁止手工维护 ID。
-  - 文档和运行时都以当前 contract schema 为准，默认统一边表当前为 v17。
+  - `navigation_route_edges` 节点契约不再出现 `WalkClusterNodeID`。
+  - `navigation_walk_components` 必须包含 `localEdges`，且本地接线只从该字段进入 runtime。
 - 表达验证：
   - 输出的每一段都带方式和经过地图。
   - 连续 `walk` 被压缩为单段展示。
@@ -508,7 +541,8 @@
   - `taxi` 不生成独立飞行点动作节点，但仍保留正确的 segment 和记步结果。
 - `walk component` 验证：
   - 首批覆盖范围只检查主城、传送门房、飞艇塔 / 港口和常用交通落点。
-  - 组件归属与代理信息只能由正式来源表自动推导，不允许再引入源侧 override 或 runtime 手写导航数据。
+  - 组件归属、connector role、显示代理与 `localEdges` 只能由正式来源表自动推导，不允许再引入源侧 override 或 runtime 手写导航数据。
+  - `3251` 这类方向性连接器不会再被当成普通本地成员；不存在 `83 -> 3251 -> 83` 这类本地零成本回环。
 
 ## 9. 修订记录
 
@@ -535,3 +569,4 @@
 | 2026-05-02 | 路线图布局补充：精简胶囊宽度改为随文本长度自适应；展开态节点区底框必须随节点范围自动扩展，禁止尾部节点超框 |
 | 2026-05-02 | `walk component` 首批实现：`navigation_walk_components` 契约与 `NavigationWalkComponents.lua` 已落地；runtime 本地接入优先读取 formal component，缺失时继续 fallback 到 `WalkClusterNodeID / WalkClusterKey` |
 | 2026-05-02 | 方案改口：移除 `navigation_walk_component_overrides.json` 与对应 enrichment；首批 walk component 改为只允许基于正式来源表全自动推导 |
+| 2026-05-02 | 根因模型重写：废弃 `WalkClusterNodeID / WalkClusterKey` runtime 真值与兼容 fallback；`navigation_walk_components` 升级为 schema v2 explicit local topology，并新增 connector role 与 `localEdges` |

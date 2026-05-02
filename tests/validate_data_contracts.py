@@ -234,6 +234,50 @@ def validate_navigation_instance_entrance_regressions() -> None:
     )
 
 
+def validate_navigation_route_edge_regressions() -> None:
+    lua_text = read_text("Toolbox", "Data", "NavigationRouteEdges.lua")
+    require(
+        "WalkClusterNodeID" not in lua_text,
+        "navigation_route_edges: runtime export must not retain WalkClusterNodeID",
+    )
+    require(
+        "WalkClusterKey" not in lua_text,
+        "navigation_route_edges: runtime export must not retain WalkClusterKey",
+    )
+
+
+def validate_navigation_walk_component_regressions() -> None:
+    lua_text = read_text("Toolbox", "Data", "NavigationWalkComponents.lua")
+    require(
+        re.search(r"^\s*localEdges\s*=\s*\{", lua_text, re.M) is not None,
+        "navigation_walk_components: missing localEdges data block",
+    )
+
+    role_values = set(re.findall(r'Role = "([^"]+)"', lua_text))
+    require(role_values, "navigation_walk_components: missing role annotations")
+
+    allowed_role_values = {
+        "anchor",
+        "landmark",
+        "departure_connector",
+        "arrival_connector",
+        "technical",
+    }
+    unexpected_role_values = sorted(role_values - allowed_role_values)
+    require(
+        not unexpected_role_values,
+        "navigation_walk_components: unexpected roles present: " + ", ".join(unexpected_role_values),
+    )
+    require(
+        "hub" not in role_values,
+        "navigation_walk_components: legacy hub role must not remain in runtime export",
+    )
+    require(
+        'Mode = "walk_local"' in lua_text,
+        "navigation_walk_components: localEdges must emit explicit walk_local edges",
+    )
+
+
 def validate_instance_entrance_regressions() -> None:
     lua_text = read_text("Toolbox", "Data", "InstanceEntrances.lua")
     dire_maul_center_match = re.search(r"\[230\]\s*=\s*\{(.*?)\n\s*\},", lua_text, re.S)
@@ -269,6 +313,8 @@ def main() -> int:
     for contract_id, expected_meta in EXPECTED_GENERATED_CONTRACTS.items():
         validate_contract(contract_id, expected_meta)
     validate_toc_loads_generated_data(EXPECTED_GENERATED_CONTRACTS)
+    validate_navigation_route_edge_regressions()
+    validate_navigation_walk_component_regressions()
     validate_navigation_instance_entrance_regressions()
     validate_instance_entrance_regressions()
     print("OK: data contracts validated")

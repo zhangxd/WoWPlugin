@@ -9,7 +9,7 @@
   - `docs/designs/navigation-design.md`
   - `docs/plans/navigation-plan.md`
   - `docs/Toolbox-addon-design.md`
-- 最后更新：2026-05-02（用户确认开动；补充 semantic path、walk component 首批覆盖与 RouteBar 布局回归要求）
+- 最后更新：2026-05-02（用户确认开动；补充 local topology 分层模型、删除 WalkCluster runtime 真值与无兼容收口）
 
 ## 1. 背景
 
@@ -102,7 +102,11 @@
 - 玩家可见路线表达拆成 `raw path -> semantic path -> display` 三层；`RouteBar` 与规划诊断不得直接消费技术节点名。
 - `semantic path` 中，地图节点承载“身处 / 将到达的地图”，动作节点承载“如何前往下一张地图”。
 - `transport / public_portal / class_portal` 到站后，显示链和规划摘要必须使用到站地图或动作代理名，不能显示返程技术节点名。
-- `walk component` 只允许通过正式契约与导出链路落地；若自动归并规则无法稳定证明归属，则该组件或节点先不导出，不允许源侧 override 顶上。
+- 方向性 `transport / public_portal` 节点只允许作为跨图动作连接器参与求解，不再作为普通本地步行成员或本地接线真值。
+- `navigation_route_edges` 只保留 raw route facts 与跨图动作边；`WalkClusterNodeID`、`WalkClusterKey` 不再属于该契约，也不再作为 runtime 本地接线输入。
+- `navigation_walk_components` 升级为 schema v2，正式导出 `components / nodeAssignments / localEdges / displayProxies`；runtime 本地连通只读取这份显式局部拓扑。
+- `nodeAssignments.Role` 口径固定为 `anchor / landmark / departure_connector / arrival_connector / technical`，不再使用把方向性连接器当普通 hub 的旧语义。
+- `Toolbox.Navigation` 必须删除 `addDynamicWalkLocalEdges`、`walkClusterNodeID`、`walkClusterKey` 及其兼容 fallback；本轮明确不做历史兼容，不保留无用过渡代码。
 
 ## 5. 导出与运行时边界
 
@@ -121,7 +125,12 @@
 - 当前仓库默认导出基线已经推进到 `navigation_route_edges` schema v17，统一边表可包含 `taxi / transport / public_portal`；`areatrigger` 仍为占位，不参与实际可达路径。
 - 如果需要“严格 V1-only”导出结果，必须另设冻结契约或独立输出，不能继续和当前统一边表共用同一份 `NavigationRouteEdges.lua`。
 - `walk` 不允许再由地图矩形、`UiMap` 父链或视觉相邻关系推导，必须等待独立连通规则。
-- `navigation_walk_components` 可以进入本轮执行范围，但只承载首批局部覆盖，不等同于全世界步行真值已经闭合。
+- `navigation_route_edges` 后续节点字段只保留 `NodeID / Kind / Source / SourceID / UiMapID / MapID / Name_lang / TaxiNodeID / PosX / PosY / PosZ` 这类 raw facts，不再混入本地接线字段。
+- `navigation_walk_components` 可以进入本轮执行范围，但只承载首批局部覆盖，不等同于全世界步行真值已经闭合；其 schema v2 至少包含：
+  - `components`：局部组件定义、成员节点、入口节点与默认锚点
+  - `nodeAssignments`：节点归属、角色、可见名与显示代理
+  - `localEdges`：显式本地 `walk_local` 拓扑，定义哪些节点在组件内部可步行接入
+  - `displayProxies`：仅用于语义 / 展示代理，不再反向驱动求解
 - `navigation_walk_components` 只能消费正式来源表与规则化自动归并结果；禁止再引入额外人工配置文件参与 walk component 真值判定。
 
 ### 5.1 当前静态闭环样例口径
@@ -132,13 +141,13 @@
   - `portal_118 -> portal_119`
   - `portal_556 -> portal_557`
   - 至少一条与 `taxi_82` 相连的运行时 taxi 边
-  - 奥格传送门房相关节点稳定归并到 `UiMapID = 85` / `WalkClusterKey = "uimap_85"`
+  - 奥格传送门房相关节点稳定归入奥格本地组件，并通过显式 `localEdges` 接到奥格主城锚点
 - `NavigationRouteEdges.edges` 必须保持 1-based 连续序列，保证运行时 `ipairs()` 遍历不会在中途截断。
 - 这个正向样例只说明“当前静态导出图已经闭合出至少一条可证明路线”，不表示系统已经穷尽所有世界关系；`areatrigger`、全世界 `walk component` 与“只能飞 / 没有别路”之类强结论仍待后续阶段。
 - 当前已确认的来源边界：
   - `areatrigger` 在 `wow.db` 中只有 source 点位；`areatriggeractionset` 当前只有 `ID / Flags`，不能恢复 destination
-  - `WalkClusterKey` 只允许当作本地挂接辅助键，不允许升级为 world walk truth
-  - 真正的 world `WalkComponent` 需要独立离线几何 / 导航资产导出管线
+  - 旧 `WalkClusterNodeID / WalkClusterKey` 模型已经判定为错误方向，不再作为本地挂接辅助键继续保留
+  - 真正的 world `WalkComponent` 需要独立离线几何 / 导航资产导出管线；当前只先导出首批局部 explicit local topology
 
 ## 6. 验收标准
 
@@ -173,6 +182,9 @@
 22. 精简胶囊宽度会随标题与三段文本长度自适应扩展，且不会因固定宽度裁切内容。
 23. 展开态节点区底框 / 背景框会覆盖完整节点范围，不再出现尾部节点超框。
 24. `walk component` 首批正式导出覆盖主城、传送门房、飞艇塔 / 港口与常用交通落点；组件归属、代理名与首选锚点均由正式来源表自动推导，不再依赖人工 override 文件。
+25. 类似 `83 -> 3251 -> 83 -> 2805 -> 2819` 的零成本本地回环在新模型下必须结构性不可生成，而不是靠步数惩罚“尽量不选”。
+26. `3251` 这类方向性连接器不再被当作普通 `walk component` 成员；若存在本地接入，只能通过 `localEdges` 明确声明。
+27. 运行时代码与导出数据中都不再保留 `WalkClusterNodeID`、`walkClusterNodeID`、`WalkClusterKey`、`walkClusterKey` 作为求解真值或兼容 fallback。
 
 ## 7. 实施状态
 
@@ -185,6 +197,7 @@
   - `areatrigger` 仍只有契约骨架与占位节点，不参与实际路径
   - `targetRules` / `WAYPOINT_LINK` 旧旁路已从运行时判断中移除
 - 2026-04-27 的旧实现计划和旧文档仍保留为历史追溯，但它们基于“预计耗时 + Dijkstra + 旧范围”的口径。
+- 2026-05-02 起，`WalkClusterNodeID / WalkClusterKey + addDynamicWalkLocalEdges` 旧本地接线模型被正式废弃；执行基线改为 `navigation_route_edges` raw facts + `navigation_walk_components` schema v2 explicit local topology，且本轮不做历史兼容。
 
 ## 8. 修订记录
 
@@ -202,3 +215,4 @@
 | 2026-04-30 | 正向样例同步：`银月城 -> 东瘟疫之地` 改为静态闭环回归；补充 `portal_118/556`、`taxi_82`、奥格传送门房并入与 `edges` 连续序列要求 |
 | 2026-04-30 | 路线图需求扩展：确认顶部胶囊 + 展开时间线、可拖动、位置 / 展开状态存档、实时偏航提示与最近 10 条历史终点重规划 |
 | 2026-05-02 | 用户确认开动：需求状态推进为 `可执行`，并补充 `raw path -> semantic path -> display` 三层、`walk component` 首批覆盖、胶囊宽度自适应与展开态节点区底框自动撑开要求 |
+| 2026-05-02 | 根因修复确认：废弃 `WalkClusterNodeID / WalkClusterKey` runtime 真值与兼容 fallback；`navigation_walk_components` 升级为 schema v2 显式局部拓扑，方向性连接器不再作为普通步行成员 |

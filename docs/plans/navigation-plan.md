@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents are explicitly authorized) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将现有 `navigation` 从“按 `UiMap` + `cost` 规划旧路径”的实现，重构为“按当前角色配置、最少路径步数、枢纽 / 动作图”工作的 V1 导航闭环，并稳定输出每段方式与经过地图。
+**Goal:** 根治 `navigation` 本地接线模型，把 `WalkClusterNodeID / WalkClusterKey + addDynamicWalkLocalEdges` 旧方案替换为“raw route facts + explicit local topology”的分层图模型，并稳定输出不泄漏技术节点的语义路线。
 
-**Architecture:** `Toolbox.Navigation` 统一消费 DataContracts 导出的静态路线骨架；查询时按当前角色配置展开 `hearthstone / class_teleport / class_portal` 模板边，并为起点、终点和同本地连通域枢纽补 `walk_local` 接入；主求解器使用 BFS，并按固定平局规则输出 `segments`。`navigation` 模块只负责 waypoint 入口、角色快照采集和顶部路径条渲染。
+**Architecture:** `navigation_route_edges` 只保留 raw route facts 与跨图动作边，`navigation_walk_components` schema v2 独立导出本地组件、节点角色、显示代理与显式 `localEdges`；`Toolbox.Navigation` 查询时按当前角色配置展开能力边，再把跨图动作图与本地图合并求解，并统一产出 `raw path -> semantic path -> display`。`navigation` 模块只负责 waypoint 入口、角色快照采集和路线 UI 展示。
 
 **Tech Stack:** WoW Retail Lua、DataContracts JSON、`scripts/export/export_toolbox_one.py`、`ToolboxDB.modules.navigation`、`busted` 逻辑测试、`python tests/validate_data_contracts.py`、`python tests/validate_settings_subcategories.py`、`python tests/run_all.py --ci`。
 
@@ -17,6 +17,13 @@
 - 后续实现、测试、导出和文档回写，全部以 `docs/specs/navigation-spec.md` 与 `docs/designs/navigation-design.md` 为准。
 
 ## 2. 已确认边界
+
+- 本轮明确不做历史兼容，不保留无用回退代码。
+- `WalkClusterNodeID / WalkClusterKey` 不再是导出字段、runtime 真值或兼容输入。
+- `addDynamicWalkLocalEdges()` 与所有基于 cluster 自动补接的路径构建逻辑必须删除。
+- 方向性 `transport / public_portal` 节点不再作为普通本地步行成员参与组件归属。
+- 本地步行真值只允许来自 `navigation_walk_components` schema v2 的 `localEdges`。
+- 根因修复必须让 `83 -> 3251 -> 83 -> 2805 -> 2819` 这类回环在结构上不可生成，而不是靠步数惩罚回避。
 
 - 最短路主指标：`最少路径步数`
 - 当前角色输入至少包含：
@@ -63,6 +70,17 @@
 - 最近路线列表独立侧贴展开，不放到导航内容下方。
 - 本轮同时建立 `walk component` 正式契约框架，但首批覆盖只落：主城、传送门房、飞艇塔 / 港口、常用交通落点。
 - `walk component` 数据来源固定为“`wow.db` + 已正式导出的 runtime 节点 / 边 -> 规则化自动归并 -> 正式导出”；自动规则不能稳定判定时宁缺毋滥，不允许源侧 override 或 runtime Lua 手写补边。
+- `navigation_walk_components` schema v2 最少包含：
+  - `components`
+  - `nodeAssignments`
+  - `localEdges`
+  - `displayProxies`
+- `nodeAssignments.Role` 口径固定为：
+  - `anchor`
+  - `landmark`
+  - `departure_connector`
+  - `arrival_connector`
+  - `technical`
 
 ## 3. 文件布局
 
@@ -81,11 +99,11 @@
 - 修改：`DataContracts/navigation_route_edges.json`
 - 修改：`DataContracts/navigation_taxi_edges.json`
 - 新增：`DataContracts/navigation_ability_templates.json`
-- 新增：`DataContracts/navigation_walk_components.json`
+- 修改：`DataContracts/navigation_walk_components.json`
 - 修改：`Toolbox/Data/NavigationRouteEdges.lua`（生成）
 - 修改：`Toolbox/Data/NavigationTaxiEdges.lua`（生成）
 - 新增：`Toolbox/Data/NavigationAbilityTemplates.lua`（生成）
-- 新增：`Toolbox/Data/NavigationWalkComponents.lua`（生成）
+- 修改：`Toolbox/Data/NavigationWalkComponents.lua`（生成）
 - 修改：`Toolbox/Toolbox.toc`
 - 修改：`scripts/export/toolbox_db_export.py`
 
@@ -111,55 +129,76 @@
 ## 4. 关键实现约束
 
 - `navigation_route_edges` 不再表达 `MAP_LINK`、`WAYPOINT_LINK`、`UiMap` 邻接猜想；它只表达 V1 运行时真正消费的静态路线骨架。
+- `navigation_route_edges` 节点契约删除 `WalkClusterNodeID`，只保留 raw route facts；本地接线信息全部迁出到 `navigation_walk_components`。
+- `navigation_walk_components` schema v2 必须显式导出 `localEdges`；runtime 不允许再从“共享 cluster 字段”推导本地步行边。
 - V1 静态骨架至少包含两类节点：
   - `map_anchor`：每张参与 V1 的 `UiMap` 锚点
   - `taxi`：飞行点 / 飞行管理员节点
 - V1 静态骨架至少包含一类静态边：
   - `taxi`
-- `walk_local` 不提前导出成全世界边；运行时根据本次查询动态补接：
-  - 起点 `QueryPoint` -> 同本地连通域枢纽
-  - 枢纽 -> 终点 `QueryPoint`
-  - 同一 `walkClusterKey` 内的可步行换乘
+- `walk_local` 不提前导出成全世界边；运行时只允许根据正式 `localEdges` 和本次查询的 `QueryPoint` 补接：
+  - 起点 `QueryPoint` -> 同组件入口 / 锚点
+  - 组件内部显式 `localEdges`
+  - 组件锚点 / 入口 -> 终点 `QueryPoint`
 - 能力类动作不写死在 `Navigation.lua`；用 `navigation_ability_templates` 导出模板，再按当前角色配置展开。
 - 如果某个职业技能无法稳定导出“法术 -> 目标节点 / 目标规则”，就不进入 V1。
 - 如果 `navigation_ability_templates` 或 `navigation_route_edges` 需要输出数组字段（如 `TraversedUiMapIDs`），导出链路必须保留 Lua 数组，不允许退化成逗号字符串。
 - `RouteBar.lua`、`WorldMap.lua` 和规划摘要不能再直接把 `TraversedUiMapNames` 或技术节点名当玩家显示文本，必须先走 semantic 层。
 - `walk_local` 不做 UI 过滤式修补；必须在 `Toolbox.Navigation` 内部被吸收到 `semantic path` 和 `WalkComponent` 语义里。
+- 所有 `WalkCluster*` 兼容分支、legacy fallback 测试与相关注释都要同步删除，不能留死代码。
 
 ## 5. 执行步骤
 
-## Chunk 1: 锁定新口径的测试与结果模型
+## Chunk 1: 先把文档与失败测试锁到新模型
 
 **Files:**
+- Modify: `docs/specs/navigation-spec.md`
+- Modify: `docs/designs/navigation-design.md`
+- Modify: `docs/plans/navigation-plan.md`
 - Modify: `tests/logic/spec/navigation_api_spec.lua`
 - Modify: `tests/logic/spec/navigation_data_spec.lua`
 - Modify: `tests/logic/spec/navigation_worldmap_spec.lua`
 - Modify: `tests/logic/spec/navigation_routebar_spec.lua`
 - Modify: `tests/logic/spec/navigation_module_spec.lua`
 
-- [ ] **Step 1: 重写 API 断言口径**
+- [ ] **Step 1: 先把 confirmed decisions 写回 spec / design / plan**
+
+写清以下真值：
+- `navigation_route_edges` 删除 `WalkClusterNodeID`
+- `navigation_walk_components` 升级为 schema v2，并新增 `localEdges`
+- `nodeAssignments.Role` 改为 `anchor / landmark / departure_connector / arrival_connector / technical`
+- runtime 删除 `addDynamicWalkLocalEdges` 与所有 `WalkCluster*` fallback
+- 本轮不做历史兼容
+
+- [ ] **Step 2: 重写 API 断言口径**
 
 把 `totalCost` / `stepLabels` 主断言改成 `totalSteps` / `segments`，并增加以下覆盖：
 - 最少步数优先于旧 `cost`
 - 平局规则：更少 `walk` -> 更短本地步行 -> 更少步骤名称切换 -> 稳定 ID
 - 连续 `walk` 在输出里被压缩
 - `taxi` 段带 `TraversedUiMapIDs` 和 `TraversedUiMapNames`
+- 不再存在 `WalkClusterNodeID / walkClusterKey` 驱动的 runtime 本地接线
+- 零成本本地回环（如 `83 -> 3251 -> 83`）不会再被构图
 
-- [ ] **Step 2: 重写数据断言口径**
+- [ ] **Step 3: 重写数据断言口径**
 
-把 `tests/logic/spec/navigation_data_spec.lua` 从“只允许 `MAP_LINK` / `WAYPOINT_LINK`”改成“只允许 V1 静态骨架字段”：
-- 节点至少断言 `Kind / UiMapID / WalkClusterKey`
+把 `tests/logic/spec/navigation_data_spec.lua` 从“只允许 `MAP_LINK` / `WAYPOINT_LINK`”改成“route edges raw facts + walk components explicit local topology”：
+- `navigation_route_edges.nodes` 至少断言 `Kind / UiMapID / Source / SourceID`
 - `taxi` 节点断言 `TaxiNodeID`
-- 边至少断言 `Mode / StepCost / TraversedUiMapIDs / TraversedUiMapNames`
+- 节点不得再包含 `WalkClusterNodeID`
+- `navigation_walk_components` 至少断言 `components / nodeAssignments / localEdges`
+- `nodeAssignments.Role` 只允许新角色枚举
+- `localEdges` 至少断言 `FromNodeID / ToNodeID / Mode / TraversedUiMapIDs / TraversedUiMapNames`
 
-- [ ] **Step 3: 重写 UI 断言口径**
+- [ ] **Step 4: 重写 UI 断言口径**
 
 让 `navigation_worldmap_spec.lua` 和 `navigation_routebar_spec.lua` 断言：
 - 世界地图入口仍读取用户 waypoint
 - `RouteBar` 读取 `segments` 渲染，而不是直接拼 `stepLabels`
 - 顶部路径条显示总步数和逐段方式
+- 规划摘要与节点链不再泄漏技术 transport/portal 返程节点名
 
-- [ ] **Step 4: 运行定向逻辑测试，确认先失败**
+- [ ] **Step 5: 运行定向逻辑测试，确认先失败**
 
 Run:
 ```bash
@@ -171,23 +210,26 @@ busted tests/logic/spec/navigation_routebar_spec.lua
 
 Expected:
 - 旧实现仍返回 `totalCost`
-- 旧数据仍是 `MAP_LINK` / `WAYPOINT_LINK`
-- 旧 RouteBar 仍依赖 `stepLabels`
+- 旧数据仍带 `WalkClusterNodeID`
+- 旧 runtime 仍通过动态 cluster 补接 `walk_local`
+- 旧 RouteBar / 规划摘要仍依赖技术节点名
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add tests/logic/spec/navigation_api_spec.lua tests/logic/spec/navigation_data_spec.lua tests/logic/spec/navigation_worldmap_spec.lua tests/logic/spec/navigation_routebar_spec.lua tests/logic/spec/navigation_module_spec.lua
 git commit -m "test: lock navigation v1 minimum-step route semantics"
 ```
 
-## Chunk 2: 重写 V1 静态路线骨架导出
+## Chunk 2: 改造 route edges / walk components 契约与导出
 
 **Files:**
 - Modify: `DataContracts/navigation_taxi_edges.json`
 - Modify: `DataContracts/navigation_route_edges.json`
+- Modify: `DataContracts/navigation_walk_components.json`
 - Modify: `Toolbox/Data/NavigationTaxiEdges.lua`
 - Modify: `Toolbox/Data/NavigationRouteEdges.lua`
+- Modify: `Toolbox/Data/NavigationWalkComponents.lua`
 - Modify: `tests/validate_data_contracts.py`
 - Modify: `tests/logic/spec/navigation_data_spec.lua`
 - Modify: `scripts/export/lua_contract_writer.py` (if arrays need extra support)
@@ -201,9 +243,12 @@ git commit -m "test: lock navigation v1 minimum-step route semantics"
 - `UiMapID`
 - `MapID`
 - `Name_lang`
-- `WalkClusterKey`
 - `TaxiNodeID`（仅 taxi）
 - `PosX / PosY`（有则输出）
+
+并明确删除：
+- `WalkClusterNodeID`
+- `WalkClusterKey`
 
 `navigation_route_edges` 的 `edges` 块至少输出：
 - `ID`
@@ -215,6 +260,12 @@ git commit -m "test: lock navigation v1 minimum-step route semantics"
 - `TraversedUiMapNames`
 - `FromTaxiNodeID / ToTaxiNodeID`（仅 taxi）
 
+`navigation_walk_components` schema v2 至少输出：
+- `components`
+- `nodeAssignments`
+- `localEdges`
+- `displayProxies`
+
 - [ ] **Step 2: 把 Taxi 来源侧补到可消费级别**
 
 更新 `navigation_taxi_edges.json`，确保 Taxi 来源数据能稳定提供：
@@ -225,7 +276,7 @@ git commit -m "test: lock navigation v1 minimum-step route semantics"
 
 如果导出链不能直接从 SQL 输出数组，就在导出 Python 层聚合成数组后再交给 Lua writer；不要把经过地图序列扁平化成字符串。
 
-- [ ] **Step 3: 把统一静态骨架收口到 V1**
+- [ ] **Step 3: 把统一静态骨架和 explicit local topology 一起收口**
 
 重写 `navigation_route_edges.json`，只把 V1 真正消费的静态骨架汇总进去：
 - `map_anchor`
@@ -237,6 +288,12 @@ git commit -m "test: lock navigation v1 minimum-step route semantics"
 - `WAYPOINT_LINK`
 - `UiMap` 邻接推导
 - `waypoint` 直连边直接参与 V1 路径
+- `WalkClusterNodeID / WalkClusterKey` 本地接线字段
+
+同时在 `navigation_walk_components` 中补齐：
+- connector role 自动判定
+- `localEdges` 自动生成
+- `displayProxies` 只作展示代理，不再反向驱动求解
 
 `navigation_uimap_relations` 和 `navigation_waypoint_edges` 可以保留为来源 / 研究数据，但不能再作为 V1 runtime truth。
 
@@ -246,10 +303,11 @@ Run:
 ```bash
 python scripts/export/export_toolbox_one.py navigation_taxi_edges
 python scripts/export/export_toolbox_one.py navigation_route_edges
+python scripts/export/export_toolbox_one.py navigation_walk_components
 ```
 
 Expected:
-- `Toolbox/Data/NavigationTaxiEdges.lua` 和 `Toolbox/Data/NavigationRouteEdges.lua` 更新
+- `Toolbox/Data/NavigationTaxiEdges.lua`、`Toolbox/Data/NavigationRouteEdges.lua` 和 `Toolbox/Data/NavigationWalkComponents.lua` 更新
 - header 中 `schema_version` 与契约一致
 
 - [ ] **Step 5: 跑契约验证**
@@ -262,7 +320,8 @@ busted tests/logic/spec/navigation_data_spec.lua
 
 Expected:
 - 新字段齐全
-- 不再断言旧 `MAP_LINK` / `WAYPOINT_LINK`
+- `route_edges` 不再含 `WalkClusterNodeID`
+- `walk_components` 含 `localEdges`
 
 **待执行补充（暂不在本轮开动）**
 
@@ -281,7 +340,7 @@ Expected:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add DataContracts/navigation_taxi_edges.json DataContracts/navigation_route_edges.json Toolbox/Data/NavigationTaxiEdges.lua Toolbox/Data/NavigationRouteEdges.lua tests/validate_data_contracts.py tests/logic/spec/navigation_data_spec.lua
+git add DataContracts/navigation_taxi_edges.json DataContracts/navigation_route_edges.json DataContracts/navigation_walk_components.json Toolbox/Data/NavigationTaxiEdges.lua Toolbox/Data/NavigationRouteEdges.lua Toolbox/Data/NavigationWalkComponents.lua tests/validate_data_contracts.py tests/logic/spec/navigation_data_spec.lua
 git commit -m "feat: export navigation v1 static route skeleton"
 ```
 
@@ -369,7 +428,7 @@ git add DataContracts/navigation_ability_templates.json Toolbox/Data/NavigationA
 git commit -m "feat: add navigation ability templates and character availability inputs"
 ```
 
-## Chunk 4: 用 BFS + 平局规则替换旧 solver，并补 walk_local
+## Chunk 4: 用 explicit local topology 重写 runtime 求解与 semantic path
 
 **Files:**
 - Modify: `Toolbox/Core/API/Navigation.lua`
@@ -390,11 +449,12 @@ git commit -m "feat: add navigation ability templates and character availability
 1. 读取静态骨架节点 / 边
 2. 按角色配置过滤 `taxi`
 3. 按模板展开 `hearthstone / class_teleport / class_portal`
-4. 动态补 `walk_local`
+4. 读取 `navigation_walk_components.localEdges` 并补 `QueryPoint` 接入
 
 要求：
-- `walk_local` 至少能连接起点 / 终点与同 `WalkClusterKey` 的枢纽
-- 同 `WalkClusterKey` 的枢纽间允许本地换乘
+- 本地 `walk_local` 只来自显式 `localEdges`
+- 起点 / 终点只接到当前组件允许的锚点 / 入口
+- runtime 不再按 cluster 自动生成连接器回环
 
 - [ ] **Step 3: 实现最少步数求解**
 
@@ -415,7 +475,22 @@ git commit -m "feat: add navigation ability templates and character availability
 - `TraversedUiMapIDs`
 - `TraversedUiMapNames`
 
-- [ ] **Step 5: 跑定向逻辑测试**
+- [ ] **Step 5: 删除所有 `WalkCluster*` runtime 真值与兼容 fallback**
+
+至少包括：
+- `addDynamicWalkLocalEdges()`
+- `walkClusterNodeID`
+- `walkClusterKey`
+- formal component 缺失时回退到 legacy cluster 的逻辑
+
+- [ ] **Step 6: 重新构建 semantic path**
+
+要求：
+- 方向性 `transport / public_portal` 节点不再作为普通地图节点泄漏到 display
+- 动作节点文案来自动作边或 display proxy
+- 到站地图优先使用 arrival connector / anchor 的语义结果
+
+- [ ] **Step 7: 跑定向逻辑测试**
 
 Run:
 ```bash
@@ -425,8 +500,10 @@ busted tests/logic/spec/navigation_api_spec.lua
 Expected:
 - 所有最短路主断言改看 `totalSteps`
 - 旧 `totalCost` 相关用例全部改写
+- `83 -> 3251 -> 83` 这类回环不再出现
+- 旧 `WalkCluster*` fallback 断言全部删除
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add Toolbox/Core/API/Navigation.lua tests/logic/spec/navigation_api_spec.lua
@@ -566,8 +643,8 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 **V2 已接入但仍需补覆盖：**
 - `public_portal`
   - 数据来源：复用 `navigation_waypoint_edges` 管道（`waypointedge` + `waypointnode`），筛选 Type=1→Type=2 portal 边
-  - 节点映射：新建 `portal_{waypoint_id}` 节点，保留精确坐标；enrichment 走 `walk_cluster_uimap_id_by_uimap_id` 确定 `WalkClusterKey`
-  - 接入方式：`WalkClusterKey` 连接同连通域 `map_anchor`，复用 `addDynamicWalkLocalEdges`
+  - 节点映射：新建 `portal_{waypoint_id}` 节点，保留精确坐标；本地接入关系由 `navigation_walk_components` 自动导出
+  - 接入方式：portal 节点只作为 connector fact 进入组件归属；组件内部接线统一走显式 `localEdges`
   - 可用性：`PlayerConditionID = 0` 无条件纳入；`924`/`923` 标 faction；其余暂不纳入
   - 出口：portal 边汇入 `navigation_route_edges` 统一静态边表
 
@@ -580,7 +657,7 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
   - 断言 `portal_118 -> portal_119`
   - 断言 `portal_556 -> portal_557`
   - 断言存在至少一条与 `taxi_82` 相连的统一运行时边
-  - 断言奥格传送门房相关节点稳定落到 `UiMapID = 85` / `WalkClusterKey = "uimap_85"`
+  - 断言奥格传送门房相关节点稳定归入奥格本地组件，并通过显式 `localEdges` 接到奥格主城锚点
 - `tests/logic/spec/navigation_api_spec.lua`
   - 断言 `银月城 -> 提瑞斯法林地` 可以通过导出的公共传送门出口求解
   - 断言 `银月城 -> 奥格瑞玛` 可以通过修正后的枢纽并入规则求解
@@ -705,7 +782,7 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 4. 新增 `navigation_walk_components` 契约与导出文件：
    - [x] 已导出首批覆盖的组件、节点归属和显示代理；
    - [x] runtime 已优先读取正式 `PreferredAnchorNodeID / VisibleName / DisplayProxyNodeID`；
-   - [x] formal 数据缺失时继续保留 `WalkClusterNodeID / WalkClusterKey` fallback。
+   - [ ] 删除 legacy `WalkClusterNodeID / WalkClusterKey` fallback；formal 数据缺口时宁缺毋滥，不再回退旧模型。
 5. 把首批 `navigation_walk_components` 收口为全自动导出：
    - 组件归属只允许由正式来源表和规则化自动归并推导；
    - `hidden / proxy / preferred_anchor / visible_name` 也必须从正式节点事实推导，不再依赖独立 override 文件；
@@ -747,3 +824,4 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 | 2026-05-02 | 路线图布局修复补充：实现范围新增胶囊宽度自适应与展开态节点区底框按节点范围自动撑开两项回归要求 |
 | 2026-05-02 | `walk component` 首批出口落地：新增 `navigation_walk_components` 契约、`NavigationWalkComponents.lua`、runtime 优先消费与 fallback 回归测试；全世界真值闭合继续留在后续阶段 |
 | 2026-05-02 | 方案改口：用户确认移除 `navigation_walk_component_overrides.json` 与对应 enrichment；后续首批 walk component 只能由正式来源表全自动推导 |
+| 2026-05-02 | 根因修复执行基线重写：废弃 `WalkClusterNodeID / WalkClusterKey + addDynamicWalkLocalEdges`；改为 `navigation_route_edges` raw facts + `navigation_walk_components` schema v2 explicit local topology，且本轮不做历史兼容 |

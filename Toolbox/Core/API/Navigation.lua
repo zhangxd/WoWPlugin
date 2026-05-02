@@ -1328,29 +1328,6 @@ local function findRouteNodeIDBySourceID(lookupBySource, routeSource, sourceID, 
   return sourceEntry.any
 end
 
---- 按组件 ID 读取正式步行组件定义，兼容数字/字符串键。
----@param componentTable table|nil 正式步行组件表
----@param componentID any 组件 ID
----@return table|nil
-local function findFormalWalkComponent(componentTable, componentID)
-  if type(componentTable) ~= "table" or componentID == nil then
-    return nil
-  end
-  local directComponent = componentTable[componentID] -- 直接按原始键读取的组件
-  if type(directComponent) == "table" then
-    return directComponent
-  end
-  local numericComponentID = tonumber(componentID) -- 数字组件键
-  if numericComponentID ~= nil and type(componentTable[numericComponentID]) == "table" then
-    return componentTable[numericComponentID]
-  end
-  local stringComponentID = tostring(componentID) -- 字符串组件键
-  if stringComponentID ~= "" and type(componentTable[stringComponentID]) == "table" then
-    return componentTable[stringComponentID]
-  end
-  return nil
-end
-
 --- 读取节点的正式步行组件归属与显示代理信息。
 ---@param runtimeNodeID any 运行时节点 ID
 ---@return table
@@ -1366,10 +1343,6 @@ local function readFormalWalkNodeMetadata(runtimeNodeID)
     return {}
   end
 
-  local componentDef = findFormalWalkComponent(
-    type(walkComponentData) == "table" and walkComponentData.components or nil,
-    assignmentDef.ComponentID or assignmentDef.componentID
-  ) -- 节点所属正式组件
   local proxyNodeID = tonumber(assignmentDef.DisplayProxyNodeID or assignmentDef.displayProxyNodeID) -- 归属里指定的显示代理节点
   local proxyDef = type(displayProxyTable) == "table" and displayProxyTable[runtimeNodeID] or nil -- 以当前节点为键的显示代理定义
   if type(proxyDef) ~= "table" and type(displayProxyTable) == "table" then
@@ -1379,13 +1352,11 @@ local function readFormalWalkNodeMetadata(runtimeNodeID)
     proxyDef = displayProxyTable[proxyNodeID] or displayProxyTable[tostring(proxyNodeID)]
   end
 
-  local preferredAnchorNodeID = tonumber(
-    type(componentDef) == "table" and (componentDef.PreferredAnchorNodeID or componentDef.preferredAnchorNodeID) or nil
-  ) -- 正式组件首选锚点
   local hiddenInSemanticChain = assignmentDef.HiddenInSemanticChain -- 是否在语义链路中隐藏
   if type(hiddenInSemanticChain) ~= "boolean" then
     hiddenInSemanticChain = false
   end
+  local roleName = trimText(assignmentDef.Role or assignmentDef.role) -- 正式步行组件角色
   local visibleName = assignmentDef.VisibleName or assignmentDef.visibleName -- 归属层显式可见名
   if trimText(visibleName) == "" then
     visibleName = type(proxyDef) == "table" and (proxyDef.VisibleName or proxyDef.visibleName) or nil
@@ -1393,7 +1364,7 @@ local function readFormalWalkNodeMetadata(runtimeNodeID)
 
   return {
     componentID = assignmentDef.ComponentID or assignmentDef.componentID,
-    preferredAnchorNodeID = preferredAnchorNodeID,
+    role = roleName,
     hiddenInSemanticChain = hiddenInSemanticChain,
     visibleName = trimText(visibleName),
   }
@@ -1407,8 +1378,6 @@ local function addRouteGraphNodes(routeGraph, nodeTable)
     if type(nodeDef) == "table" then
       local numericNodeID = tonumber(nodeDef.NodeID or nodeDef.nodeID) or tonumber(nodeId) -- 数字节点 ID
       local runtimeNodeID = numericNodeID or nodeId -- 运行时节点 ID
-      local walkClusterNodeID = tonumber(nodeDef.WalkClusterNodeID or nodeDef.walkClusterNodeID) -- 新版本地步行锚点数字节点 ID
-      local walkClusterKey = nodeDef.WalkClusterKey or nodeDef.walkClusterKey -- 旧版本地步行锚点字符串键
       local formalWalkMetadata = readFormalWalkNodeMetadata(runtimeNodeID) -- 正式步行组件归属与显示代理
       routeGraph.nodes[runtimeNodeID] = {
         id = runtimeNodeID,
@@ -1417,11 +1386,9 @@ local function addRouteGraphNodes(routeGraph, nodeTable)
         source = nodeDef.Source or nodeDef.source,
         sourceID = tonumber(nodeDef.SourceID or nodeDef.sourceID),
         kind = nodeDef.Kind or nodeDef.kind,
-        walkClusterNodeID = walkClusterNodeID,
-        walkClusterKey = type(walkClusterKey) == "string" and walkClusterKey or nil,
         taxiNodeID = tonumber(nodeDef.TaxiNodeID or nodeDef.taxiNodeID),
         walkComponentID = formalWalkMetadata.componentID,
-        preferredWalkAnchorNodeID = formalWalkMetadata.preferredAnchorNodeID,
+        walkComponentRole = formalWalkMetadata.role,
         hiddenInSemanticChain = formalWalkMetadata.hiddenInSemanticChain,
         visibleName = formalWalkMetadata.visibleName,
       }
@@ -1518,47 +1485,29 @@ local function addWalkLocalEdge(routeGraph, fromNodeId, toNodeId, traversedUiMap
   }
 end
 
---- 基于 WalkClusterNodeID 为本地可步行节点补动态接线。
+--- 从 formal walk component 的显式 localEdges 读取本地步行接线。
 ---@param routeGraph table 正在构建的路径图
-local function addDynamicWalkLocalEdges(routeGraph)
-  for nodeId, nodeDef in pairs(routeGraph.nodes or {}) do
-    local preferredWalkAnchorNodeID = type(nodeDef) == "table" and nodeDef.preferredWalkAnchorNodeID or nil -- 正式步行组件首选锚点
-    local walkClusterTargetID = nil -- 当前节点应接入的本地步行目标
-    if preferredWalkAnchorNodeID ~= nil and preferredWalkAnchorNodeID ~= nodeId then
-      walkClusterTargetID = preferredWalkAnchorNodeID
-    end
-    if walkClusterTargetID == nil then
-      walkClusterTargetID = tonumber(nodeDef and nodeDef.walkClusterNodeID) -- 旧版数字步行锚点
-    end
-    if walkClusterTargetID == nil then
-      local legacyWalkClusterKey = type(nodeDef) == "table" and nodeDef.walkClusterKey or nil -- 旧版字符串锚点键
-      if type(legacyWalkClusterKey) == "string" and legacyWalkClusterKey ~= "" then
-        walkClusterTargetID = legacyWalkClusterKey
+local function addFormalWalkLocalEdges(routeGraph)
+  local walkComponentData = Toolbox.Data and Toolbox.Data.NavigationWalkComponents or nil -- 正式步行组件导出
+  local localEdgeTable = type(walkComponentData) == "table" and walkComponentData.localEdges or nil -- 显式本地步行边
+  if type(localEdgeTable) ~= "table" then
+    return
+  end
+
+  for _, localEdgeDef in pairs(localEdgeTable) do
+    if type(localEdgeDef) == "table" then
+      local fromNodeID = tonumber(localEdgeDef.FromNodeID or localEdgeDef.fromNodeID or localEdgeDef.from) -- 本地边起点
+      local toNodeID = tonumber(localEdgeDef.ToNodeID or localEdgeDef.toNodeID or localEdgeDef.to) -- 本地边终点
+      local modeName = trimText(localEdgeDef.Mode or localEdgeDef.mode) -- 本地边模式
+      if modeName == "" or modeName == WALK_LOCAL_MODE then
+        addWalkLocalEdge(
+          routeGraph,
+          fromNodeID,
+          toNodeID,
+          localEdgeDef.TraversedUiMapIDs or localEdgeDef.traversedUiMapIDs,
+          localEdgeDef.TraversedUiMapNames or localEdgeDef.traversedUiMapNames
+        )
       end
-    end
-
-    local clusterNode = walkClusterTargetID and routeGraph.nodes[walkClusterTargetID] or nil -- 连通域锚点节点
-    if walkClusterTargetID ~= nil and clusterNode ~= nil and walkClusterTargetID ~= nodeId then
-      local nodeToClusterUiMapIDs = {} -- 节点 -> 簇锚点的经过地图 ID
-      local nodeToClusterUiMapNames = {} -- 节点 -> 簇锚点的经过地图名
-      local clusterToNodeUiMapIDs = {} -- 簇锚点 -> 节点的经过地图 ID
-      local clusterToNodeUiMapNames = {} -- 簇锚点 -> 节点的经过地图名
-      local nodeDisplayName = buildRouteNodeDisplayName(nodeDef, nodeId, true) -- 节点 -> 簇锚点时使用的节点显示名
-      local clusterDisplayName = buildRouteNodeDisplayName(clusterNode, walkClusterTargetID, false) -- 簇锚点显示名
-      local rawNodeDisplayName = buildRouteNodeDisplayName(nodeDef, nodeId, false) -- 原始节点显示名
-
-      appendUniqueArray(nodeToClusterUiMapIDs, { tonumber(nodeDef.uiMapID) })
-      appendUniqueArray(nodeToClusterUiMapIDs, { tonumber(clusterNode.uiMapID) })
-      appendUniqueArray(nodeToClusterUiMapNames, { nodeDisplayName })
-      appendUniqueArray(nodeToClusterUiMapNames, { clusterDisplayName })
-
-      appendUniqueArray(clusterToNodeUiMapIDs, { tonumber(clusterNode.uiMapID) })
-      appendUniqueArray(clusterToNodeUiMapIDs, { tonumber(nodeDef.uiMapID) })
-      appendUniqueArray(clusterToNodeUiMapNames, { clusterDisplayName })
-      appendUniqueArray(clusterToNodeUiMapNames, { rawNodeDisplayName })
-
-      addWalkLocalEdge(routeGraph, nodeId, walkClusterTargetID, nodeToClusterUiMapIDs, nodeToClusterUiMapNames)
-      addWalkLocalEdge(routeGraph, walkClusterTargetID, nodeId, clusterToNodeUiMapIDs, clusterToNodeUiMapNames)
     end
   end
 end
@@ -1713,7 +1662,7 @@ local function buildMapTargetRouteGraph(target, availabilityContext)
   local routeNodeLookupBySource = buildRouteNodeLookupBySource(routeGraph.nodes) -- 统一 route node 来源查找表
   local targetMapNodeId = findRouteNodeIDBySourceID(routeNodeLookupBySource, "uimap", targetMapID, "map_anchor") -- 目标 UiMap 对应的 route node ID
   addRouteGraphEdges(routeGraph, routeEdgeData.edges)
-  addDynamicWalkLocalEdges(routeGraph)
+  addFormalWalkLocalEdges(routeGraph)
   addCurrentLocationEdges(routeGraph, availabilityContext, routeNodeLookupBySource)
   addAbilityTemplateEdges(routeGraph, availabilityContext, routeNodeLookupBySource)
 

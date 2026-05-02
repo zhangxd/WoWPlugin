@@ -33,6 +33,18 @@ describe("Navigation data", function()
     return nil
   end
 
+  -- 在 localEdges 中查找显式本地接线，避免退回旧 cluster 隐式补边。
+  local function findLocalEdgeByNodeIDs(exportedData, fromNodeID, toNodeID)
+    for _, edgeDef in pairs(exportedData.localEdges or {}) do
+      if tonumber(edgeDef.FromNodeID) == tonumber(fromNodeID)
+        and tonumber(edgeDef.ToNodeID) == tonumber(toNodeID) then
+        return edgeDef
+      end
+    end
+
+    return nil
+  end
+
   -- 判断数组里是否包含指定数字节点 ID，避免组件键名变化导致测试耦合到命名。
   local function arrayContainsNumericValue(valueArray, expectedValue)
     for _, currentValue in ipairs(valueArray or {}) do
@@ -75,15 +87,12 @@ describe("Navigation data", function()
       assert.is_string(nodeDef.Kind)
       assert.is_number(tonumber(nodeDef.UiMapID))
       assert.is_string(nodeDef.Name_lang)
-      assert.is_number(tonumber(nodeDef.WalkClusterNodeID))
+      assert.is_nil(nodeDef.WalkClusterNodeID)
+      assert.is_nil(nodeDef.WalkClusterKey)
       assert.is_table(generatedNodes[tonumber(nodeDef.UiMapID)])
       if nodeDef.Kind == "taxi" then
         assert.is_number(tonumber(nodeDef.TaxiNodeID))
       end
-    end
-
-    for _, nodeDef in pairs(exportedData.nodes or {}) do
-      assert.is_true(nodeExistsById[tonumber(nodeDef.WalkClusterNodeID)] == true)
     end
 
     for _, edgeDef in ipairs(exportedData.edges or {}) do
@@ -214,19 +223,13 @@ describe("Navigation data", function()
     local portal285 = findNodeByOrigin(exportedData, "portal", "portal", 285) -- 奥利波斯同房间出口
     local portal556 = findNodeByOrigin(exportedData, "portal", "portal", 556) -- 幽魂之地前往东瘟疫之地的入口
     local portal557 = findNodeByOrigin(exportedData, "portal", "portal", 557) -- 幽魂之地前往东瘟疫之地的出口
-    local orgrimmarClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 85) -- 奥格主城簇锚点
-    local tirisfalClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 18) -- 提瑞斯法簇锚点
-    local easternPlaguelandsClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 23) -- 东瘟疫之地簇锚点
-    local ghostlandsClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 95) -- 幽魂之地簇锚点
     local hasSilvermoonTaxiEdge = false -- 银月城飞行点是否接入公共 taxi 图
 
     assert.is_table(portal119)
     assert.equals(18, tonumber(portal119.UiMapID))
-    assert.equals(tonumber(tirisfalClusterNode.NodeID), tonumber(portal119.WalkClusterNodeID))
 
     assert.is_table(portal557)
     assert.equals(23, tonumber(portal557.UiMapID))
-    assert.equals(tonumber(easternPlaguelandsClusterNode.NodeID), tonumber(portal557.WalkClusterNodeID))
 
     for _, portalRoomNode in ipairs({
       portal101,
@@ -243,10 +246,7 @@ describe("Navigation data", function()
     }) do
       assert.is_table(portalRoomNode)
       assert.equals(85, tonumber(portalRoomNode.UiMapID))
-      assert.equals(tonumber(orgrimmarClusterNode.NodeID), tonumber(portalRoomNode.WalkClusterNodeID))
     end
-
-    assert.equals(tonumber(ghostlandsClusterNode.NodeID), tonumber(portal556.WalkClusterNodeID))
 
     for _, edgeDef in ipairs(exportedData.edges or {}) do
       if tonumber(edgeDef.FromTaxiNodeID) == 82 or tonumber(edgeDef.ToTaxiNodeID) == 82 then
@@ -266,17 +266,13 @@ describe("Navigation data", function()
     local exportedData = Toolbox.Data.NavigationRouteEdges -- 契约导出的统一路径边数据
     local orgrimmarZeppelinNode = findNodeByOrigin(exportedData, "transport", "waypoint_transport", 150) -- 奥格瑞玛去北风苔原的飞艇起点
     local boreanZeppelinNode = findNodeByOrigin(exportedData, "transport", "waypoint_transport", 151) -- 战歌要塞回奥格的飞艇起点
-    local orgrimmarClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 85) -- 奥格主城簇锚点
-    local boreanClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 114) -- 北风苔原簇锚点
     local zeppelinEdge = findEdgeByNodeIDs(exportedData, orgrimmarZeppelinNode.NodeID, boreanZeppelinNode.NodeID) -- 奥格瑞玛 -> 北风苔原的公共交通边
 
     assert.is_table(orgrimmarZeppelinNode)
     assert.equals(85, tonumber(orgrimmarZeppelinNode.UiMapID))
-    assert.equals(tonumber(orgrimmarClusterNode.NodeID), tonumber(orgrimmarZeppelinNode.WalkClusterNodeID))
 
     assert.is_table(boreanZeppelinNode)
     assert.equals(114, tonumber(boreanZeppelinNode.UiMapID))
-    assert.equals(tonumber(boreanClusterNode.NodeID), tonumber(boreanZeppelinNode.WalkClusterNodeID))
 
     assert.is_table(zeppelinEdge)
     assert.equals("waypoint_transport", zeppelinEdge.Source)
@@ -296,31 +292,24 @@ describe("Navigation data", function()
     local ghostlandsTaxi = findNodeByOrigin(exportedData, "taxi", "taxi", 3134) -- 塔奎林，永歌森林（12.0）
     local zulamanHubTaxi = findNodeByOrigin(exportedData, "taxi", "taxi", 3129) -- 影盆岗哨，祖阿曼
     local zulamanTaxi = findNodeByOrigin(exportedData, "taxi", "taxi", 3106) -- 石洗营地，祖阿曼
-    local quelthalasClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 2395) -- 奎尔萨拉斯簇锚点
-    local zulamanClusterNode = findNodeByOrigin(exportedData, "map_anchor", "uimap", 2437) -- 祖阿曼簇锚点
-
     assert.is_table(silvermoonTaxi)
     assert.equals(2393, tonumber(silvermoonTaxi.UiMapID))
-    assert.equals(tonumber(quelthalasClusterNode.NodeID), tonumber(silvermoonTaxi.WalkClusterNodeID))
 
     assert.is_table(eversongTaxi)
     assert.equals(2395, tonumber(eversongTaxi.UiMapID))
-    assert.equals(tonumber(quelthalasClusterNode.NodeID), tonumber(eversongTaxi.WalkClusterNodeID))
 
     assert.is_table(ghostlandsTaxi)
     assert.equals(2395, tonumber(ghostlandsTaxi.UiMapID))
-    assert.equals(tonumber(quelthalasClusterNode.NodeID), tonumber(ghostlandsTaxi.WalkClusterNodeID))
 
     assert.is_table(zulamanTaxi)
     assert.equals(2437, tonumber(zulamanTaxi.UiMapID))
-    assert.equals(tonumber(zulamanClusterNode.NodeID), tonumber(zulamanTaxi.WalkClusterNodeID))
 
     assert.is_table(findEdgeByNodeIDs(exportedData, silvermoonTaxi.NodeID, eversongTaxi.NodeID))
     assert.is_table(findEdgeByNodeIDs(exportedData, eversongTaxi.NodeID, ghostlandsTaxi.NodeID))
     assert.is_table(findEdgeByNodeIDs(exportedData, zulamanHubTaxi.NodeID, zulamanTaxi.NodeID))
   end)
 
-  it("exports_the_orgrimmar_public_portal_arrival_into_a_formal_walk_component_for_the_new_silvermoon_anchor", function()
+  it("exports_the_orgrimmar_public_portal_arrival_into_a_formal_walk_component_with_explicit_local_edges", function()
     dofile("Toolbox/Data/NavigationRouteEdges.lua")
     dofile("Toolbox/Data/NavigationWalkComponents.lua")
 
@@ -330,8 +319,10 @@ describe("Navigation data", function()
     local silvermoonMapAnchor = findNodeByOrigin(exportedRouteData, "map_anchor", "uimap", 2393) -- 12.0 银月城锚点
     local arrivalAssignment = walkComponentData.nodeAssignments[tonumber(silvermoonPortalArrival.NodeID)] -- 落点节点归属
     local assignedComponent = nil -- 落点实际归属的正式步行组件
+    local localEdge = nil -- 落点到本地锚点的显式步行边
 
     assert.is_table(arrivalAssignment)
+    assert.equals("arrival_connector", arrivalAssignment.Role)
     assert.is_string(arrivalAssignment.ComponentID)
     assignedComponent = walkComponentData.components[arrivalAssignment.ComponentID]
 
@@ -339,6 +330,11 @@ describe("Navigation data", function()
     assert.equals(tonumber(silvermoonMapAnchor.NodeID), tonumber(assignedComponent.PreferredAnchorNodeID))
     assert.is_true(arrayContainsNumericValue(assignedComponent.MemberNodeIDs, silvermoonPortalArrival.NodeID))
     assert.is_true(arrayContainsNumericValue(assignedComponent.EntryNodeIDs, silvermoonPortalArrival.NodeID))
+    localEdge = findLocalEdgeByNodeIDs(walkComponentData, silvermoonPortalArrival.NodeID, silvermoonMapAnchor.NodeID)
+    assert.is_table(localEdge)
+    assert.equals("walk_local", localEdge.Mode)
+    assert.is_table(localEdge.TraversedUiMapIDs)
+    assert.is_table(localEdge.TraversedUiMapNames)
   end)
 
   it("exports_navigation_map_assignments_without_region_coordinate_fields", function()
@@ -364,16 +360,18 @@ describe("Navigation data", function()
     assert.is_nil(firstAssignment.RegionY1)
   end)
 
-  it("exports_walk_components_with_component_membership_and_display_proxy_metadata", function()
+  it("exports_walk_components_with_component_membership_connector_roles_and_local_edges", function()
     dofile("Toolbox/Data/NavigationWalkComponents.lua")
 
     local exportedData = Toolbox.Data.NavigationWalkComponents -- 步行组件正式导出数据
     local componentCount = 0 -- 已检查组件数量
     local assignmentCount = 0 -- 已检查归属数量
+    local localEdgeCount = 0 -- 已检查本地接线数量
     local proxyCount = 0 -- 已检查代理数量
 
     assert.is_table(exportedData.components)
     assert.is_table(exportedData.nodeAssignments)
+    assert.is_table(exportedData.localEdges)
     assert.is_table(exportedData.displayProxies)
 
     for componentID, componentDef in pairs(exportedData.components) do
@@ -396,6 +394,11 @@ describe("Navigation data", function()
       assert.equals(tonumber(nodeID), tonumber(assignmentDef.NodeID))
       assert.is_string(assignmentDef.ComponentID)
       assert.is_string(assignmentDef.Role)
+      assert.is_true(assignmentDef.Role == "anchor"
+        or assignmentDef.Role == "landmark"
+        or assignmentDef.Role == "departure_connector"
+        or assignmentDef.Role == "arrival_connector"
+        or assignmentDef.Role == "technical")
       assert.is_boolean(assignmentDef.HiddenInSemanticChain)
       assert.is_table(componentDef)
       assert.is_true(arrayContainsNumericValue(componentDef.MemberNodeIDs, assignmentDef.NodeID))
@@ -419,8 +422,22 @@ describe("Navigation data", function()
       assert.is_table(exportedData.components[proxyDef.ComponentID])
     end
 
+    for localEdgeID, localEdgeDef in pairs(exportedData.localEdges) do
+      localEdgeCount = localEdgeCount + 1
+      assert.equals(localEdgeID, localEdgeDef.LocalEdgeID)
+      assert.is_string(localEdgeDef.ComponentID)
+      assert.is_number(tonumber(localEdgeDef.FromNodeID))
+      assert.is_number(tonumber(localEdgeDef.ToNodeID))
+      assert.equals("walk_local", localEdgeDef.Mode)
+      assert.equals(1, tonumber(localEdgeDef.StepCost))
+      assert.is_table(localEdgeDef.TraversedUiMapIDs)
+      assert.is_table(localEdgeDef.TraversedUiMapNames)
+      assert.is_table(exportedData.components[localEdgeDef.ComponentID])
+    end
+
     assert.is_true(componentCount > 0)
     assert.is_true(assignmentCount > 0)
+    assert.is_true(localEdgeCount > 0)
     assert.is_true(proxyCount > 0)
   end)
 end)

@@ -17,7 +17,7 @@ describe("Navigation WorldMap integration", function()
     assert.equals("第2段 | mode=walk_local | from=奥格瑞玛 | to=北风苔原目标点 | traversedUiMapNames=北风苔原", messageList[3])
   end
 
-  local function assertTaxiHubPlanningDiagnostics(messageList)
+  local function assertTaxiPlanningDiagnostics(messageList)
     assert.equals("规划成功 | 起点：银月城 64.1, 65.2 | 终点：辛特兰 57.1, 48.1 | 总步数：4 | 节点：银月城 -> 永歌森林 -> 塔奎林，永歌森林 -> 东瘟疫之地 -> 圣光之愿礼拜堂，东瘟疫之地 -> 辛特兰 -> 恶齿村，辛特兰 -> 辛特兰", messageList[1])
     assert.equals("第1段 | mode=walk_local | from=当前位置 | to=塔奎林，永歌森林 | traversedUiMapNames=银月城 -> 永歌森林 -> 塔奎林，永歌森林", messageList[2])
     assert.equals("第2段 | mode=taxi | from=塔奎林，永歌森林 | to=圣光之愿礼拜堂，东瘟疫之地 | traversedUiMapNames=永歌森林 -> 祖阿曼 -> 东瘟疫之地", messageList[3])
@@ -231,12 +231,12 @@ describe("Navigation WorldMap integration", function()
     assertPlanningDiagnostics(chatMessages)
   end)
 
-  it("builds_planning_node_summary_from_segment_hubs_instead_of_the_player_facing_routebar_summary", function()
+  it("builds_planning_node_summary_from_segment_maps_instead_of_the_player_facing_routebar_summary", function()
     Toolbox.Navigation.BuildCurrentCharacterAvailability = function()
       return {
         classFile = "PALADIN",
         faction = "Horde",
-        currentUiMapID = 94,
+        currentUiMapID = 2393,
         currentX = 0.641,
         currentY = 0.652,
         knownSpellByID = {},
@@ -276,7 +276,7 @@ describe("Navigation WorldMap integration", function()
     Toolbox.NavigationModule.RouteBar.BuildPositionDisplayText = function(uiMapID, pointX, pointY, fallbackText)
       local mapNameByID = {
         [26] = "辛特兰",
-        [94] = "银月城",
+        [2393] = "银月城",
       }
       local mapName = mapNameByID[tonumber(uiMapID)] or tostring(fallbackText or "")
       if type(pointX) == "number" and type(pointY) == "number" then
@@ -296,7 +296,7 @@ describe("Navigation WorldMap integration", function()
     })
 
     assert.equals(5, #chatMessages)
-    assertTaxiHubPlanningDiagnostics(chatMessages)
+    assertTaxiPlanningDiagnostics(chatMessages)
   end)
 
   it("uses_arrival_semantics_in_planning_diagnostics_instead_of_return_transport_node_names", function()

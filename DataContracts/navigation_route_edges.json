@@ -1,8 +1,8 @@
 {
   "contract": {
     "contract_id": "navigation_route_edges",
-    "schema_version": 19,
-    "summary": "navigation V2 统一静态路线骨架（数字 node ID：map_anchor + taxi + waypoint transport + portal + areatrigger 占位）",
+    "schema_version": 20,
+    "summary": "navigation V2 统一静态路线骨架（数字 node ID：raw route facts + taxi + waypoint transport + portal + areatrigger 占位）",
     "source_of_truth": "WoWPlugin",
     "status": "active"
   },
@@ -36,7 +36,7 @@
         "waypointnode + waypointsafelocs 生成 portal 节点（Type=1/2）",
         "waypointedge 连接 portal 入口 → 出口",
         "areatrigger + areatriggeractionset 生成 areatrigger 节点与边（占位；当前 wow.db 的 areatriggeractionset 只有 ID/Flags，缺目标端点）",
-        "supplemental 补齐 WalkClusterKey、映射 UiMap、生成统一 route nodes + edges"
+        "supplemental 映射 UiMap、生成统一 route nodes + edges；本地步行拓扑改由 navigation_walk_components 单独导出"
       ],
       "select": [
         "map_anchor_raw：V2 参与导航的 UiMap 锚点",
@@ -53,7 +53,7 @@
       "where": [
         "统一静态骨架不导出 MAP_LINK / WAYPOINT_LINK / UiMap 邻接猜想",
         "V2 runtime 消费 map_anchor 节点、taxi 节点、transport 节点、portal 节点，以及 taxi / transport / public_portal 静态边",
-        "walk_local 不提前导出成全世界边，运行时按 WalkClusterKey 动态补接",
+        "walk_local 不提前导出成全世界边，运行时本地接线统一读取 navigation_walk_components.localEdges",
         "waypoint transport 边按 PlayerConditionID 分层：0 无条件纳入，924/923 标注 faction，其余暂不纳入",
         "public_portal 边按 PlayerConditionID 分层：0 无条件纳入，924/923 标注 faction，其余暂不纳入",
         "areatrigger 边为公共设施，对所有角色可用（占位；现阶段先不猜目标端点）"
@@ -307,7 +307,7 @@
       {
         "name": "metadata",
         "metadata": {
-          "schemaVersion": 19,
+          "schemaVersion": 20,
           "sourceMode": "live",
           "generatedAt": "@generated_at"
         }
@@ -325,8 +325,7 @@
           "node_kind",
           "source_id",
           "ui_map_id",
-          "node_name",
-          "walk_cluster_node_id"
+          "node_name"
         ],
         "sort_by": [
           "node_id"
@@ -339,7 +338,6 @@
           "UiMapID": "ui_map_id",
           "MapID": "map_id",
           "Name_lang": "node_name",
-          "WalkClusterNodeID": "walk_cluster_node_id",
           "TaxiNodeID": "taxi_node_id",
           "PosX": "pos_x",
           "PosY": "pos_y",
@@ -393,7 +391,7 @@
     "sort_rules": []
   },
   "versioning": {
-    "current_schema_version": 19,
+    "current_schema_version": 20,
     "change_log": [
       {
         "schema_version": 14,
@@ -418,6 +416,10 @@
       {
         "schema_version": 19,
         "summary": "V2 数字 node ID：统一把 NodeID/FromNodeID/ToNodeID 迁移为不透明数字，并新增 SourceID 与 WalkClusterNodeID"
+      },
+      {
+        "schema_version": 20,
+        "summary": "移除 route node 上的 WalkClusterNodeID；本地步行接线改由 navigation_walk_components schema v2 的 explicit localEdges 独立承载"
       }
     ]
   }

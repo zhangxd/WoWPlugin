@@ -19,11 +19,11 @@ describe("Navigation RouteBar", function()
 
   local function buildRouteNodeTable()
     return {
-      [8500] = { NodeID = 8500, Kind = "map_anchor", Source = "uimap", SourceID = 85, UiMapID = 85, Name_lang = "奥格瑞玛", WalkClusterNodeID = 8500 },
-      [8501] = { NodeID = 8501, Kind = "portal", Source = "portal", SourceID = 437, UiMapID = 85, Name_lang = "奥格瑞玛传送门", WalkClusterNodeID = 8500 },
-      [6261] = { NodeID = 6261, Kind = "map_anchor", Source = "uimap", SourceID = 626, UiMapID = 626, Name_lang = "达拉然", WalkClusterNodeID = 6261 },
-      [6262] = { NodeID = 6262, Kind = "taxi", Source = "taxi", SourceID = 1774, UiMapID = 626, Name_lang = "达拉然飞行点", WalkClusterNodeID = 6261 },
-      [1201] = { NodeID = 1201, Kind = "map_anchor", Source = "uimap", SourceID = 120, UiMapID = 120, Name_lang = "风暴峭壁", WalkClusterNodeID = 1201 },
+      [8500] = { NodeID = 8500, Kind = "map_anchor", Source = "uimap", SourceID = 85, UiMapID = 85, Name_lang = "奥格瑞玛" },
+      [8501] = { NodeID = 8501, Kind = "portal", Source = "portal", SourceID = 437, UiMapID = 85, Name_lang = "奥格瑞玛传送门" },
+      [6261] = { NodeID = 6261, Kind = "map_anchor", Source = "uimap", SourceID = 626, UiMapID = 626, Name_lang = "达拉然" },
+      [6262] = { NodeID = 6262, Kind = "taxi", Source = "taxi", SourceID = 1774, UiMapID = 626, Name_lang = "达拉然飞行点" },
+      [1201] = { NodeID = 1201, Kind = "map_anchor", Source = "uimap", SourceID = 120, UiMapID = 120, Name_lang = "风暴峭壁" },
     }
   end
 
@@ -106,9 +106,9 @@ describe("Navigation RouteBar", function()
       totalSteps = 4,
       rawNodePath = { "current", 9400, 2200, 2600, "target" },
       semanticNodes = {
-        { kind = "map", text = "银月城", uiMapID = 94 },
-        { kind = "map", text = "永歌森林", uiMapID = 95 },
-        { kind = "map", text = "东瘟疫之地", uiMapID = 22 },
+        { kind = "map", text = "银月城", uiMapID = 2393 },
+        { kind = "map", text = "永歌森林", uiMapID = 2395 },
+        { kind = "map", text = "东瘟疫之地", uiMapID = 23 },
         { kind = "map", text = "辛特兰", uiMapID = 26 },
       },
       segments = {
@@ -117,9 +117,9 @@ describe("Navigation RouteBar", function()
           label = "步行：银月城 -> 塔奎林，永歌森林",
           fromName = "当前位置",
           toName = "塔奎林，永歌森林",
-          fromUiMapID = 94,
-          toUiMapID = 95,
-          traversedUiMapIDs = { 94, 95 },
+          fromUiMapID = 2393,
+          toUiMapID = 2395,
+          traversedUiMapIDs = { 2393, 2395 },
           traversedUiMapNames = { "银月城", "永歌森林", "塔奎林，永歌森林" },
         },
         {
@@ -127,9 +127,9 @@ describe("Navigation RouteBar", function()
           label = "飞行前往圣光之愿礼拜堂，东瘟疫之地",
           fromName = "塔奎林，永歌森林",
           toName = "圣光之愿礼拜堂，东瘟疫之地",
-          fromUiMapID = 95,
-          toUiMapID = 22,
-          traversedUiMapIDs = { 95, 22 },
+          fromUiMapID = 2395,
+          toUiMapID = 23,
+          traversedUiMapIDs = { 2395, 23 },
           traversedUiMapNames = { "永歌森林", "祖阿曼", "东瘟疫之地" },
         },
         {
@@ -137,9 +137,9 @@ describe("Navigation RouteBar", function()
           label = "飞行前往恶齿村，辛特兰",
           fromName = "圣光之愿礼拜堂，东瘟疫之地",
           toName = "恶齿村，辛特兰",
-          fromUiMapID = 22,
+          fromUiMapID = 23,
           toUiMapID = 26,
-          traversedUiMapIDs = { 22, 26 },
+          traversedUiMapIDs = { 23, 26 },
           traversedUiMapNames = { "东瘟疫之地", "辛特兰" },
         },
         {
@@ -187,20 +187,20 @@ describe("Navigation RouteBar", function()
       totalSteps = 1,
       rawNodePath = { "current", 9940, "target" },
       semanticNodes = {
-        { kind = "map", text = "Hub", uiMapID = 994 },
+        { kind = "map", text = "起点位置", uiMapID = 994 },
         { kind = "map", text = "LongTargetDestinationAlpha", uiMapID = 993 },
       },
       segments = {
         {
           mode = "walk_local",
           label = "目标位置：LongTargetDestinationAlpha 78.9, 65.4",
-          fromName = "Hub",
+          fromName = "起点位置",
           toName = "LongTargetDestinationAlpha",
           fromUiMapID = 994,
           toUiMapID = 993,
           traversedUiMapIDs = { 994, 993 },
           traversedUiMapNames = {
-            "Hub",
+            "起点位置",
             "LongTargetDestinationAlpha",
           },
         },
@@ -429,14 +429,14 @@ describe("Navigation RouteBar", function()
             [114] = { Name_lang = "北风苔原" },
             [120] = { Name_lang = "风暴峭壁" },
             [626] = { Name_lang = "达拉然" },
-            [94] = { Name_lang = "银月城" },
-            [95] = { Name_lang = "永歌森林" },
-            [22] = { Name_lang = "东瘟疫之地" },
+            [2393] = { Name_lang = "银月城" },
+            [2395] = { Name_lang = "永歌森林" },
+            [23] = { Name_lang = "东瘟疫之地" },
             [26] = { Name_lang = "辛特兰" },
             [991] = { Name_lang = "这是一段非常非常长的起始位置说明文本" },
             [992] = { Name_lang = "这是一段非常非常长的终点说明文本" },
             [993] = { Name_lang = "LongTargetDestinationAlpha" },
-            [994] = { Name_lang = "Hub" },
+            [994] = { Name_lang = "起点位置" },
           },
         },
         NavigationRouteEdges = {
@@ -601,7 +601,7 @@ describe("Navigation RouteBar", function()
 
   it("renders_intermediate_map_nodes_in_the_expanded_chain_without_promoting_flight_point_details", function()
     locationSnapshot = {
-      currentUiMapID = 94,
+      currentUiMapID = 2393,
       currentX = 0.638,
       currentY = 0.653,
     }

@@ -21,6 +21,253 @@ describe("Navigation API", function()
     Toolbox.Data.NavigationWalkComponents = walkComponentData
   end
 
+  local function buildWalkLocalEdge(localEdgeID, componentID, fromNodeID, toNodeID, traversedUiMapIDs, traversedUiMapNames)
+    return {
+      LocalEdgeID = localEdgeID,
+      ComponentID = componentID,
+      FromNodeID = fromNodeID,
+      ToNodeID = toNodeID,
+      Mode = "walk_local",
+      StepCost = 1,
+      TraversedUiMapIDs = traversedUiMapIDs,
+      TraversedUiMapNames = traversedUiMapNames,
+    }
+  end
+
+  local function appendLocalEdgeSet(targetEdgeTable, sourceEdgeTable)
+    for localEdgeID, localEdgeDef in pairs(sourceEdgeTable or {}) do
+      targetEdgeTable[localEdgeID] = localEdgeDef
+    end
+  end
+
+  local function buildBidirectionalLocalEdgeSet(edgePrefix, componentID, anchorNodeID, connectorNodeID, anchorUiMapID, connectorUiMapID, anchorName, connectorName)
+    return {
+      [edgePrefix .. "_anchor_to_connector"] = buildWalkLocalEdge(
+        edgePrefix .. "_anchor_to_connector",
+        componentID,
+        anchorNodeID,
+        connectorNodeID,
+        { anchorUiMapID, connectorUiMapID },
+        { anchorName, connectorName }
+      ),
+      [edgePrefix .. "_connector_to_anchor"] = buildWalkLocalEdge(
+        edgePrefix .. "_connector_to_anchor",
+        componentID,
+        connectorNodeID,
+        anchorNodeID,
+        { connectorUiMapID, anchorUiMapID },
+        { connectorName, anchorName }
+      ),
+    }
+  end
+
+  local function withMergedWalkComponents(extraWalkComponentData)
+    local baseWalkComponentData = Toolbox.Data.NavigationWalkComponents or {} -- 当前测试里的正式步行组件基线
+    local mergedWalkComponentData = { -- 合并后的正式步行组件夹具
+      components = {},
+      nodeAssignments = {},
+      displayProxies = {},
+      localEdges = {},
+    }
+    local bucketNameList = { "components", "nodeAssignments", "displayProxies", "localEdges" } -- 需要合并的字段分组
+
+    for _, bucketName in ipairs(bucketNameList) do
+      local mergedBucket = mergedWalkComponentData[bucketName] -- 当前分组的合并结果
+      for entryKey, entryValue in pairs(type(baseWalkComponentData[bucketName]) == "table" and baseWalkComponentData[bucketName] or {}) do
+        mergedBucket[entryKey] = entryValue
+      end
+      for entryKey, entryValue in pairs(type(extraWalkComponentData and extraWalkComponentData[bucketName]) == "table" and extraWalkComponentData[bucketName] or {}) do
+        mergedBucket[entryKey] = entryValue
+      end
+    end
+
+    return mergedWalkComponentData
+  end
+
+  local function installExplicitRetailWalkLocalEdges()
+    local extraLocalEdges = {} -- 导出图测试补齐的显式本地边
+    local silvermoonArrivalNodeIDList = { 2820, 2955, 3170, 3172, 3173, 3197, 3200, 3216, 3219, 3221 } -- 银月城公共传送落点节点
+    local zulamanConnectorList = { -- 祖阿曼地图锚点到各飞行点的显式接线
+      { nodeID = 2682, uiMapID = 2437, name = "石洗营地" },
+      { nodeID = 2688, uiMapID = 2437, name = "断齿瞭望台" },
+      { nodeID = 2689, uiMapID = 2437, name = "阿曼尼扎村" },
+      { nodeID = 2690, uiMapID = 2536, name = "阿塔阿曼卫" },
+      { nodeID = 2691, uiMapID = 2437, name = "影盆岗哨" },
+      { nodeID = 2692, uiMapID = 2437, name = "枯木山崖" },
+    }
+
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "orgrimmar_transport",
+      "uimap_85_city",
+      83,
+      3251,
+      85,
+      85,
+      "奥格瑞玛",
+      "奥格瑞玛飞艇塔"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "borean_transport",
+      "uimap_114_arrival_3252",
+      110,
+      3252,
+      114,
+      114,
+      "北风苔原",
+      "战歌要塞"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "orgrimmar_portal_room",
+      "uimap_85_portal_room_2805",
+      83,
+      2805,
+      85,
+      85,
+      "奥格瑞玛",
+      "探路者大厅"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "orgrimmar_silvermoon_portal",
+      "uimap_85_portal_room_2805",
+      83,
+      2819,
+      85,
+      85,
+      "奥格瑞玛",
+      "前往银月城的传送门"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "silvermoon_to_eversong",
+      "uimap_2393_city",
+      1554,
+      1556,
+      2393,
+      2395,
+      "银月城",
+      "永歌森林"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "silvermoon_orgrimmar_portal",
+      "uimap_2393_city",
+      1554,
+      2821,
+      2393,
+      2393,
+      "银月城",
+      "日怒之塔"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "silvermoon_tirisfal_orb",
+      "uimap_2393_city",
+      1554,
+      2822,
+      2393,
+      2393,
+      "银月城",
+      "内部圣殿"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "tirisfal_portal_arrival",
+      "uimap_18_city",
+      16,
+      2823,
+      18,
+      18,
+      "提瑞斯法林地",
+      "提瑞斯法林地传送门落点"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "silvermoon_sanctum_taxi",
+      "uimap_2393_city",
+      1554,
+      2693,
+      2393,
+      2393,
+      "银月城",
+      "圣光秘殿"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "silvermoon_bazaar_taxi",
+      "uimap_2393_city",
+      1554,
+      2694,
+      2393,
+      2393,
+      "银月城",
+      "皇家贸易区"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "eversong_fairbreeze_taxi",
+      "uimap_2395_city",
+      1556,
+      2695,
+      2395,
+      2395,
+      "永歌森林",
+      "晴风村"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "eversong_tranquillien_taxi",
+      "uimap_2395_city",
+      1556,
+      2696,
+      2395,
+      2395,
+      "永歌森林",
+      "塔奎林"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "epl_taxi_67",
+      "uimap_23_city",
+      21,
+      1735,
+      23,
+      23,
+      "东瘟疫之地",
+      "圣光之愿礼拜堂"
+    ))
+    appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+      "epl_taxi_68",
+      "uimap_23_city",
+      21,
+      1736,
+      23,
+      23,
+      "东瘟疫之地",
+      "圣光之愿礼拜堂"
+    ))
+
+    for _, arrivalNodeID in ipairs(silvermoonArrivalNodeIDList) do
+      appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+        "silvermoon_arrival_" .. tostring(arrivalNodeID),
+        "uimap_2393_city",
+        1554,
+        arrivalNodeID,
+        2393,
+        2393,
+        "银月城",
+        "银月城传送门落点"
+      ))
+    end
+
+    for _, connectorDef in ipairs(zulamanConnectorList) do
+      appendLocalEdgeSet(extraLocalEdges, buildBidirectionalLocalEdgeSet(
+        "zulaman_connector_" .. tostring(connectorDef.nodeID),
+        "uimap_2437_city",
+        1581,
+        connectorDef.nodeID,
+        2437,
+        connectorDef.uiMapID,
+        "祖阿曼",
+        connectorDef.name
+      ))
+    end
+
+    Toolbox.Data.NavigationWalkComponents = withMergedWalkComponents({
+      localEdges = extraLocalEdges,
+    })
+  end
+
   local function buildAllKnownTaxiNodeByID()
     local knownTaxiNodeByID = {} -- 测试用：把导出图中的所有 taxi 节点视为已开启
     for _, nodeDef in pairs(Toolbox.Data.NavigationRouteEdges and Toolbox.Data.NavigationRouteEdges.nodes or {}) do
@@ -115,6 +362,7 @@ describe("Navigation API", function()
     moduleChunk()
     dofile("Toolbox/Data/NavigationMapNodes.lua")
     dofile("Toolbox/Data/NavigationRouteEdges.lua")
+    dofile("Toolbox/Data/NavigationWalkComponents.lua")
   end)
 
   after_each(function()
@@ -370,12 +618,12 @@ describe("Navigation API", function()
   it("builds_current_character_availability_from_runtime_spellbook_taxi_map_and_bind_location", function()
     local checkedSpellIDList = {} -- 被查询的技能 ID
     setNavigationData({
-      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
-      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "绑定地图", WalkClusterNodeID = 2 },
-      [85] = { NodeID = 85, Kind = "map_anchor", Source = "uimap", SourceID = 85, UiMapID = 85, Name_lang = "奥格瑞玛", WalkClusterNodeID = 85 },
-      [100] = { NodeID = 100, Kind = "taxi", Source = "taxi", SourceID = 100, UiMapID = 1, Name_lang = "起点飞行点", WalkClusterNodeID = 1, TaxiNodeID = 100 },
-      [101] = { NodeID = 101, Kind = "taxi", Source = "taxi", SourceID = 101, UiMapID = 1, Name_lang = "未开飞行点", WalkClusterNodeID = 1, TaxiNodeID = 101 },
-      [200] = { NodeID = 200, Kind = "taxi", Source = "taxi", SourceID = 200, UiMapID = 2, Name_lang = "目标飞行点", WalkClusterNodeID = 2, TaxiNodeID = 200 },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图"},
+      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "绑定地图"},
+      [85] = { NodeID = 85, Kind = "map_anchor", Source = "uimap", SourceID = 85, UiMapID = 85, Name_lang = "奥格瑞玛"},
+      [100] = { NodeID = 100, Kind = "taxi", Source = "taxi", SourceID = 100, UiMapID = 1, Name_lang = "起点飞行点", TaxiNodeID = 100 },
+      [101] = { NodeID = 101, Kind = "taxi", Source = "taxi", SourceID = 101, UiMapID = 1, Name_lang = "未开飞行点", TaxiNodeID = 101 },
+      [200] = { NodeID = 200, Kind = "taxi", Source = "taxi", SourceID = 200, UiMapID = 2, Name_lang = "目标飞行点", TaxiNodeID = 200 },
     }, {}, {
       [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
       [2] = { Name_lang = "绑定地图", MapType = 3, ParentUiMapID = 0 },
@@ -477,8 +725,8 @@ describe("Navigation API", function()
 
   it("expands_hearthstone_template_only_when_spell_and_bind_node_are_available", function()
     setNavigationData({
-      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
-      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "炉石绑定地", WalkClusterNodeID = 2 },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图"},
+      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "炉石绑定地"},
     }, {}, {
       [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
       [2] = { Name_lang = "炉石绑定地", MapType = 3, ParentUiMapID = 0 },
@@ -556,8 +804,8 @@ describe("Navigation API", function()
 
   it("expands_class_templates_only_when_class_faction_and_spell_match", function()
     setNavigationData({
-      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
-      [85] = { NodeID = 85, Kind = "map_anchor", Source = "uimap", SourceID = 85, UiMapID = 85, Name_lang = "奥格瑞玛", WalkClusterNodeID = 85 },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图"},
+      [85] = { NodeID = 85, Kind = "map_anchor", Source = "uimap", SourceID = 85, UiMapID = 85, Name_lang = "奥格瑞玛"},
     }, {}, {
       [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
       [85] = { Name_lang = "奥格瑞玛", MapType = 3, ParentUiMapID = 0 },
@@ -612,10 +860,10 @@ describe("Navigation API", function()
 
   it("allows_taxi_routes_only_when_both_endpoint_nodes_are_known", function()
     setNavigationData({
-      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
-      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "目标地图", WalkClusterNodeID = 2 },
-      [100] = { NodeID = 100, Kind = "taxi", Source = "taxi", SourceID = 100, UiMapID = 1, Name_lang = "起点飞行点", WalkClusterNodeID = 1, TaxiNodeID = 100 },
-      [200] = { NodeID = 200, Kind = "taxi", Source = "taxi", SourceID = 200, UiMapID = 2, Name_lang = "目标飞行点", WalkClusterNodeID = 2, TaxiNodeID = 200 },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图" },
+      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "目标地图" },
+      [100] = { NodeID = 100, Kind = "taxi", Source = "taxi", SourceID = 100, UiMapID = 1, Name_lang = "起点飞行点", TaxiNodeID = 100 },
+      [200] = { NodeID = 200, Kind = "taxi", Source = "taxi", SourceID = 200, UiMapID = 2, Name_lang = "目标飞行点", TaxiNodeID = 200 },
     }, {
       {
         ID = 9001,
@@ -634,7 +882,24 @@ describe("Navigation API", function()
     }, {
       [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
       [2] = { Name_lang = "目标地图", MapType = 3, ParentUiMapID = 0 },
-    }, {})
+    }, {}, {
+      components = {
+        start = { ComponentID = "start", DisplayName = "起点本地组件", MemberNodeIDs = { 1, 100 }, EntryNodeIDs = { 1, 100 }, PreferredAnchorNodeID = 1 },
+        target = { ComponentID = "target", DisplayName = "目标本地组件", MemberNodeIDs = { 2, 200 }, EntryNodeIDs = { 2, 200 }, PreferredAnchorNodeID = 2 },
+      },
+      nodeAssignments = {
+        [1] = { NodeID = 1, ComponentID = "start", Role = "anchor" },
+        [100] = { NodeID = 100, ComponentID = "start", Role = "departure_connector", VisibleName = "起点飞行点" },
+        [2] = { NodeID = 2, ComponentID = "target", Role = "anchor" },
+        [200] = { NodeID = 200, ComponentID = "target", Role = "arrival_connector", VisibleName = "目标飞行点" },
+      },
+      localEdges = {
+        start_anchor_to_taxi = buildWalkLocalEdge("start_anchor_to_taxi", "start", 1, 100, { 1, 1 }, { "起点地图", "起点飞行点" }),
+        start_taxi_to_anchor = buildWalkLocalEdge("start_taxi_to_anchor", "start", 100, 1, { 1, 1 }, { "起点飞行点", "起点地图" }),
+        target_anchor_to_taxi = buildWalkLocalEdge("target_anchor_to_taxi", "target", 2, 200, { 2, 2 }, { "目标地图", "目标飞行点" }),
+        target_taxi_to_anchor = buildWalkLocalEdge("target_taxi_to_anchor", "target", 200, 2, { 2, 2 }, { "目标飞行点", "目标地图" }),
+      },
+    })
 
     local routeResult = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 2,
@@ -677,10 +942,10 @@ describe("Navigation API", function()
 
   it("routes_transport_edges_when_both_endpoint_nodes_are_known", function()
     setNavigationData({
-      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
-      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "目标地图", WalkClusterNodeID = 2 },
-      [35] = { NodeID = 35, Kind = "taxi", Source = "taxi", SourceID = 35, UiMapID = 1, Name_lang = "交通工具，起点", WalkClusterNodeID = 1, TaxiNodeID = 35 },
-      [90] = { NodeID = 90, Kind = "taxi", Source = "taxi", SourceID = 90, UiMapID = 2, Name_lang = "交通工具，目标", WalkClusterNodeID = 2, TaxiNodeID = 90 },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图" },
+      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "目标地图" },
+      [35] = { NodeID = 35, Kind = "taxi", Source = "taxi", SourceID = 35, UiMapID = 1, Name_lang = "交通工具，起点", TaxiNodeID = 35 },
+      [90] = { NodeID = 90, Kind = "taxi", Source = "taxi", SourceID = 90, UiMapID = 2, Name_lang = "交通工具，目标", TaxiNodeID = 90 },
     }, {
       {
         ID = 9002,
@@ -699,7 +964,24 @@ describe("Navigation API", function()
     }, {
       [1] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
       [2] = { Name_lang = "目标地图", MapType = 3, ParentUiMapID = 0 },
-    }, {})
+    }, {}, {
+      components = {
+        start = { ComponentID = "start", DisplayName = "起点本地组件", MemberNodeIDs = { 1, 35 }, EntryNodeIDs = { 1, 35 }, PreferredAnchorNodeID = 1 },
+        target = { ComponentID = "target", DisplayName = "目标本地组件", MemberNodeIDs = { 2, 90 }, EntryNodeIDs = { 2, 90 }, PreferredAnchorNodeID = 2 },
+      },
+      nodeAssignments = {
+        [1] = { NodeID = 1, ComponentID = "start", Role = "anchor" },
+        [35] = { NodeID = 35, ComponentID = "start", Role = "departure_connector", VisibleName = "交通工具，起点" },
+        [2] = { NodeID = 2, ComponentID = "target", Role = "anchor" },
+        [90] = { NodeID = 90, ComponentID = "target", Role = "arrival_connector", VisibleName = "交通工具，目标" },
+      },
+      localEdges = {
+        start_anchor_to_transport = buildWalkLocalEdge("start_anchor_to_transport", "start", 1, 35, { 1, 1 }, { "起点地图", "交通工具，起点" }),
+        start_transport_to_anchor = buildWalkLocalEdge("start_transport_to_anchor", "start", 35, 1, { 1, 1 }, { "交通工具，起点", "起点地图" }),
+        target_anchor_to_transport = buildWalkLocalEdge("target_anchor_to_transport", "target", 2, 90, { 2, 2 }, { "目标地图", "交通工具，目标" }),
+        target_transport_to_anchor = buildWalkLocalEdge("target_transport_to_anchor", "target", 90, 2, { 2, 2 }, { "交通工具，目标", "目标地图" }),
+      },
+    })
 
     local routeResult = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 2,
@@ -744,9 +1026,9 @@ describe("Navigation API", function()
 
   it("ignores_legacy_target_rules_from_route_edge_exports", function()
     setNavigationData({
-      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图", WalkClusterNodeID = 1 },
-      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "目标地图", WalkClusterNodeID = 2 },
-      [300] = { NodeID = 300, Kind = "portal", Source = "portal", SourceID = 300, UiMapID = 2, Name_lang = "旧中转点", WalkClusterNodeID = 300 },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "起点地图"},
+      [2] = { NodeID = 2, Kind = "map_anchor", Source = "uimap", SourceID = 2, UiMapID = 2, Name_lang = "目标地图"},
+      [300] = { NodeID = 300, Kind = "portal", Source = "portal", SourceID = 300, UiMapID = 2, Name_lang = "旧中转点"},
     }, {
       {
         ID = 9100,
@@ -800,14 +1082,50 @@ describe("Navigation API", function()
     assert.equals("NAVIGATION_ERR_NO_ROUTE", errorObject.code)
   end)
 
-  it("bridges_same_walk_cluster_nodes_with_a_single_compressed_walk_segment", function()
+  it("bridges_explicit_local_edges_with_a_single_compressed_walk_segment", function()
     setNavigationData({
-      [18] = { NodeID = 18, Kind = "map_anchor", Source = "uimap", SourceID = 18, UiMapID = 18, Name_lang = "提瑞斯法林地", WalkClusterNodeID = 18 },
-      [90] = { NodeID = 90, Kind = "map_anchor", Source = "uimap", SourceID = 90, UiMapID = 90, Name_lang = "幽暗城", WalkClusterNodeID = 18 },
+      [18] = { NodeID = 18, Kind = "map_anchor", Source = "uimap", SourceID = 18, UiMapID = 18, Name_lang = "提瑞斯法林地"},
+      [90] = { NodeID = 90, Kind = "map_anchor", Source = "uimap", SourceID = 90, UiMapID = 90, Name_lang = "幽暗城"},
     }, {}, {
       [18] = { Name_lang = "提瑞斯法林地", MapType = 3, ParentUiMapID = 0 },
       [90] = { Name_lang = "幽暗城", MapType = 3, ParentUiMapID = 18 },
-    }, {})
+    }, {}, {
+      components = {
+        undercity = {
+          ComponentID = "undercity",
+          DisplayName = "提瑞斯法本地组件",
+          MemberNodeIDs = { 18, 90 },
+          EntryNodeIDs = { 18, 90 },
+          PreferredAnchorNodeID = 18,
+        },
+      },
+      nodeAssignments = {
+        [18] = { NodeID = 18, ComponentID = "undercity", Role = "anchor" },
+        [90] = { NodeID = 90, ComponentID = "undercity", Role = "landmark", VisibleName = "幽暗城" },
+      },
+      localEdges = {
+        undercity_to_tirisfal = {
+          LocalEdgeID = "undercity_to_tirisfal",
+          ComponentID = "undercity",
+          FromNodeID = 90,
+          ToNodeID = 18,
+          Mode = "walk_local",
+          StepCost = 1,
+          TraversedUiMapIDs = { 90, 18 },
+          TraversedUiMapNames = { "幽暗城", "提瑞斯法林地" },
+        },
+        tirisfal_to_undercity = {
+          LocalEdgeID = "tirisfal_to_undercity",
+          ComponentID = "undercity",
+          FromNodeID = 18,
+          ToNodeID = 90,
+          Mode = "walk_local",
+          StepCost = 1,
+          TraversedUiMapIDs = { 18, 90 },
+          TraversedUiMapNames = { "提瑞斯法林地", "幽暗城" },
+        },
+      },
+    })
 
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 18,
@@ -830,12 +1148,12 @@ describe("Navigation API", function()
     assert.equals("walk_local", routeResult.segments[1].mode)
   end)
 
-  it("allows_public_portal_edges_for_all_characters_regardless_of_taxi_nodes", function()
+  it("allows_public_portal_edges_for_all_characters_when_explicit_local_edges_connect_the_portal", function()
     setNavigationData({
-      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "暴风城", WalkClusterNodeID = 1 },
-      [12] = { NodeID = 12, Kind = "map_anchor", Source = "uimap", SourceID = 12, UiMapID = 12, Name_lang = "卡利姆多", WalkClusterNodeID = 12 },
-      [100] = { NodeID = 100, Kind = "portal", Source = "portal", SourceID = 100, UiMapID = 1, Name_lang = "使用巫师圣殿的传送门前往海加尔山", WalkClusterNodeID = 1 },
-      [200] = { NodeID = 200, Kind = "portal", Source = "portal", SourceID = 200, UiMapID = 12, Name_lang = "海加尔山", WalkClusterNodeID = 12 },
+      [1] = { NodeID = 1, Kind = "map_anchor", Source = "uimap", SourceID = 1, UiMapID = 1, Name_lang = "暴风城"},
+      [12] = { NodeID = 12, Kind = "map_anchor", Source = "uimap", SourceID = 12, UiMapID = 12, Name_lang = "卡利姆多"},
+      [100] = { NodeID = 100, Kind = "portal", Source = "portal", SourceID = 100, UiMapID = 1, Name_lang = "使用巫师圣殿的传送门前往海加尔山"},
+      [200] = { NodeID = 200, Kind = "portal", Source = "portal", SourceID = 200, UiMapID = 12, Name_lang = "海加尔山"},
     }, {
       {
         ID = 0,
@@ -852,7 +1170,52 @@ describe("Navigation API", function()
     }, {
       [1] = { Name_lang = "暴风城", MapType = 3, ParentUiMapID = 0 },
       [12] = { Name_lang = "卡利姆多", MapType = 3, ParentUiMapID = 0 },
-    }, {})
+    }, {}, {
+      components = {
+        stormwind = {
+          ComponentID = "stormwind",
+          DisplayName = "暴风城本地组件",
+          MemberNodeIDs = { 1, 100 },
+          EntryNodeIDs = { 1, 100 },
+          PreferredAnchorNodeID = 1,
+        },
+        kalimdor = {
+          ComponentID = "kalimdor",
+          DisplayName = "卡利姆多本地组件",
+          MemberNodeIDs = { 12, 200 },
+          EntryNodeIDs = { 12, 200 },
+          PreferredAnchorNodeID = 12,
+        },
+      },
+      nodeAssignments = {
+        [1] = { NodeID = 1, ComponentID = "stormwind", Role = "anchor" },
+        [100] = { NodeID = 100, ComponentID = "stormwind", Role = "departure_connector", VisibleName = "巫师圣殿传送门" },
+        [12] = { NodeID = 12, ComponentID = "kalimdor", Role = "anchor" },
+        [200] = { NodeID = 200, ComponentID = "kalimdor", Role = "arrival_connector", VisibleName = "海加尔山" },
+      },
+      localEdges = {
+        stormwind_to_portal = {
+          LocalEdgeID = "stormwind_to_portal",
+          ComponentID = "stormwind",
+          FromNodeID = 1,
+          ToNodeID = 100,
+          Mode = "walk_local",
+          StepCost = 1,
+          TraversedUiMapIDs = { 1 },
+          TraversedUiMapNames = { "暴风城", "巫师圣殿传送门" },
+        },
+        portal_arrival_to_anchor = {
+          LocalEdgeID = "portal_arrival_to_anchor",
+          ComponentID = "kalimdor",
+          FromNodeID = 200,
+          ToNodeID = 12,
+          Mode = "walk_local",
+          StepCost = 1,
+          TraversedUiMapIDs = { 12 },
+          TraversedUiMapNames = { "海加尔山", "卡利姆多" },
+        },
+      },
+    })
 
     local routeResult = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 12,
@@ -987,6 +1350,8 @@ describe("Navigation API", function()
   end)
 
   it("routes_from_silvermoon_to_tirisfal_via_exported_public_portal_exit", function()
+    installExplicitRetailWalkLocalEdges()
+
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 18,
       x = 0.50,
@@ -994,7 +1359,7 @@ describe("Navigation API", function()
     }, {
       classFile = "WARRIOR",
       faction = "Horde",
-      currentUiMapID = 110,
+      currentUiMapID = 2393,
       knownSpellByID = {},
       knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
     })
@@ -1015,7 +1380,9 @@ describe("Navigation API", function()
     assert.is_true(usedSilvermoonTirisfalPortal)
   end)
 
-  it("routes_from_silvermoon_to_orgrimmar_after_portal_hub_merge_is_closed", function()
+  it("routes_from_silvermoon_to_orgrimmar_after_public_portal_local_topology_is_closed", function()
+    installExplicitRetailWalkLocalEdges()
+
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 85,
       x = 0.50,
@@ -1023,7 +1390,7 @@ describe("Navigation API", function()
     }, {
       classFile = "WARRIOR",
       faction = "Horde",
-      currentUiMapID = 110,
+      currentUiMapID = 2393,
       knownSpellByID = {},
       knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
     })
@@ -1045,6 +1412,8 @@ describe("Navigation API", function()
   end)
 
   it("routes_from_silvermoon_to_eastern_plaguelands_with_exported_static_graph", function()
+    installExplicitRetailWalkLocalEdges()
+
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 23,
       x = 0.50,
@@ -1052,7 +1421,7 @@ describe("Navigation API", function()
     }, {
       classFile = "WARRIOR",
       faction = "Horde",
-      currentUiMapID = 110,
+      currentUiMapID = 2393,
       knownSpellByID = {},
       knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
     })
@@ -1063,6 +1432,8 @@ describe("Navigation API", function()
   end)
 
   it("routes_from_orgrimmar_to_borean_tundra_via_direct_transport_instead_of_dalaran_flight", function()
+    installExplicitRetailWalkLocalEdges()
+
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 114,
       x = 0.50,
@@ -1102,8 +1473,9 @@ describe("Navigation API", function()
     assert.is_false(usedDalaranTaxiFallback)
   end)
 
-  it("uses_the_arrival_hub_name_for_the_final_walk_after_the_orgrimmar_borean_transport", function()
+  it("uses_the_arrival_anchor_name_for_the_final_walk_after_the_orgrimmar_borean_transport", function()
     dofile("Toolbox/Data/NavigationAbilityTemplates.lua")
+    installExplicitRetailWalkLocalEdges()
 
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 114,
@@ -1133,6 +1505,8 @@ describe("Navigation API", function()
   end)
 
   it("routes_from_the_12_0_silvermoon_map_to_zulaman_without_falling_back_to_legacy_silvermoon", function()
+    installExplicitRetailWalkLocalEdges()
+
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 2437,
       x = 0.50,
@@ -1201,6 +1575,7 @@ describe("Navigation API", function()
 
   it("routes_from_orgrimmar_to_zulaman_via_the_12_0_silvermoon_mage_teleport_chain", function()
     dofile("Toolbox/Data/NavigationAbilityTemplates.lua")
+    installExplicitRetailWalkLocalEdges()
 
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 2437,
@@ -1276,6 +1651,7 @@ describe("Navigation API", function()
 
   it("routes_from_orgrimmar_to_zulaman_via_the_silvermoon_public_portal_chain", function()
     dofile("Toolbox/Data/NavigationWalkComponents.lua")
+    installExplicitRetailWalkLocalEdges()
 
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 2437,
@@ -1338,10 +1714,10 @@ describe("Navigation API", function()
 
   it("prefers_formal_walk_components_for_local_access_and_semantic_proxy_names", function()
     setNavigationData({
-      [1000] = { NodeID = 1000, Kind = "map_anchor", Source = "uimap", SourceID = 10, UiMapID = 10, Name_lang = "起点地图", WalkClusterNodeID = 1000 },
-      [1001] = { NodeID = 1001, Kind = "taxi", Source = "taxi", SourceID = 5001, UiMapID = 10, Name_lang = "起点技术飞行点", WalkClusterNodeID = 9999, TaxiNodeID = 5001 },
-      [2000] = { NodeID = 2000, Kind = "map_anchor", Source = "uimap", SourceID = 20, UiMapID = 20, Name_lang = "目标地图", WalkClusterNodeID = 2000 },
-      [2001] = { NodeID = 2001, Kind = "taxi", Source = "taxi", SourceID = 6001, UiMapID = 20, Name_lang = "目标技术飞行点", WalkClusterNodeID = 9998, TaxiNodeID = 6001 },
+      [1000] = { NodeID = 1000, Kind = "map_anchor", Source = "uimap", SourceID = 10, UiMapID = 10, Name_lang = "起点地图"},
+      [1001] = { NodeID = 1001, Kind = "taxi", Source = "taxi", SourceID = 5001, UiMapID = 10, Name_lang = "起点技术飞行点", TaxiNodeID = 5001 },
+      [2000] = { NodeID = 2000, Kind = "map_anchor", Source = "uimap", SourceID = 20, UiMapID = 20, Name_lang = "目标地图"},
+      [2001] = { NodeID = 2001, Kind = "taxi", Source = "taxi", SourceID = 6001, UiMapID = 20, Name_lang = "目标技术飞行点", TaxiNodeID = 6001 },
     }, {
       {
         ID = 1,
@@ -1383,9 +1759,51 @@ describe("Navigation API", function()
       },
       nodeAssignments = {
         [1000] = { NodeID = 1000, ComponentID = 1, Role = "anchor" },
-        [1001] = { NodeID = 1001, ComponentID = 1, Role = "hub", VisibleName = "起点飞行点" },
+        [1001] = { NodeID = 1001, ComponentID = 1, Role = "departure_connector", VisibleName = "起点飞行点" },
         [2000] = { NodeID = 2000, ComponentID = 2, Role = "anchor" },
-        [2001] = { NodeID = 2001, ComponentID = 2, Role = "hub", VisibleName = "目标飞行点" },
+        [2001] = { NodeID = 2001, ComponentID = 2, Role = "arrival_connector", VisibleName = "目标飞行点" },
+      },
+      localEdges = {
+        start_anchor_to_taxi = {
+          LocalEdgeID = "start_anchor_to_taxi",
+          ComponentID = 1,
+          FromNodeID = 1000,
+          ToNodeID = 1001,
+          Mode = "walk_local",
+          StepCost = 1,
+          TraversedUiMapIDs = { 10 },
+          TraversedUiMapNames = { "起点地图", "起点飞行点" },
+        },
+        start_taxi_to_anchor = {
+          LocalEdgeID = "start_taxi_to_anchor",
+          ComponentID = 1,
+          FromNodeID = 1001,
+          ToNodeID = 1000,
+          Mode = "walk_local",
+          StepCost = 1,
+          TraversedUiMapIDs = { 10 },
+          TraversedUiMapNames = { "起点飞行点", "起点地图" },
+        },
+        target_anchor_to_taxi = {
+          LocalEdgeID = "target_anchor_to_taxi",
+          ComponentID = 2,
+          FromNodeID = 2000,
+          ToNodeID = 2001,
+          Mode = "walk_local",
+          StepCost = 1,
+          TraversedUiMapIDs = { 20 },
+          TraversedUiMapNames = { "目标地图", "目标飞行点" },
+        },
+        target_taxi_to_anchor = {
+          LocalEdgeID = "target_taxi_to_anchor",
+          ComponentID = 2,
+          FromNodeID = 2001,
+          ToNodeID = 2000,
+          Mode = "walk_local",
+          StepCost = 1,
+          TraversedUiMapIDs = { 20 },
+          TraversedUiMapNames = { "目标飞行点", "目标地图" },
+        },
       },
     })
 
@@ -1416,12 +1834,12 @@ describe("Navigation API", function()
     assert.same({ "目标飞行点", "目标地图" }, routeResult.segments[3].traversedUiMapNames)
   end)
 
-  it("keeps_the_legacy_walk_cluster_fallback_when_formal_walk_components_are_missing", function()
+  it("requires_explicit_local_edges_instead_of_falling_back_to_legacy_walk_clusters", function()
     setNavigationData({
-      [1000] = { NodeID = 1000, Kind = "map_anchor", Source = "uimap", SourceID = 10, UiMapID = 10, Name_lang = "起点地图", WalkClusterNodeID = 1000 },
-      [1001] = { NodeID = 1001, Kind = "taxi", Source = "taxi", SourceID = 5001, UiMapID = 10, Name_lang = "起点飞行点", WalkClusterNodeID = 1000, TaxiNodeID = 5001 },
-      [2000] = { NodeID = 2000, Kind = "map_anchor", Source = "uimap", SourceID = 20, UiMapID = 20, Name_lang = "目标地图", WalkClusterNodeID = 2000 },
-      [2001] = { NodeID = 2001, Kind = "taxi", Source = "taxi", SourceID = 6001, UiMapID = 20, Name_lang = "目标飞行点", WalkClusterNodeID = 2000, TaxiNodeID = 6001 },
+      [1000] = { NodeID = 1000, Kind = "map_anchor", Source = "uimap", SourceID = 10, UiMapID = 10, Name_lang = "起点地图"},
+      [1001] = { NodeID = 1001, Kind = "taxi", Source = "taxi", SourceID = 5001, UiMapID = 10, Name_lang = "起点飞行点", TaxiNodeID = 5001 },
+      [2000] = { NodeID = 2000, Kind = "map_anchor", Source = "uimap", SourceID = 20, UiMapID = 20, Name_lang = "目标地图"},
+      [2001] = { NodeID = 2001, Kind = "taxi", Source = "taxi", SourceID = 6001, UiMapID = 20, Name_lang = "目标飞行点", TaxiNodeID = 6001 },
     }, {
       {
         ID = 1,
@@ -1444,7 +1862,31 @@ describe("Navigation API", function()
     }, {
       [10] = { Name_lang = "起点地图", MapType = 3, ParentUiMapID = 0 },
       [20] = { Name_lang = "目标地图", MapType = 3, ParentUiMapID = 0 },
-    }, {})
+    }, {}, {
+      components = {
+        [1] = {
+          ComponentID = 1,
+          DisplayName = "起点组件",
+          MemberNodeIDs = { 1000, 1001 },
+          EntryNodeIDs = { 1000, 1001 },
+          PreferredAnchorNodeID = 1000,
+        },
+        [2] = {
+          ComponentID = 2,
+          DisplayName = "目标组件",
+          MemberNodeIDs = { 2000, 2001 },
+          EntryNodeIDs = { 2000, 2001 },
+          PreferredAnchorNodeID = 2000,
+        },
+      },
+      nodeAssignments = {
+        [1000] = { NodeID = 1000, ComponentID = 1, Role = "anchor" },
+        [1001] = { NodeID = 1001, ComponentID = 1, Role = "departure_connector", VisibleName = "起点飞行点" },
+        [2000] = { NodeID = 2000, ComponentID = 2, Role = "anchor" },
+        [2001] = { NodeID = 2001, ComponentID = 2, Role = "arrival_connector", VisibleName = "目标飞行点" },
+      },
+      localEdges = {},
+    })
 
     local routeResult, errorObject = Toolbox.Navigation.PlanRouteToMapTarget({
       uiMapID = 20,
@@ -1458,16 +1900,8 @@ describe("Navigation API", function()
       knownTaxiNodeByID = buildAllKnownTaxiNodeByID(),
     })
 
-    assert.is_nil(errorObject)
-    assert.is_table(routeResult)
-    assert.is_true(rawPathUsesResolvedEdge(routeResult.rawEdgePath, {
-      source = "taxi",
-      sourceID = 5001,
-      kind = "taxi",
-    }, {
-      source = "taxi",
-      sourceID = 6001,
-      kind = "taxi",
-    }, "taxi"))
+    assert.is_nil(routeResult)
+    assert.equals("NAVIGATION_ERR_NO_ROUTE", errorObject.code)
   end)
 end)
+

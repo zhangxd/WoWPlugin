@@ -261,6 +261,12 @@ class ContractExportIntegrationTests(unittest.TestCase):
 
 
 class NavigationWalkComponentExportTests(unittest.TestCase):
+    @staticmethod
+    def _build_walk_component_ui_map_context(local_scope_by_ui_map_id: dict[int, int]) -> dict[str, dict[int, int]]:
+        return {
+            "local_scope_uimap_id_by_uimap_id": dict(local_scope_by_ui_map_id),
+        }
+
     def test_enrich_walk_components_derives_transport_landing_components_without_override_file(self) -> None:
         sqlite_conn = sqlite3.connect(":memory:")
         synthetic_route_nodes = [
@@ -272,7 +278,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 85,
                 "map_id": 1,
                 "node_name": "奥格瑞玛",
-                "walk_cluster_node_id": 83,
                 "pos_x": None,
                 "pos_y": None,
                 "pos_z": None,
@@ -285,7 +290,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 85,
                 "map_id": 1,
                 "node_name": "乘坐奥格瑞玛的飞艇前往荆棘谷",
-                "walk_cluster_node_id": 83,
                 "pos_x": 1871.02,
                 "pos_y": -4419.94,
                 "pos_z": 135.233,
@@ -298,7 +302,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 85,
                 "map_id": 1,
                 "node_name": "乘坐奥格瑞玛的飞艇前往北风苔原",
-                "walk_cluster_node_id": 83,
                 "pos_x": 1764.4,
                 "pos_y": -4285.97,
                 "pos_z": 133.107,
@@ -326,6 +329,11 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                     "transport_nodes_raw": synthetic_transport_rows,
                 },
             ),
+            mock.patch.object(
+                toolbox_db_export,
+                "build_navigation_uimap_context",
+                return_value=self._build_walk_component_ui_map_context({85: 85}),
+            ),
         ):
             datasets = toolbox_db_export.enrich_navigation_walk_component_datasets(
                 sqlite_conn,
@@ -343,13 +351,25 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
 
         self.assertIn(3249, assignment_by_node_id)
         self.assertIn(3251, assignment_by_node_id)
-        self.assertTrue(any(component_id.endswith("_arrival_3249") for component_id in component_ids))
-        self.assertTrue(any(component_id.endswith("_arrival_3251") for component_id in component_ids))
-        self.assertNotIn("uimap_85_city", component_ids)
+        self.assertEqual({"uimap_85_local"}, component_ids)
+        self.assertEqual("departure_connector", assignment_by_node_id[3249]["role"])
+        self.assertEqual("departure_connector", assignment_by_node_id[3251]["role"])
 
     def test_enrich_walk_components_hides_generic_arrival_portal_without_override_file(self) -> None:
         sqlite_conn = sqlite3.connect(":memory:")
         synthetic_route_nodes = [
+            {
+                "node_id": 83,
+                "node_kind": "map_anchor",
+                "route_source": "uimap",
+                "source_id": 85,
+                "ui_map_id": 85,
+                "map_id": 1,
+                "node_name": "奥格瑞玛",
+                "pos_x": None,
+                "pos_y": None,
+                "pos_z": None,
+            },
             {
                 "node_id": 2805,
                 "node_kind": "portal",
@@ -358,7 +378,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 85,
                 "map_id": 1,
                 "node_name": "探路者大厅",
-                "walk_cluster_node_id": 83,
                 "pos_x": 1445.21,
                 "pos_y": -4499.56,
                 "pos_z": 18.3064,
@@ -371,7 +390,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 85,
                 "map_id": 1,
                 "node_name": "通往奥格瑞玛的传送门",
-                "walk_cluster_node_id": 83,
                 "pos_x": 1445.21,
                 "pos_y": -4499.56,
                 "pos_z": 18.3067,
@@ -398,6 +416,11 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                     "nodes": synthetic_route_nodes,
                     "portal_nodes_raw": synthetic_portal_rows,
                 },
+            ),
+            mock.patch.object(
+                toolbox_db_export,
+                "build_navigation_uimap_context",
+                return_value=self._build_walk_component_ui_map_context({85: 85}),
             ),
         ):
             datasets = toolbox_db_export.enrich_navigation_walk_component_datasets(
@@ -431,7 +454,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 110,
                 "map_id": 530,
                 "node_name": "银月城",
-                "walk_cluster_node_id": 92,
                 "pos_x": None,
                 "pos_y": None,
                 "pos_z": None,
@@ -444,7 +466,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 2393,
                 "map_id": 0,
                 "node_name": "银月城",
-                "walk_cluster_node_id": 1556,
                 "pos_x": None,
                 "pos_y": None,
                 "pos_z": None,
@@ -457,7 +478,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 2443,
                 "map_id": 2907,
                 "node_name": "银月城",
-                "walk_cluster_node_id": 1556,
                 "pos_x": None,
                 "pos_y": None,
                 "pos_z": None,
@@ -470,7 +490,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 2393,
                 "map_id": 0,
                 "node_name": "使用银月城的传送门前往奥格瑞玛",
-                "walk_cluster_node_id": 1556,
                 "pos_x": 1.0,
                 "pos_y": 1.0,
                 "pos_z": 0.0,
@@ -483,7 +502,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 2393,
                 "map_id": 0,
                 "node_name": "通往银月城的传送门",
-                "walk_cluster_node_id": 1556,
                 "pos_x": 1.5,
                 "pos_y": 1.0,
                 "pos_z": 0.0,
@@ -496,7 +514,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 2393,
                 "map_id": 0,
                 "node_name": "通往银月城的传送门",
-                "walk_cluster_node_id": 1556,
                 "pos_x": 2.0,
                 "pos_y": 1.0,
                 "pos_z": 0.0,
@@ -509,7 +526,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 110,
                 "map_id": 530,
                 "node_name": "银月城",
-                "walk_cluster_node_id": 92,
                 "pos_x": 100.0,
                 "pos_y": 100.0,
                 "pos_z": 0.0,
@@ -549,6 +565,17 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
             ),
             mock.patch.object(
                 toolbox_db_export,
+                "build_navigation_uimap_context",
+                return_value=self._build_walk_component_ui_map_context(
+                    {
+                        110: 2393,
+                        2393: 2393,
+                        2443: 2443,
+                    }
+                ),
+            ),
+            mock.patch.object(
+                toolbox_db_export,
                 "query_navigation_walk_component_uimap_semantics",
                 return_value={
                     110: {"ui_map_type": 3, "has_city_area_flag": False},
@@ -570,6 +597,7 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 break
 
         self.assertIsNotNone(matched_component)
+        self.assertEqual("uimap_2393_local", matched_component["component_id"])
         self.assertEqual(1554, matched_component["preferred_anchor_node_id"])
 
     def test_enrich_walk_components_does_not_promote_single_arrival_portal_to_city_component(self) -> None:
@@ -583,7 +611,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 900,
                 "map_id": 1,
                 "node_name": "普通区域",
-                "walk_cluster_node_id": 500,
                 "pos_x": None,
                 "pos_y": None,
                 "pos_z": None,
@@ -596,7 +623,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 900,
                 "map_id": 1,
                 "node_name": "通往普通区域的传送门",
-                "walk_cluster_node_id": 500,
                 "pos_x": 50.0,
                 "pos_y": 50.0,
                 "pos_z": 0.0,
@@ -618,6 +644,11 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                     "nodes": synthetic_route_nodes,
                     "portal_nodes_raw": synthetic_portal_rows,
                 },
+            ),
+            mock.patch.object(
+                toolbox_db_export,
+                "build_navigation_uimap_context",
+                return_value=self._build_walk_component_ui_map_context({900: 900}),
             ),
         ):
             datasets = toolbox_db_export.enrich_navigation_walk_component_datasets(
@@ -644,7 +675,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 100,
                 "map_id": 1,
                 "node_name": "测试城",
-                "walk_cluster_node_id": 1000,
                 "pos_x": None,
                 "pos_y": None,
                 "pos_z": None,
@@ -657,7 +687,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 101,
                 "map_id": 0,
                 "node_name": "测试城",
-                "walk_cluster_node_id": 1001,
                 "pos_x": None,
                 "pos_y": None,
                 "pos_z": None,
@@ -670,7 +699,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 100,
                 "map_id": 1,
                 "node_name": "通往测试城的传送门",
-                "walk_cluster_node_id": 1000,
                 "pos_x": 10.0,
                 "pos_y": 10.0,
                 "pos_z": 0.0,
@@ -683,7 +711,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 101,
                 "map_id": 0,
                 "node_name": "通往测试城的传送门",
-                "walk_cluster_node_id": 1001,
                 "pos_x": 20.0,
                 "pos_y": 20.0,
                 "pos_z": 0.0,
@@ -711,6 +738,16 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                     "portal_nodes_raw": synthetic_portal_rows,
                 },
             ),
+            mock.patch.object(
+                toolbox_db_export,
+                "build_navigation_uimap_context",
+                return_value=self._build_walk_component_ui_map_context(
+                    {
+                        100: 100,
+                        101: 101,
+                    }
+                ),
+            ),
         ):
             datasets = toolbox_db_export.enrich_navigation_walk_component_datasets(
                 sqlite_conn,
@@ -736,7 +773,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 200,
                 "map_id": 1,
                 "node_name": "测试枢纽",
-                "walk_cluster_node_id": 2000,
                 "pos_x": None,
                 "pos_y": None,
                 "pos_z": None,
@@ -749,7 +785,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 201,
                 "map_id": 0,
                 "node_name": "测试枢纽",
-                "walk_cluster_node_id": 2001,
                 "pos_x": None,
                 "pos_y": None,
                 "pos_z": None,
@@ -762,7 +797,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 201,
                 "map_id": 0,
                 "node_name": "使用测试枢纽的传送门前往主城",
-                "walk_cluster_node_id": 2001,
                 "pos_x": 1.0,
                 "pos_y": 1.0,
                 "pos_z": 0.0,
@@ -775,7 +809,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 201,
                 "map_id": 0,
                 "node_name": "通往测试枢纽的传送门",
-                "walk_cluster_node_id": 2001,
                 "pos_x": 1.5,
                 "pos_y": 1.0,
                 "pos_z": 0.0,
@@ -788,7 +821,6 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                 "ui_map_id": 201,
                 "map_id": 0,
                 "node_name": "通往测试枢纽的传送门",
-                "walk_cluster_node_id": 2001,
                 "pos_x": 2.0,
                 "pos_y": 1.0,
                 "pos_z": 0.0,
@@ -820,6 +852,16 @@ class NavigationWalkComponentExportTests(unittest.TestCase):
                     "nodes": synthetic_route_nodes,
                     "portal_nodes_raw": synthetic_portal_rows,
                 },
+            ),
+            mock.patch.object(
+                toolbox_db_export,
+                "build_navigation_uimap_context",
+                return_value=self._build_walk_component_ui_map_context(
+                    {
+                        200: 200,
+                        201: 201,
+                    }
+                ),
             ),
             mock.patch.object(
                 toolbox_db_export,

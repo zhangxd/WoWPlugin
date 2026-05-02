@@ -1,8 +1,8 @@
 {
   "contract": {
     "contract_id": "navigation_walk_components",
-    "schema_version": 1,
-    "summary": "navigation 首批 walk component 正式导出（主城 / 传送门房 / 港口与飞艇塔 / 常用交通落点）",
+    "schema_version": 2,
+    "summary": "navigation 首批 explicit local topology 正式导出（组件 / 节点角色 / localEdges / 显示代理）",
     "source_of_truth": "WoWPlugin",
     "status": "active"
   },
@@ -29,6 +29,7 @@
       "select": [
         "components",
         "node_assignments",
+        "local_edges",
         "display_proxies"
       ],
       "where": [
@@ -39,9 +40,10 @@
       "order_by": [
         "components.component_id ASC",
         "node_assignments.node_id ASC",
+        "local_edges.local_edge_id ASC",
         "display_proxies.node_id ASC"
       ],
-      "row_granularity": "一行代表一个 walk component 组件、节点归属或显示代理记录"
+      "row_granularity": "一行代表一个 walk component 组件、节点归属、显式 localEdge 或显示代理记录"
     },
     "supplemental_sources": [
       {
@@ -69,13 +71,13 @@
   },
   "structure": {
     "root_type": "document",
-    "lua_shape": "Toolbox.Data.NavigationWalkComponents = { schemaVersion, sourceMode, generatedAt, components, nodeAssignments, displayProxies }",
+    "lua_shape": "Toolbox.Data.NavigationWalkComponents = { schemaVersion, sourceMode, generatedAt, components, nodeAssignments, localEdges, displayProxies }",
     "fields": [],
     "document_blocks": [
       {
         "name": "metadata",
         "metadata": {
-          "schemaVersion": 1,
+          "schemaVersion": 2,
           "sourceMode": "live",
           "generatedAt": "@generated_at"
         }
@@ -133,6 +135,36 @@
         }
       },
       {
+        "name": "localEdges",
+        "dataset": "local_edges",
+        "block_type": "map_object",
+        "key_field": "local_edge_id",
+        "dedupe_by": [
+          "local_edge_id"
+        ],
+        "required_fields": [
+          "local_edge_id",
+          "component_id",
+          "from_node_id",
+          "to_node_id",
+          "mode",
+          "step_cost"
+        ],
+        "sort_by": [
+          "local_edge_id"
+        ],
+        "value_template": {
+          "LocalEdgeID": "local_edge_id",
+          "ComponentID": "component_id",
+          "FromNodeID": "from_node_id",
+          "ToNodeID": "to_node_id",
+          "Mode": "mode",
+          "StepCost": "step_cost",
+          "TraversedUiMapIDs": "traversed_ui_map_ids",
+          "TraversedUiMapNames": "traversed_ui_map_names"
+        }
+      },
+      {
         "name": "displayProxies",
         "dataset": "display_proxies",
         "block_type": "map_object",
@@ -165,11 +197,15 @@
     "sort_rules": []
   },
   "versioning": {
-    "current_schema_version": 1,
+    "current_schema_version": 2,
     "change_log": [
       {
         "schema_version": 1,
         "summary": "初始契约版本：导出首批 walk component 组件、节点归属与显示代理"
+      },
+      {
+        "schema_version": 2,
+        "summary": "升级为 explicit local topology：新增 localEdges，并把 connector role 作为 runtime 唯一的本地接线语义"
       }
     ]
   }
