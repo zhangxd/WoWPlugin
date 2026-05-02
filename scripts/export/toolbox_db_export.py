@@ -55,12 +55,6 @@ def default_data_dir() -> Path:
     return default_wowplugin_root() / "Toolbox" / "Data"
 
 
-def default_navigation_walk_component_override_path() -> Path:
-    """返回 walk component 源侧 override 文件路径。"""
-
-    return Path(__file__).resolve().with_name("navigation_walk_component_overrides.json")
-
-
 def to_workspace_relative(path_value: Path) -> Path:
     """尽量返回相对工作区根目录的路径，否则返回原路径。"""
 
@@ -81,22 +75,29 @@ def require(condition: bool, message: str) -> None:
         raise ValueError(message)
 
 
-EXPORT_PERFORMANCE_INDEX_SQL_LIST = (
+EXPORT_PERFORMANCE_INDEX_DEFINITIONS = (
     # spellname 的候选筛选依赖 Name_lang，ID 也常以 CAST(... AS INTEGER) 参与排序与关联。
-    "CREATE INDEX IF NOT EXISTS idx_spellname_name_lang ON spellname(Name_lang)",
-    "CREATE INDEX IF NOT EXISTS idx_spellname_id_integer ON spellname(CAST(ID AS INTEGER))",
+    ("spellname", "CREATE INDEX IF NOT EXISTS idx_spellname_name_lang ON spellname(Name_lang)"),
+    ("spellname", "CREATE INDEX IF NOT EXISTS idx_spellname_id_integer ON spellname(CAST(ID AS INTEGER))"),
     # 导航能力导出会高频按 SpellID / Effect 访问 spelleffect。
-    "CREATE INDEX IF NOT EXISTS idx_spelleffect_spellid_effect_integer ON spelleffect(CAST(SpellID AS INTEGER), CAST(Effect AS INTEGER))",
+    ("spelleffect", "CREATE INDEX IF NOT EXISTS idx_spelleffect_spellid_effect_integer ON spelleffect(CAST(SpellID AS INTEGER), CAST(Effect AS INTEGER))"),
     # 导航能力导出会高频按 Spell / SkillLine 访问 skilllineability。
-    "CREATE INDEX IF NOT EXISTS idx_skilllineability_spell_integer ON skilllineability(CAST(Spell AS INTEGER))",
-    "CREATE INDEX IF NOT EXISTS idx_skilllineability_spell_skillline_integer ON skilllineability(CAST(Spell AS INTEGER), CAST(SkillLine AS INTEGER))",
+    ("skilllineability", "CREATE INDEX IF NOT EXISTS idx_skilllineability_spell_integer ON skilllineability(CAST(Spell AS INTEGER))"),
+    ("skilllineability", "CREATE INDEX IF NOT EXISTS idx_skilllineability_spell_skillline_integer ON skilllineability(CAST(Spell AS INTEGER), CAST(SkillLine AS INTEGER))"),
 )
 
 
 def ensure_export_performance_indexes(sqlite_conn: sqlite3.Connection) -> None:
     """为导出高频查询补齐只读友好的性能索引。"""
 
-    for sql_text in EXPORT_PERFORMANCE_INDEX_SQL_LIST:
+    table_name_rows = sqlite_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+    ).fetchall()
+    available_table_names = {str(row[0]).lower() for row in table_name_rows}
+
+    for table_name, sql_text in EXPORT_PERFORMANCE_INDEX_DEFINITIONS:
+        if str(table_name).lower() not in available_table_names:
+            continue
         sqlite_conn.execute(sql_text)
     sqlite_conn.commit()
 
@@ -2174,18 +2175,10 @@ def enrich_navigation_route_datasets(
     return dataset_rows_by_name
 
 
-def load_navigation_walk_component_override_document() -> dict[str, Any]:
-    """读取 walk component 源侧 override 定义。"""
-
-    override_path = default_navigation_walk_component_override_path()
-    require(override_path.exists(), f"missing navigation walk component override file: {override_path}")
-    return json.loads(override_path.read_text(encoding="utf-8"))
-
-
-def build_navigation_walk_component_route_nodes(
+def build_navigation_walk_component_route_datasets(
     sqlite_conn: sqlite3.Connection,
-) -> list[dict[str, Any]]:
-    """复用 navigation_route_edges 导出链生成 runtime 路线节点。"""
+) -> dict[str, list[dict[str, Any]]]:
+    """复用 navigation_route_edges 导出链生成 walk component 推导所需 datasets。"""
 
     route_contract = load_contract("navigation_route_edges", default_contract_dir())
     _, _, route_datasets, _ = execute_contract_queries(sqlite_conn, route_contract)
@@ -2196,131 +2189,819 @@ def build_navigation_walk_component_route_nodes(
         route_datasets,
         questcompletist_dir=None,
     )
-    return list(enriched_route_datasets.get("nodes", []))
+    return {dataset_name: list(dataset_rows) for dataset_name, dataset_rows in enriched_route_datasets.items()}
 
 
-def build_navigation_walk_component_node_index(
-    route_node_rows: Iterable[Mapping[str, Any]],
-) -> dict[tuple[str, str, int], dict[str, Any]]:
-    """按 Kind + Source + SourceID 为 walk component 建立节点索引。"""
+def normalize_navigation_walk_component_name(raw_name: Any) -> str:
+    """清洗 walk component 推导时使用的文本。"""
 
-    node_index: dict[tuple[str, str, int], dict[str, Any]] = {}
-    for route_node_row in route_node_rows:
-        node_kind = str(route_node_row.get("node_kind") or "")
-        route_source = str(route_node_row.get("route_source") or "")
-        source_id = int(route_node_row.get("source_id") or 0)
-        if node_kind == "" or route_source == "" or source_id <= 0:
+    return str(raw_name or "").strip()
+
+
+def build_navigation_walk_component_name_key(raw_name: Any) -> str:
+    """构建用于松散对齐的名称键。"""
+
+    normalized_name = normalize_navigation_walk_component_name(raw_name)
+    return re.sub(r"\s+", "", normalized_name)
+
+
+def normalize_navigation_walk_component_node(route_node_row: Mapping[str, Any]) -> dict[str, Any]:
+    """把 runtime route node 归一成 walk component 推导结构。"""
+
+    def normalize_position(raw_value: Any) -> float | None:
+        if raw_value in (None, ""):
+            return None
+        return float(raw_value)
+
+    return {
+        "node_id": int(route_node_row.get("node_id") or 0),
+        "kind": str(route_node_row.get("node_kind") or ""),
+        "route_source": str(route_node_row.get("route_source") or ""),
+        "source_id": int(route_node_row.get("source_id") or 0),
+        "ui_map_id": int(route_node_row.get("ui_map_id") or 0),
+        "map_id": int(route_node_row.get("map_id") or 0),
+        "name": normalize_navigation_walk_component_name(route_node_row.get("node_name")),
+        "walk_cluster_node_id": int(route_node_row.get("walk_cluster_node_id") or 0),
+        "taxi_node_id": int(route_node_row.get("taxi_node_id") or 0),
+        "pos_x": normalize_position(route_node_row.get("pos_x")),
+        "pos_y": normalize_position(route_node_row.get("pos_y")),
+        "pos_z": normalize_position(route_node_row.get("pos_z")),
+    }
+
+
+def build_navigation_walk_component_meta_by_source_id(
+    dataset_rows: Iterable[Mapping[str, Any]],
+    source_field: str,
+) -> dict[int, dict[str, Any]]:
+    """按来源 ID 建立原始 portal/transport metadata 索引。"""
+
+    metadata_by_source_id: dict[int, dict[str, Any]] = {}
+    for dataset_row in dataset_rows:
+        source_id = int(dataset_row.get(source_field) or 0)
+        if source_id <= 0:
             continue
-        node_index[(node_kind, route_source, source_id)] = dict(route_node_row)
-    return node_index
+        metadata_by_source_id[source_id] = dict(dataset_row)
+    return metadata_by_source_id
 
 
-def resolve_navigation_walk_component_ref(
-    node_index: Mapping[tuple[str, str, int], Mapping[str, Any]],
-    ref_data: Mapping[str, Any],
-) -> dict[str, Any]:
-    """把 override 中的节点引用解析成 runtime 节点行。"""
+def build_navigation_walk_component_map_anchor_names(route_node_rows: Iterable[Mapping[str, Any]]) -> set[str]:
+    """收集 map anchor 名称键，便于识别房间锚点和技术落点。"""
 
-    node_kind = str(ref_data.get("kind") or "")
-    route_source = str(ref_data.get("source") or "")
-    source_id = int(ref_data.get("source_id") or 0)
-    require(node_kind != "", "walk component ref.kind must be non-empty")
-    require(route_source != "", "walk component ref.source must be non-empty")
-    require(source_id > 0, "walk component ref.source_id must be positive")
-    matched_node = node_index.get((node_kind, route_source, source_id))
-    require(
-        matched_node is not None,
-        f"missing walk component node ref kind={node_kind} source={route_source} source_id={source_id}",
+    name_keys: set[str] = set()
+    for route_node_row in route_node_rows:
+        if str(route_node_row.get("kind") or "") != "map_anchor":
+            continue
+        name_keys.add(build_navigation_walk_component_name_key(route_node_row.get("name")))
+    return name_keys
+
+
+def navigation_walk_component_distance_sq(
+    left_node: Mapping[str, Any],
+    right_node: Mapping[str, Any],
+) -> float:
+    """计算两个节点的平面距离平方。"""
+
+    left_x = left_node.get("pos_x")
+    left_y = left_node.get("pos_y")
+    right_x = right_node.get("pos_x")
+    right_y = right_node.get("pos_y")
+    if left_x is None or left_y is None or right_x is None or right_y is None:
+        return float("inf")
+    delta_x = float(left_x) - float(right_x)
+    delta_y = float(left_y) - float(right_y)
+    return (delta_x * delta_x) + (delta_y * delta_y)
+
+
+def cluster_navigation_walk_component_nodes(
+    node_rows: list[dict[str, Any]],
+    distance_threshold: float,
+) -> list[list[dict[str, Any]]]:
+    """按平面距离把节点聚成局部簇。"""
+
+    if not node_rows:
+        return []
+
+    threshold_sq = distance_threshold * distance_threshold
+    clustered_rows: list[list[dict[str, Any]]] = []
+    remaining_node_ids = {int(node_row["node_id"]) for node_row in node_rows}
+    node_row_by_id = {int(node_row["node_id"]): node_row for node_row in node_rows}
+
+    while remaining_node_ids:
+        seed_node_id = next(iter(remaining_node_ids))
+        pending_node_ids = [seed_node_id]
+        cluster_node_ids: set[int] = set()
+        while pending_node_ids:
+            current_node_id = pending_node_ids.pop()
+            if current_node_id in cluster_node_ids:
+                continue
+            cluster_node_ids.add(current_node_id)
+            current_node = node_row_by_id[current_node_id]
+            for candidate_node_id in list(remaining_node_ids):
+                if candidate_node_id == current_node_id:
+                    continue
+                candidate_node = node_row_by_id[candidate_node_id]
+                if navigation_walk_component_distance_sq(current_node, candidate_node) <= threshold_sq:
+                    pending_node_ids.append(candidate_node_id)
+        remaining_node_ids.difference_update(cluster_node_ids)
+        clustered_rows.append(sorted((node_row_by_id[node_id] for node_id in cluster_node_ids), key=lambda row: int(row["node_id"])))
+
+    return clustered_rows
+
+
+def is_navigation_generic_connector_name(node_name: str) -> bool:
+    """判断节点名是否为通用连接器/技术文案。"""
+
+    normalized_name = normalize_navigation_walk_component_name(node_name)
+    if normalized_name == "":
+        return True
+    generic_prefixes = (
+        "使用",
+        "通往",
+        "进入",
+        "搭乘",
+        "乘坐",
+        "开启",
+        "开往",
+        "离开",
+        "前往",
+        "从",
+        "和码头管理员交谈",
+        "传送到",
     )
-    return dict(matched_node)
+    return normalized_name.startswith(generic_prefixes)
+
+
+def extract_navigation_walk_component_local_landmark(node_name: str) -> str | None:
+    """从 portal/transport 文案里提取本地枢纽名。"""
+
+    normalized_name = normalize_navigation_walk_component_name(node_name)
+    landmark_name = (
+        re.match(r"^使用(.+)的传送(?:门|宝珠)前往.+$", normalized_name)
+        or re.match(r"^从(.+)的传送门前往.+$", normalized_name)
+        or re.match(r"^([^，]+)，通往.+的传送门$", normalized_name)
+        or re.match(r"^(?:搭乘|乘坐)(.+)的船前往.+$", normalized_name)
+        or re.match(r"^(?:搭乘|乘坐)(.+)的飞艇前往.+$", normalized_name)
+    )
+    if landmark_name is None:
+        return None
+    return normalize_navigation_walk_component_name(landmark_name.group(1))
+
+
+def build_navigation_walk_component_city_visible_name(node_row: Mapping[str, Any], component_display_name: str) -> str | None:
+    """为城市组件成员推导玩家可见名。"""
+
+    node_name = normalize_navigation_walk_component_name(node_row.get("name"))
+    node_kind = str(node_row.get("kind") or "")
+    if node_kind == "transport":
+        if node_name == "乘坐地铁":
+            return component_display_name + "地铁入口"
+        if re.match(r"^(?:搭乘|乘坐).+的船前往.+$", node_name):
+            return component_display_name + "港口"
+        return None
+
+    if node_kind != "portal":
+        return None
+
+    arrival_match = re.match(r"^通往(.+)的传送门$", node_name)
+    if arrival_match is not None:
+        return component_display_name + "传送门落点"
+
+    if node_name == component_display_name:
+        return component_display_name + "传送门落点"
+
+    local_landmark = extract_navigation_walk_component_local_landmark(node_name)
+    if local_landmark:
+        if local_landmark == component_display_name:
+            return component_display_name + "传送门落点"
+        return local_landmark
+
+    return None
+
+
+def resolve_navigation_walk_component_node_type(
+    node_row: Mapping[str, Any],
+    portal_metadata_by_source_id: Mapping[int, Mapping[str, Any]],
+    transport_metadata_by_source_id: Mapping[int, Mapping[str, Any]],
+) -> int:
+    """读取 route node 对应原始 waypoint node_type。"""
+
+    node_kind = str(node_row.get("kind") or "")
+    source_id = int(node_row.get("source_id") or 0)
+    if source_id <= 0:
+        return 0
+    if node_kind == "portal":
+        return int(portal_metadata_by_source_id.get(source_id, {}).get("node_type") or 0)
+    if node_kind == "transport":
+        return int(transport_metadata_by_source_id.get(source_id, {}).get("node_type") or 0)
+    return 0
+
+
+def is_navigation_walk_component_arrival_portal_name(
+    node_row: Mapping[str, Any],
+    local_map_display_name: str,
+) -> bool:
+    """判断 portal 节点文案是否像本地落点。"""
+
+    node_name = normalize_navigation_walk_component_name(node_row.get("name"))
+    if node_name == "":
+        return False
+    if node_name == local_map_display_name:
+        return True
+    if re.match(r"^通往.+的传送门$", node_name):
+        return True
+    local_landmark_name = extract_navigation_walk_component_local_landmark(node_name)
+    return local_landmark_name == local_map_display_name
+
+
+def is_navigation_walk_component_city_support_node(
+    node_row: Mapping[str, Any],
+    *,
+    local_map_display_name: str,
+    portal_metadata_by_source_id: Mapping[int, Mapping[str, Any]],
+    transport_metadata_by_source_id: Mapping[int, Mapping[str, Any]],
+) -> bool:
+    """判断节点是否足以证明 duplicate-name 锚点对应真实主城本地支撑。"""
+
+    node_kind = str(node_row.get("kind") or "")
+    node_name = normalize_navigation_walk_component_name(node_row.get("name"))
+    if node_kind == "transport":
+        return build_navigation_walk_component_transport_visible_name(node_row, local_map_display_name) is not None
+
+    if node_kind != "portal":
+        return False
+
+    node_type = resolve_navigation_walk_component_node_type(
+        node_row,
+        portal_metadata_by_source_id,
+        transport_metadata_by_source_id,
+    )
+    if node_type == 1:
+        return True
+    if not is_navigation_generic_connector_name(node_name):
+        return True
+
+    local_landmark_name = extract_navigation_walk_component_local_landmark(node_name)
+    return bool(local_landmark_name and local_landmark_name != local_map_display_name)
+
+
+def choose_navigation_walk_component_city_anchor(
+    grouped_map_anchor_rows: list[dict[str, Any]],
+    candidate_member_nodes: list[dict[str, Any]],
+    portal_metadata_by_source_id: Mapping[int, Mapping[str, Any]],
+    transport_metadata_by_source_id: Mapping[int, Mapping[str, Any]],
+) -> dict[str, Any]:
+    """在重复名称的 map anchor 里优先选本地支撑节点最多的锚点。"""
+
+    candidate_rows: list[tuple[int, int, int, int, dict[str, Any]]] = []
+    for map_anchor_row in grouped_map_anchor_rows:
+        anchor_ui_map_id = int(map_anchor_row["ui_map_id"])
+        local_support_rows = [
+            member_node_row
+            for member_node_row in candidate_member_nodes
+            if member_node_row["kind"] != "map_anchor" and int(member_node_row["ui_map_id"]) == anchor_ui_map_id
+        ]
+        support_count = len(local_support_rows)
+        arrival_portal_count = sum(
+            1
+            for member_node_row in local_support_rows
+            if member_node_row["kind"] == "portal"
+            and resolve_navigation_walk_component_node_type(
+                member_node_row,
+                portal_metadata_by_source_id,
+                transport_metadata_by_source_id,
+            )
+            == 2
+        )
+        transport_count = sum(1 for member_node_row in local_support_rows if member_node_row["kind"] == "transport")
+        candidate_rows.append(
+            (
+                support_count,
+                arrival_portal_count,
+                transport_count,
+                int(map_anchor_row["ui_map_id"]),
+                map_anchor_row,
+            )
+        )
+
+    candidate_rows.sort(key=lambda item: (-item[0], -item[1], -item[2], -item[3], int(item[4]["node_id"])))
+    return dict(candidate_rows[0][4])
+
+
+def query_navigation_walk_component_uimap_semantics(
+    sqlite_conn: sqlite3.Connection,
+) -> dict[int, dict[str, Any]]:
+    """查询 UiMap 的正式语义信号，供 duplicate-name city 兜底收口。"""
+
+    try:
+        query_rows = sqlite_conn.execute(
+            """
+            SELECT
+                CAST(uimap.ID AS INTEGER) AS ui_map_id,
+                CAST(COALESCE(uimap.Type, 0) AS INTEGER) AS ui_map_type,
+                CAST(COALESCE(uimapassignment.AreaID, 0) AS INTEGER) AS area_id,
+                CAST(COALESCE(areatable.Flags_0, 0) AS INTEGER) AS area_flags_0
+            FROM uimap
+            LEFT JOIN uimapassignment
+                ON CAST(uimapassignment.UiMapID AS INTEGER) = CAST(uimap.ID AS INTEGER)
+            LEFT JOIN areatable
+                ON CAST(areatable.ID AS INTEGER) = CAST(uimapassignment.AreaID AS INTEGER)
+            """
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+
+    # AreaTable.Flags_0 的 bit 8 在当前首批主城样本上稳定出现，可作为 no-room city 兜底的正式语义信号。
+    city_area_flag_bit = 1 << 8
+    semantics_by_ui_map_id: dict[int, dict[str, Any]] = {}
+    for query_row in query_rows:
+        ui_map_id = int(query_row["ui_map_id"])
+        semantics_row = semantics_by_ui_map_id.setdefault(
+            ui_map_id,
+            {
+                "ui_map_type": int(query_row["ui_map_type"]),
+                "has_city_area_flag": False,
+            },
+        )
+        if int(query_row["area_flags_0"]) & city_area_flag_bit:
+            semantics_row["has_city_area_flag"] = True
+
+    return semantics_by_ui_map_id
+
+
+def is_navigation_walk_component_city_semantic_uimap(
+    ui_map_id: int,
+    uimap_semantics_by_ui_map_id: Mapping[int, Mapping[str, Any]],
+) -> bool:
+    """判断 UiMap 是否具备 duplicate-name city fallback 所需的正式城市语义。"""
+
+    semantics_row = uimap_semantics_by_ui_map_id.get(int(ui_map_id))
+    if not semantics_row:
+        return False
+    return int(semantics_row.get("ui_map_type") or 0) == 3 and bool(semantics_row.get("has_city_area_flag"))
+
+
+def build_navigation_walk_component_transport_visible_name(
+    node_row: Mapping[str, Any],
+    local_map_display_name: str,
+) -> str | None:
+    """为 transport 落点推导玩家可见名。"""
+
+    node_name = normalize_navigation_walk_component_name(node_row.get("name"))
+    if node_name == "":
+        return None
+    if node_name == "乘坐地铁":
+        return local_map_display_name + "地铁入口"
+
+    local_landmark_name = extract_navigation_walk_component_local_landmark(node_name)
+    if re.match(r"^(?:搭乘|乘坐).+的飞艇前往.+$", node_name):
+        if local_landmark_name and local_landmark_name != local_map_display_name:
+            return local_landmark_name
+        return local_map_display_name + "飞艇塔"
+
+    if re.match(r"^(?:搭乘|乘坐).+的船前往.+$", node_name):
+        if local_landmark_name and local_landmark_name != local_map_display_name and not local_landmark_name.endswith("号"):
+            return local_landmark_name
+        return local_map_display_name + "港口"
+
+    return local_landmark_name
+
+
+def build_navigation_walk_component_arrival_display_name(
+    arrival_cluster_nodes: list[dict[str, Any]],
+    local_map_display_name: str,
+) -> tuple[str, dict[str, Any]]:
+    """为剩余到站 hub 选择显示名与首选锚点。"""
+
+    preferred_anchor_row = arrival_cluster_nodes[0]
+    for arrival_node_row in arrival_cluster_nodes:
+        if arrival_node_row["kind"] == "transport":
+            preferred_anchor_row = arrival_node_row
+            break
+
+    for arrival_node_row in arrival_cluster_nodes:
+        if arrival_node_row["kind"] == "transport":
+            visible_name = build_navigation_walk_component_transport_visible_name(arrival_node_row, local_map_display_name)
+            if visible_name:
+                return visible_name, arrival_node_row
+
+    for arrival_node_row in arrival_cluster_nodes:
+        local_landmark_name = extract_navigation_walk_component_local_landmark(arrival_node_row["name"])
+        if local_landmark_name and local_landmark_name != local_map_display_name:
+            return local_landmark_name, arrival_node_row
+
+    for arrival_node_row in arrival_cluster_nodes:
+        if is_navigation_walk_component_arrival_portal_name(arrival_node_row, local_map_display_name):
+            return local_map_display_name + "传送门落点", arrival_node_row
+
+    return local_map_display_name + "入口", preferred_anchor_row
+
+
+def choose_navigation_walk_component_room_anchor(
+    cluster_nodes: list[dict[str, Any]],
+    map_anchor_name_keys: set[str],
+) -> dict[str, Any] | None:
+    """为 portal 房间簇选一个更像本地锚点的节点。"""
+
+    candidate_rows = []
+    for node_row in cluster_nodes:
+        node_name_key = build_navigation_walk_component_name_key(node_row.get("name"))
+        if is_navigation_generic_connector_name(str(node_row.get("name") or "")):
+            continue
+        average_distance = 0.0
+        distance_count = 0
+        for other_node in cluster_nodes:
+            if int(other_node["node_id"]) == int(node_row["node_id"]):
+                continue
+            distance_sq = navigation_walk_component_distance_sq(node_row, other_node)
+            if distance_sq == float("inf"):
+                continue
+            average_distance += distance_sq
+            distance_count += 1
+        candidate_rows.append(
+            (
+                node_name_key in map_anchor_name_keys,
+                (average_distance / distance_count) if distance_count > 0 else float("inf"),
+                int(node_row["node_id"]),
+                node_row,
+            )
+        )
+
+    if not candidate_rows:
+        return None
+    candidate_rows.sort(key=lambda item: (item[0], item[1], item[2]))
+    return dict(candidate_rows[0][3])
+
+
+def append_navigation_walk_component_rows(
+    component_rows: list[dict[str, Any]],
+    assignment_rows: list[dict[str, Any]],
+    display_proxy_rows: list[dict[str, Any]],
+    *,
+    component_id: str,
+    display_name: str,
+    preferred_anchor_node_id: int,
+    member_nodes: list[dict[str, Any]],
+    entry_node_ids: list[int],
+    assignment_by_node_id: Mapping[int, dict[str, Any]],
+) -> None:
+    """把单个 component 及其 assignment/proxy 写入 datasets。"""
+
+    component_rows.append(
+        {
+            "component_id": component_id,
+            "display_name": display_name,
+            "member_node_ids": sorted(int(node_row["node_id"]) for node_row in member_nodes),
+            "entry_node_ids": sorted({int(node_id) for node_id in entry_node_ids}),
+            "preferred_anchor_node_id": int(preferred_anchor_node_id),
+        }
+    )
+
+    for member_node in member_nodes:
+        node_id = int(member_node["node_id"])
+        assignment_row = dict(assignment_by_node_id[node_id])
+        assignment_rows.append(assignment_row)
+        if assignment_row.get("display_proxy_node_id") is not None and assignment_row.get("visible_name") is not None:
+            display_proxy_rows.append(
+                {
+                    "node_id": node_id,
+                    "component_id": component_id,
+                    "display_proxy_node_id": int(assignment_row["display_proxy_node_id"]),
+                    "visible_name": str(assignment_row["visible_name"]),
+                }
+            )
 
 
 def enrich_navigation_walk_component_datasets(
     sqlite_conn: sqlite3.Connection,
     dataset_rows_by_name: dict[str, list[dict[str, Any]]],
 ) -> dict[str, list[dict[str, Any]]]:
-    """生成 walk component 正式导出 datasets。"""
+    """基于正式来源表自动推导 walk component 正式导出 datasets。"""
 
-    override_document = load_navigation_walk_component_override_document()
-    component_specs = override_document.get("components", [])
-    require(isinstance(component_specs, list) and component_specs, "walk component override must contain components")
+    route_datasets = build_navigation_walk_component_route_datasets(sqlite_conn)
+    route_node_rows = [
+        normalize_navigation_walk_component_node(route_node_row)
+        for route_node_row in route_datasets.get("nodes", [])
+        if int(route_node_row.get("node_id") or 0) > 0
+    ]
+    require(route_node_rows, "navigation_walk_components requires route nodes")
 
-    route_node_rows = build_navigation_walk_component_route_nodes(sqlite_conn)
-    node_index = build_navigation_walk_component_node_index(route_node_rows)
+    portal_metadata_by_source_id = build_navigation_walk_component_meta_by_source_id(
+        route_datasets.get("portal_nodes_raw", []),
+        "waypoint_node_id",
+    )
+    transport_metadata_by_source_id = build_navigation_walk_component_meta_by_source_id(
+        route_datasets.get("transport_nodes_raw", []),
+        "waypoint_node_id",
+    )
+    uimap_semantics_by_ui_map_id = query_navigation_walk_component_uimap_semantics(sqlite_conn)
+
+    map_anchor_rows = [node_row for node_row in route_node_rows if node_row["kind"] == "map_anchor"]
+    map_anchor_name_keys = build_navigation_walk_component_map_anchor_names(map_anchor_rows)
+    map_anchor_rows_by_ui_map_id: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    map_anchor_rows_by_name_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for map_anchor_row in map_anchor_rows:
+        map_anchor_rows_by_ui_map_id[int(map_anchor_row["ui_map_id"])].append(map_anchor_row)
+        map_anchor_rows_by_name_key[build_navigation_walk_component_name_key(map_anchor_row["name"])].append(map_anchor_row)
+
     component_rows: list[dict[str, Any]] = []
     assignment_rows: list[dict[str, Any]] = []
     display_proxy_rows: list[dict[str, Any]] = []
     assigned_node_ids: set[int] = set()
+    consumed_node_ids: set[int] = set()
+    portal_room_count_by_ui_map_id: dict[int, int] = defaultdict(int)
 
-    for component_spec in component_specs:
-        require(isinstance(component_spec, dict), "walk component override component must be object")
-        component_id = str(component_spec.get("component_id") or "").strip()
-        display_name = str(component_spec.get("display_name") or "").strip()
-        require(component_id != "", "walk component component_id must be non-empty")
-        require(display_name != "", f"{component_id}: display_name must be non-empty")
+    portal_nodes_by_group: dict[tuple[int, int], list[dict[str, Any]]] = defaultdict(list)
+    for route_node_row in route_node_rows:
+        if route_node_row["kind"] != "portal":
+            continue
+        portal_nodes_by_group[(int(route_node_row["ui_map_id"]), int(route_node_row["walk_cluster_node_id"]))].append(route_node_row)
 
-        preferred_anchor_row = resolve_navigation_walk_component_ref(node_index, dict(component_spec.get("preferred_anchor") or {}))
-        member_specs = component_spec.get("members", [])
-        entry_specs = component_spec.get("entry_nodes", [])
-        require(isinstance(member_specs, list) and member_specs, f"{component_id}: members must be non-empty array")
-        require(isinstance(entry_specs, list) and entry_specs, f"{component_id}: entry_nodes must be non-empty array")
+    for (ui_map_id, _walk_cluster_node_id), grouped_portal_nodes in portal_nodes_by_group.items():
+        local_map_anchor_rows = map_anchor_rows_by_ui_map_id.get(ui_map_id, [])
+        local_map_display_name = (
+            normalize_navigation_walk_component_name(local_map_anchor_rows[0]["name"])
+            if local_map_anchor_rows
+            else ""
+        )
+        for portal_cluster_nodes in cluster_navigation_walk_component_nodes(grouped_portal_nodes, distance_threshold=90.0):
+            room_anchor_row = choose_navigation_walk_component_room_anchor(portal_cluster_nodes, map_anchor_name_keys)
+            if room_anchor_row is None:
+                continue
 
-        member_node_ids: list[int] = []
-        entry_node_ids: list[int] = []
-        for entry_spec in entry_specs:
-            entry_row = resolve_navigation_walk_component_ref(node_index, dict(entry_spec or {}))
-            entry_node_ids.append(int(entry_row["node_id"]))
+            portal_type_one_rows = [
+                portal_node_row
+                for portal_node_row in portal_cluster_nodes
+                if resolve_navigation_walk_component_node_type(
+                    portal_node_row,
+                    portal_metadata_by_source_id,
+                    transport_metadata_by_source_id,
+                )
+                == 1
+            ]
+            generic_portal_rows = [
+                portal_node_row
+                for portal_node_row in portal_cluster_nodes
+                if is_navigation_generic_connector_name(str(portal_node_row["name"]))
+            ]
+            generic_arrival_proxy_rows = [
+                portal_node_row
+                for portal_node_row in generic_portal_rows
+                if resolve_navigation_walk_component_node_type(
+                    portal_node_row,
+                    portal_metadata_by_source_id,
+                    transport_metadata_by_source_id,
+                )
+                == 2
+                and re.match(r"^通往.+的传送门$", normalize_navigation_walk_component_name(portal_node_row["name"]))
+            ]
+            has_small_arrival_proxy_pair = (
+                len(portal_cluster_nodes) == 2
+                and len(generic_arrival_proxy_rows) == 1
+                and len(portal_type_one_rows) >= 1
+                and navigation_walk_component_distance_sq(generic_arrival_proxy_rows[0], room_anchor_row) <= 9.0
+            )
+            has_portal_room_cluster = len(generic_portal_rows) >= 2 and len(portal_type_one_rows) >= 2
+            if not (has_small_arrival_proxy_pair or has_portal_room_cluster):
+                continue
 
-        for member_spec in member_specs:
-            require(isinstance(member_spec, dict), f"{component_id}: member must be object")
-            member_row = resolve_navigation_walk_component_ref(node_index, member_spec)
-            member_node_id = int(member_row["node_id"])
-            require(member_node_id not in assigned_node_ids, f"{component_id}: duplicate node assignment for NodeID {member_node_id}")
-            assigned_node_ids.add(member_node_id)
-            member_node_ids.append(member_node_id)
+            local_map_display_name = (
+                normalize_navigation_walk_component_name(local_map_anchor_rows[0]["name"])
+                if local_map_anchor_rows
+                else normalize_navigation_walk_component_name(room_anchor_row["name"])
+            )
+            room_display_name = (
+                local_map_display_name + "传送门房"
+                if build_navigation_walk_component_name_key(room_anchor_row["name"]) != build_navigation_walk_component_name_key(local_map_display_name)
+                else normalize_navigation_walk_component_name(room_anchor_row["name"])
+            )
+            component_id = f"uimap_{ui_map_id}_portal_room_{int(room_anchor_row['node_id'])}"
+            assignment_by_node_id: dict[int, dict[str, Any]] = {}
+            entry_node_ids = [int(portal_node_row["node_id"]) for portal_node_row in portal_cluster_nodes]
 
-            role_text = str(member_spec.get("role") or "").strip()
-            require(role_text != "", f"{component_id}: member role must be non-empty")
-            hidden_in_semantic_chain = bool(member_spec.get("hidden_in_semantic_chain") is True)
-            visible_name = str(member_spec.get("visible_name") or "").strip() or None
-            display_proxy_node_id = None
-            display_proxy_ref = member_spec.get("display_proxy")
-            if isinstance(display_proxy_ref, dict):
-                display_proxy_row = resolve_navigation_walk_component_ref(node_index, display_proxy_ref)
-                display_proxy_node_id = int(display_proxy_row["node_id"])
-                if visible_name is None:
-                    visible_name = str(display_proxy_row.get("node_name") or "").strip() or None
+            for portal_node_row in portal_cluster_nodes:
+                portal_node_id = int(portal_node_row["node_id"])
+                require(portal_node_id not in assigned_node_ids, f"duplicate walk component assignment for NodeID {portal_node_id}")
+                assigned_node_ids.add(portal_node_id)
+                consumed_node_ids.add(portal_node_id)
 
-            assignment_rows.append(
-                {
-                    "node_id": member_node_id,
+                assignment_row = {
+                    "node_id": portal_node_id,
                     "component_id": component_id,
-                    "role": role_text,
-                    "hidden_in_semantic_chain": hidden_in_semantic_chain,
-                    "display_proxy_node_id": display_proxy_node_id,
-                    "visible_name": visible_name,
+                    "role": "hub",
+                    "hidden_in_semantic_chain": False,
+                    "display_proxy_node_id": None,
+                    "visible_name": None,
                 }
+                if portal_node_id == int(room_anchor_row["node_id"]):
+                    assignment_row["role"] = "anchor"
+                    if normalize_navigation_walk_component_name(portal_node_row["name"]) != room_display_name:
+                        assignment_row["visible_name"] = normalize_navigation_walk_component_name(portal_node_row["name"])
+                elif (
+                    resolve_navigation_walk_component_node_type(
+                        portal_node_row,
+                        portal_metadata_by_source_id,
+                        transport_metadata_by_source_id,
+                    )
+                    == 2
+                    and
+                    build_navigation_walk_component_name_key(portal_node_row["name"]).startswith("通往")
+                    and navigation_walk_component_distance_sq(portal_node_row, room_anchor_row) <= 9.0
+                ):
+                    assignment_row["role"] = "technical"
+                    assignment_row["hidden_in_semantic_chain"] = True
+                    assignment_row["display_proxy_node_id"] = int(room_anchor_row["node_id"])
+                    assignment_row["visible_name"] = room_display_name
+                assignment_by_node_id[portal_node_id] = assignment_row
+
+            append_navigation_walk_component_rows(
+                component_rows,
+                assignment_rows,
+                display_proxy_rows,
+                component_id=component_id,
+                display_name=room_display_name,
+                preferred_anchor_node_id=int(room_anchor_row["node_id"]),
+                member_nodes=portal_cluster_nodes,
+                entry_node_ids=entry_node_ids,
+                assignment_by_node_id=assignment_by_node_id,
+            )
+            portal_room_count_by_ui_map_id[ui_map_id] += 1
+
+    for name_key, grouped_map_anchor_rows in map_anchor_rows_by_name_key.items():
+        candidate_ui_map_ids = {int(map_anchor_row["ui_map_id"]) for map_anchor_row in grouped_map_anchor_rows}
+        candidate_member_nodes = list(grouped_map_anchor_rows)
+        for route_node_row in route_node_rows:
+            route_node_id = int(route_node_row["node_id"])
+            if route_node_id in consumed_node_ids or route_node_row["kind"] == "map_anchor":
+                continue
+            if int(route_node_row["ui_map_id"]) not in candidate_ui_map_ids:
+                continue
+            if route_node_row["kind"] not in {"portal", "transport"}:
+                continue
+            candidate_member_nodes.append(route_node_row)
+
+        remaining_non_anchor_nodes = [member_node_row for member_node_row in candidate_member_nodes if member_node_row["kind"] != "map_anchor"]
+        if not remaining_non_anchor_nodes:
+            continue
+
+        room_component_count = sum(portal_room_count_by_ui_map_id.get(ui_map_id, 0) for ui_map_id in candidate_ui_map_ids)
+        preferred_anchor_row = choose_navigation_walk_component_city_anchor(
+            grouped_map_anchor_rows,
+            candidate_member_nodes,
+            portal_metadata_by_source_id,
+            transport_metadata_by_source_id,
+        )
+        if room_component_count < 1:
+            preferred_ui_map_id = int(preferred_anchor_row["ui_map_id"])
+            component_display_name = normalize_navigation_walk_component_name(preferred_anchor_row["name"])
+            local_support_rows = [
+                member_node_row
+                for member_node_row in remaining_non_anchor_nodes
+                if int(member_node_row["ui_map_id"]) == preferred_ui_map_id
+            ]
+            local_arrival_portal_count = sum(
+                1
+                for member_node_row in local_support_rows
+                if member_node_row["kind"] == "portal"
+                and resolve_navigation_walk_component_node_type(
+                    member_node_row,
+                    portal_metadata_by_source_id,
+                    transport_metadata_by_source_id,
+                )
+                == 2
+            )
+            local_city_support_count = sum(
+                1
+                for member_node_row in local_support_rows
+                if is_navigation_walk_component_city_support_node(
+                    member_node_row,
+                    local_map_display_name=component_display_name,
+                    portal_metadata_by_source_id=portal_metadata_by_source_id,
+                    transport_metadata_by_source_id=transport_metadata_by_source_id,
+                )
+            )
+            preferred_anchor_has_city_semantics = is_navigation_walk_component_city_semantic_uimap(
+                preferred_ui_map_id,
+                uimap_semantics_by_ui_map_id,
+            )
+            if not (
+                len(grouped_map_anchor_rows) >= 2
+                and local_arrival_portal_count >= 2
+                and local_city_support_count >= 1
+                and preferred_anchor_has_city_semantics
+            ):
+                continue
+
+        component_display_name = normalize_navigation_walk_component_name(preferred_anchor_row["name"])
+        component_id = f"uimap_{int(preferred_anchor_row['ui_map_id'])}_city"
+        assignment_by_node_id: dict[int, dict[str, Any]] = {}
+        entry_node_ids = [int(node_row["node_id"]) for node_row in candidate_member_nodes]
+
+        for member_node_row in candidate_member_nodes:
+            member_node_id = int(member_node_row["node_id"])
+            require(member_node_id not in assigned_node_ids, f"duplicate walk component assignment for NodeID {member_node_id}")
+            assigned_node_ids.add(member_node_id)
+            if member_node_row["kind"] != "map_anchor":
+                consumed_node_ids.add(member_node_id)
+
+            assignment_row = {
+                "node_id": member_node_id,
+                "component_id": component_id,
+                "role": "hub",
+                "hidden_in_semantic_chain": False,
+                "display_proxy_node_id": None,
+                "visible_name": None,
+            }
+            if member_node_id == int(preferred_anchor_row["node_id"]):
+                assignment_row["role"] = "anchor"
+            else:
+                assignment_row["visible_name"] = build_navigation_walk_component_city_visible_name(member_node_row, component_display_name)
+            assignment_by_node_id[member_node_id] = assignment_row
+
+        append_navigation_walk_component_rows(
+            component_rows,
+            assignment_rows,
+            display_proxy_rows,
+            component_id=component_id,
+            display_name=component_display_name,
+            preferred_anchor_node_id=int(preferred_anchor_row["node_id"]),
+            member_nodes=candidate_member_nodes,
+                entry_node_ids=entry_node_ids,
+                assignment_by_node_id=assignment_by_node_id,
             )
 
-            if display_proxy_node_id is not None and visible_name is not None:
-                display_proxy_rows.append(
-                    {
-                        "node_id": member_node_id,
-                        "component_id": component_id,
-                        "display_proxy_node_id": display_proxy_node_id,
-                        "visible_name": visible_name,
-                    }
-                )
+    remaining_arrival_nodes_by_group: dict[tuple[int, int], list[dict[str, Any]]] = defaultdict(list)
+    for route_node_row in route_node_rows:
+        node_id = int(route_node_row["node_id"])
+        if node_id in consumed_node_ids:
+            continue
+        if route_node_row["kind"] not in {"portal", "transport"}:
+            continue
+        if route_node_row["kind"] == "portal" and resolve_navigation_walk_component_node_type(
+            route_node_row,
+            portal_metadata_by_source_id,
+            transport_metadata_by_source_id,
+        ) != 2:
+            continue
+        remaining_arrival_nodes_by_group[
+            (int(route_node_row["ui_map_id"]), int(route_node_row["walk_cluster_node_id"]))
+        ].append(route_node_row)
 
-        component_rows.append(
-            {
-                "component_id": component_id,
-                "display_name": display_name,
-                "member_node_ids": sorted(member_node_ids),
-                "entry_node_ids": sorted(set(entry_node_ids)),
-                "preferred_anchor_node_id": int(preferred_anchor_row["node_id"]),
-            }
-        )
+    for (ui_map_id, _walk_cluster_node_id), grouped_arrival_nodes in remaining_arrival_nodes_by_group.items():
+        local_map_anchor_rows = map_anchor_rows_by_ui_map_id.get(ui_map_id, [])
+        if not local_map_anchor_rows:
+            continue
+        local_map_display_name = normalize_navigation_walk_component_name(local_map_anchor_rows[0]["name"])
+
+        for arrival_cluster_nodes in cluster_navigation_walk_component_nodes(grouped_arrival_nodes, distance_threshold=35.0):
+            if not arrival_cluster_nodes:
+                continue
+
+            if len(arrival_cluster_nodes) < 2 and arrival_cluster_nodes[0]["kind"] == "portal":
+                if not is_navigation_walk_component_arrival_portal_name(arrival_cluster_nodes[0], local_map_display_name):
+                    continue
+
+            component_display_name, preferred_anchor_row = build_navigation_walk_component_arrival_display_name(
+                arrival_cluster_nodes,
+                local_map_display_name,
+            )
+            component_id = f"uimap_{ui_map_id}_arrival_{int(preferred_anchor_row['node_id'])}"
+            component_member_nodes = list(arrival_cluster_nodes)
+            assignment_by_node_id: dict[int, dict[str, Any]] = {}
+            entry_node_ids = [int(node_row["node_id"]) for node_row in arrival_cluster_nodes]
+
+            for member_node_row in component_member_nodes:
+                member_node_id = int(member_node_row["node_id"])
+                require(member_node_id not in assigned_node_ids, f"duplicate walk component assignment for NodeID {member_node_id}")
+                assigned_node_ids.add(member_node_id)
+                consumed_node_ids.add(member_node_id)
+
+                assignment_row = {
+                    "node_id": member_node_id,
+                    "component_id": component_id,
+                    "role": "hub",
+                    "hidden_in_semantic_chain": False,
+                    "display_proxy_node_id": None,
+                    "visible_name": None,
+                }
+                if member_node_id == int(preferred_anchor_row["node_id"]):
+                    assignment_row["role"] = "anchor"
+                    if normalize_navigation_walk_component_name(member_node_row["name"]) != component_display_name:
+                        assignment_row["visible_name"] = component_display_name
+                else:
+                    assignment_row["visible_name"] = component_display_name
+                assignment_by_node_id[member_node_id] = assignment_row
+
+            append_navigation_walk_component_rows(
+                component_rows,
+                assignment_rows,
+                display_proxy_rows,
+                component_id=component_id,
+                display_name=component_display_name,
+                preferred_anchor_node_id=int(preferred_anchor_row["node_id"]),
+                member_nodes=component_member_nodes,
+                entry_node_ids=entry_node_ids,
+                assignment_by_node_id=assignment_by_node_id,
+            )
 
     dataset_rows_by_name["components"] = component_rows
     dataset_rows_by_name["node_assignments"] = assignment_rows

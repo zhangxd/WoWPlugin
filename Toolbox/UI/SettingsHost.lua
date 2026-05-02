@@ -246,6 +246,122 @@ local function setControlLabelText(controlObject, textValue)
   end
 end
 
+local function getChoiceCurrentValue(rowOptions, choiceList)
+  local currentValue = type(rowOptions.getValue) == "function" and rowOptions.getValue() or rowOptions.value -- 当前取值
+  local normalizedValue, wasNormalized = normalizeChoiceValue(currentValue, choiceList, rowOptions.defaultValue) -- 归一后的取值
+  if wasNormalized and normalizedValue ~= nil and type(rowOptions.setValue) == "function" then
+    rowOptions.setValue(normalizedValue)
+  end
+  return normalizedValue
+end
+
+local function findChoiceIndex(choiceList, currentValue)
+  for indexNumber, optionObject in ipairs(choiceList or {}) do
+    if optionObject and optionObject.value == currentValue then
+      return indexNumber
+    end
+  end
+  return nil
+end
+
+local function getChoiceOption(choiceList, currentValue)
+  local currentIndex = findChoiceIndex(choiceList, currentValue) or 1 -- 当前索引
+  return choiceList[currentIndex], currentIndex
+end
+
+local function setDropdownDisplayText(dropdownButton, textValue)
+  if not dropdownButton then
+    return
+  end
+  if type(dropdownButton.SetDefaultText) == "function" then
+    dropdownButton:SetDefaultText(textValue or "")
+  end
+  if type(dropdownButton.OverrideText) == "function" then
+    dropdownButton:OverrideText(textValue or "")
+  elseif type(dropdownButton.SetText) == "function" then
+    dropdownButton:SetText(textValue or "")
+  end
+end
+
+local function ensureDropdownWithButtonsControl(parentFrame, dropdownWidth)
+  local widthValue = tonumber(dropdownWidth) or 170 -- 中间下拉框宽度
+  local controlObject = nil -- 下拉+步进组合控件
+  local createdWithTemplate = false -- 是否成功使用原生模板
+  local okFlag, frameObject = pcall(function()
+    return CreateFrame("Frame", nil, parentFrame, "SettingsDropdownWithButtonsTemplate")
+  end)
+  if okFlag and frameObject then
+    controlObject = frameObject
+    createdWithTemplate = true
+  else
+    controlObject = CreateFrame("Frame", nil, parentFrame)
+  end
+
+  controlObject.templateName = createdWithTemplate and "SettingsDropdownWithButtonsTemplate" or controlObject.templateName
+  controlObject:SetSize(widthValue + 70, 32)
+
+  if not controlObject.Dropdown then
+    local dropdownButton = CreateFrame("Button", nil, controlObject) -- 兜底下拉按钮
+    dropdownButton:RegisterForClicks("LeftButtonUp")
+    controlObject.Dropdown = dropdownButton
+  end
+  if not controlObject.IncrementButton then
+    local incrementButton = CreateFrame("Button", nil, controlObject) -- 兜底右箭头
+    incrementButton:RegisterForClicks("LeftButtonUp")
+    controlObject.IncrementButton = incrementButton
+  end
+  if not controlObject.DecrementButton then
+    local decrementButton = CreateFrame("Button", nil, controlObject) -- 兜底左箭头
+    decrementButton:RegisterForClicks("LeftButtonUp")
+    controlObject.DecrementButton = decrementButton
+  end
+
+  if controlObject.Dropdown.ClearAllPoints and controlObject.Dropdown.SetPoint then
+    controlObject.Dropdown:ClearAllPoints()
+    controlObject.Dropdown:SetPoint("LEFT", controlObject, "LEFT", 32, 0)
+  end
+  if controlObject.Dropdown.SetWidth then
+    controlObject.Dropdown:SetWidth(widthValue)
+  end
+  if controlObject.Dropdown.SetHeight then
+    controlObject.Dropdown:SetHeight(28)
+  end
+
+  if controlObject.IncrementButton.ClearAllPoints and controlObject.IncrementButton.SetPoint then
+    controlObject.IncrementButton:ClearAllPoints()
+    controlObject.IncrementButton:SetPoint("LEFT", controlObject.Dropdown, "RIGHT", 4, 0)
+  end
+  if controlObject.DecrementButton.ClearAllPoints and controlObject.DecrementButton.SetPoint then
+    controlObject.DecrementButton:ClearAllPoints()
+    controlObject.DecrementButton:SetPoint("RIGHT", controlObject.Dropdown, "LEFT", -5, 0)
+  end
+  if controlObject.IncrementButton.SetSize then
+    controlObject.IncrementButton:SetSize(28, 28)
+  end
+  if controlObject.DecrementButton.SetSize then
+    controlObject.DecrementButton:SetSize(28, 28)
+  end
+
+  if type(controlObject.SetSteppersShown) ~= "function" then
+    function controlObject:SetSteppersShown(isShown)
+      setObjectShown(self.IncrementButton, isShown ~= false)
+      setObjectShown(self.DecrementButton, isShown ~= false)
+    end
+  end
+  if type(controlObject.SetSteppersEnabled) ~= "function" then
+    function controlObject:SetSteppersEnabled(canDecrement, canIncrement)
+      if self.DecrementButton and self.DecrementButton.SetEnabled then
+        self.DecrementButton:SetEnabled(canDecrement == true)
+      end
+      if self.IncrementButton and self.IncrementButton.SetEnabled then
+        self.IncrementButton:SetEnabled(canIncrement == true)
+      end
+    end
+  end
+
+  return controlObject
+end
+
 local function createSurfaceControl(parentFrame, frameType)
   local controlObject = CreateFrame(frameType or "Button", nil, parentFrame) -- 通用表面控件
   local borderTexture = controlObject:CreateTexture(nil, "BORDER") -- 外边框贴图
@@ -316,6 +432,13 @@ local function applySurfaceControlState(controlObject, isEnabled, isSelected, is
 end
 
 local function createCheckboxControl(parentFrame)
+  local okFlag, nativeCheckbox = pcall(function()
+    return CreateFrame("CheckButton", nil, parentFrame, "SettingsCheckboxTemplate")
+  end)
+  if okFlag and nativeCheckbox then
+    return nativeCheckbox
+  end
+
   local checkButton = CreateFrame("CheckButton", nil, parentFrame) -- 自绘勾选控件
   checkButton:RegisterForClicks("LeftButtonUp")
 
@@ -486,8 +609,8 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
     end
 
     local stateButton = createCheckboxControl(self) -- 开关勾选控件
-    stateButton:SetSize(22, 22)
-    stateButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, rowTop - 2)
+    stateButton:SetSize(30, 29)
+    stateButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, rowTop - 5)
 
     local function getValue()
       if type(rowOptions.getValue) == "function" then
@@ -535,7 +658,7 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
     local rowOptions = options or {} -- 单值选择配置
     local choiceList = getChoiceOptions(rowOptions.options) -- 选项列表
     local rowTop = self._toolboxCursorY -- 行顶部位置
-    local rowHeight = 24 -- 当前行高度
+    local rowHeight = 28 -- 当前行高度
 
     local titleLabel = self:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 行标题
     titleLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop)
@@ -550,65 +673,107 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
       descriptionLabel:SetWidth(SETTINGS_ROW_TEXT_WIDTH)
       descriptionLabel:SetJustifyH("LEFT")
       descriptionLabel:SetText(rowOptions.description)
-      rowHeight = 18 + math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8))
+      rowHeight = math.max(28, 18 + math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8)))
     end
 
-    local buttonList = {} -- 选项按钮列表
-    local currentLeft = SETTINGS_ROW_CONTROL_LEFT -- 当前按钮起点
-    for _, optionObject in ipairs(choiceList) do
-      local choiceButton = createSurfaceControl(self, "Button") -- 选项按钮
-      choiceButton:SetSize(rowOptions.buttonWidth or SETTINGS_ROW_BUTTON_WIDTH, 22)
-      choiceButton:SetPoint("TOPLEFT", self, "TOPLEFT", currentLeft, rowTop - 2)
-      choiceButton._toolboxValue = optionObject.value
-      choiceButton._toolboxValueLabel = optionObject.label or tostring(optionObject.value)
-      if choiceButton._toolboxLabel then
-        choiceButton._toolboxLabel:SetText(choiceButton._toolboxValueLabel)
-      end
-      choiceButton:SetScript("OnClick", function()
-        if type(rowOptions.setValue) == "function" then
-          rowOptions.setValue(optionObject.value)
-        end
-        if type(rowOptions.afterChange) == "function" then
-          rowOptions.afterChange(optionObject.value)
-        end
-        triggerBoxRefresh(self, rowOptions)
-      end)
-      buttonList[#buttonList + 1] = choiceButton
-      currentLeft = currentLeft + (rowOptions.buttonWidth or SETTINGS_ROW_BUTTON_WIDTH) + 6
-    end
+    local dropdownControl = ensureDropdownWithButtonsControl(self, rowOptions.buttonWidth or 160) -- 原生箭头+下拉控件
+    dropdownControl:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT - 28, rowTop - 6)
 
     local function refresh()
-      local currentValue = type(rowOptions.getValue) == "function" and rowOptions.getValue() or rowOptions.value -- 当前取值
-      local normalizedValue, wasNormalized = normalizeChoiceValue(currentValue, choiceList, rowOptions.defaultValue)
-      if wasNormalized and normalizedValue ~= nil and type(rowOptions.setValue) == "function" then
-        rowOptions.setValue(normalizedValue)
-        currentValue = normalizedValue
-      else
-        currentValue = normalizedValue
-      end
-
+      local currentValue = getChoiceCurrentValue(rowOptions, choiceList) -- 当前归一后的取值
+      local currentOption, currentIndex = getChoiceOption(choiceList, currentValue) -- 当前选项与索引
       local isEnabled = self:_IsRowEnabled(rowOptions) -- 当前行启用态
-      for _, choiceButton in ipairs(buttonList) do
-        local isSelected = choiceButton._toolboxValue == currentValue -- 是否当前选中
-        choiceButton:SetEnabled(isEnabled and not isSelected)
-        setControlLabelText(choiceButton, tostring(choiceButton._toolboxValueLabel or ""))
-        applySurfaceControlState(choiceButton, isEnabled, isSelected, false)
+      local currentLabel = currentOption and (currentOption.label or tostring(currentOption.value)) or "" -- 当前显示文本
+      dropdownControl._toolboxCurrentLabel = currentLabel
+      if dropdownControl.Dropdown and dropdownControl.Dropdown.SetEnabled then
+        dropdownControl.Dropdown:SetEnabled(isEnabled)
+      end
+      setDropdownDisplayText(dropdownControl.Dropdown, currentLabel)
+
+      local canDecrement = isEnabled and currentIndex and currentIndex > 1 or false -- 左箭头是否可用
+      local canIncrement = isEnabled and currentIndex and currentIndex < #choiceList or false -- 右箭头是否可用
+      dropdownControl:SetSteppersShown(#choiceList > 1)
+      dropdownControl:SetSteppersEnabled(canDecrement == true, canIncrement == true)
+
+      if dropdownControl.IncrementButton and dropdownControl.IncrementButton.SetEnabled then
+        dropdownControl.IncrementButton:SetEnabled(canIncrement == true)
+      end
+      if dropdownControl.DecrementButton and dropdownControl.DecrementButton.SetEnabled then
+        dropdownControl.DecrementButton:SetEnabled(canDecrement == true)
       end
       setFontStringTextColor(titleLabel, isEnabled)
       setFontStringTextColor(descriptionLabel, isEnabled)
     end
 
+    local function commitValueByIndex(indexNumber)
+      local optionObject = choiceList[indexNumber] -- 目标选项
+      if not optionObject then
+        return
+      end
+      if type(rowOptions.setValue) == "function" then
+        rowOptions.setValue(optionObject.value)
+      end
+      if type(rowOptions.afterChange) == "function" then
+        rowOptions.afterChange(optionObject.value)
+      end
+      triggerBoxRefresh(self, rowOptions)
+    end
+
+    if dropdownControl.IncrementButton then
+      dropdownControl.IncrementButton:SetScript("OnClick", function()
+        local currentValue = getChoiceCurrentValue(rowOptions, choiceList) -- 当前归一后的取值
+        local currentIndex = findChoiceIndex(choiceList, currentValue) or 1 -- 当前索引
+        if currentIndex < #choiceList then
+          commitValueByIndex(currentIndex + 1)
+        end
+      end)
+    end
+    if dropdownControl.DecrementButton then
+      dropdownControl.DecrementButton:SetScript("OnClick", function()
+        local currentValue = getChoiceCurrentValue(rowOptions, choiceList) -- 当前归一后的取值
+        local currentIndex = findChoiceIndex(choiceList, currentValue) or 1 -- 当前索引
+        if currentIndex > 1 then
+          commitValueByIndex(currentIndex - 1)
+        end
+      end)
+    end
+
+    if dropdownControl.Dropdown and type(dropdownControl.Dropdown.SetupMenu) == "function" then
+      dropdownControl.Dropdown:SetupMenu(function(_, rootDescription)
+        for _, optionObject in ipairs(choiceList) do
+          local optionValue = optionObject.value -- 菜单项值
+          local optionLabel = optionObject.label or tostring(optionValue) -- 菜单项文本
+          rootDescription:CreateRadio(
+            optionLabel,
+            function()
+              return getChoiceCurrentValue(rowOptions, choiceList) == optionValue
+            end,
+            function()
+              if type(rowOptions.setValue) == "function" then
+                rowOptions.setValue(optionValue)
+              end
+              if type(rowOptions.afterChange) == "function" then
+                rowOptions.afterChange(optionValue)
+              end
+              triggerBoxRefresh(self, rowOptions)
+            end,
+            optionValue
+          )
+        end
+      end)
+    end
+
     self:_RegisterRefresher(refresh)
     refresh()
     self:_ConsumeHeight(rowHeight, rowOptions.gap or 10)
-    return buttonList
+    return dropdownControl
   end
 
   function boxFrame:AddMenuRow(options)
     local rowOptions = options or {} -- 菜单行配置
     local choiceList = getChoiceOptions(rowOptions.options) -- 菜单选项
     local rowTop = self._toolboxCursorY -- 行顶部位置
-    local rowHeight = 24 -- 当前行高度
+    local rowHeight = 28 -- 当前行高度
 
     local titleLabel = self:CreateFontString(nil, "OVERLAY", "GameFontNormal") -- 行标题
     titleLabel:SetPoint("TOPLEFT", self, "TOPLEFT", 0, rowTop)
@@ -623,138 +788,88 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
       descriptionLabel:SetWidth(SETTINGS_ROW_TEXT_WIDTH)
       descriptionLabel:SetJustifyH("LEFT")
       descriptionLabel:SetText(rowOptions.description)
-      rowHeight = 18 + math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8))
+      rowHeight = math.max(28, 18 + math.max(18, math.ceil((descriptionLabel:GetStringHeight() or 0) + 8)))
     end
 
-    local menuButton = createSurfaceControl(self, "Button") -- 菜单按钮
-    menuButton:SetSize(rowOptions.buttonWidth or 170, 22)
-    menuButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, rowTop - 2)
-    local menuArrow = menuButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 菜单箭头文本
-    menuArrow:SetPoint("RIGHT", menuButton, "RIGHT", -8, 0)
-    menuArrow:SetText("v")
-    menuButton._toolboxArrow = menuArrow
-    if menuButton._toolboxLabel then
-      menuButton._toolboxLabel:ClearAllPoints()
-      menuButton._toolboxLabel:SetPoint("LEFT", menuButton, "LEFT", 10, 0)
-      menuButton._toolboxLabel:SetPoint("RIGHT", menuArrow, "LEFT", -6, 0)
-      menuButton._toolboxLabel:SetJustifyH("LEFT")
-    end
-    local popupFrame = CreateFrame("Frame", nil, self) -- 下拉菜单弹层
-    popupFrame:SetPoint("TOPLEFT", menuButton, "BOTTOMLEFT", 0, -4)
-    popupFrame:SetSize(rowOptions.buttonWidth or 170, math.max(1, #choiceList) * 24)
-    popupFrame:SetFrameStrata("DIALOG")
-    if popupFrame.SetFrameLevel and self.GetFrameLevel then
-      popupFrame:SetFrameLevel((self:GetFrameLevel() or 0) + 20)
-    end
-    local popupBorder = popupFrame:CreateTexture(nil, "BORDER") -- 弹层边框贴图
-    popupBorder:SetAllPoints()
-    popupBorder:SetColorTexture(0.27, 0.31, 0.4, 1)
-    local popupBackground = popupFrame:CreateTexture(nil, "BACKGROUND") -- 弹层背景贴图
-    anchorInset(popupBackground, popupFrame, 1)
-    popupBackground:SetColorTexture(0.07, 0.09, 0.14, 0.98)
-    popupFrame:Hide()
-    menuButton._toolboxPopupFrame = popupFrame
-    local optionButtonList = {} -- 下拉选项按钮列表
-
-    local function findCurrentIndex(currentValue)
-      for indexNumber, optionObject in ipairs(choiceList) do
-        if optionObject and optionObject.value == currentValue then
-          return indexNumber
-        end
-      end
-      return 1
-    end
-
-    local function hidePopup()
-      popupFrame:Hide()
-    end
-
-    local function ensureOptionButtons()
-      if #optionButtonList > 0 then
-        return
-      end
-      local optionTop = 0 -- 当前选项顶部
-      for _, optionObject in ipairs(choiceList) do
-        local optionButton = createSurfaceControl(popupFrame, "Button") -- 菜单选项按钮
-        optionButton:SetSize(rowOptions.buttonWidth or 170, 22)
-        optionButton:SetPoint("TOPLEFT", popupFrame, "TOPLEFT", 0, optionTop)
-        optionButton._toolboxValue = optionObject.value
-        optionButton._toolboxValueLabel = optionObject.label or tostring(optionObject.value)
-        if optionButton._toolboxLabel then
-          optionButton._toolboxLabel:SetText(optionButton._toolboxValueLabel)
-        end
-        if optionButton._toolboxLabel then
-          optionButton._toolboxLabel:ClearAllPoints()
-          optionButton._toolboxLabel:SetPoint("LEFT", optionButton, "LEFT", 10, 0)
-          optionButton._toolboxLabel:SetPoint("RIGHT", optionButton, "RIGHT", -10, 0)
-          optionButton._toolboxLabel:SetJustifyH("LEFT")
-        end
-        optionButton:SetScript("OnClick", function()
-          if type(rowOptions.setValue) == "function" then
-            rowOptions.setValue(optionObject.value)
-          end
-          if type(rowOptions.afterChange) == "function" then
-            rowOptions.afterChange(optionObject.value)
-          end
-          hidePopup()
-          triggerBoxRefresh(self, rowOptions)
-        end)
-        optionButtonList[#optionButtonList + 1] = optionButton
-        optionTop = optionTop - 24
-      end
-    end
+    local menuButton = ensureDropdownWithButtonsControl(self, rowOptions.buttonWidth or 170) -- 原生箭头+下拉控件
+    menuButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT - 28, rowTop - 6)
 
     local function refresh()
-      local currentValue = type(rowOptions.getValue) == "function" and rowOptions.getValue() or rowOptions.value -- 当前取值
-      local normalizedValue, wasNormalized = normalizeChoiceValue(currentValue, choiceList, rowOptions.defaultValue)
-      if wasNormalized and normalizedValue ~= nil and type(rowOptions.setValue) == "function" then
-        rowOptions.setValue(normalizedValue)
-        currentValue = normalizedValue
-      else
-        currentValue = normalizedValue
-      end
-
+      local currentValue = getChoiceCurrentValue(rowOptions, choiceList) -- 当前归一后的取值
+      local currentOption, currentIndex = getChoiceOption(choiceList, currentValue) -- 当前选项与索引
       local isEnabled = self:_IsRowEnabled(rowOptions) -- 当前行启用态
-      local currentIndex = findCurrentIndex(currentValue) -- 当前索引
-      local currentOption = choiceList[currentIndex] or {} -- 当前选项
-      local currentLabel = currentOption.label or tostring(currentOption.value or "") -- 当前按钮文案
-      menuButton:SetEnabled(isEnabled)
-      menuButton:SetText(currentLabel .. " v")
-      if menuButton._toolboxLabel and menuButton._toolboxLabel.SetText then
-        menuButton._toolboxLabel:SetText(currentLabel)
+      local currentLabel = currentOption and (currentOption.label or tostring(currentOption.value)) or "" -- 当前按钮文案
+      menuButton._toolboxCurrentLabel = currentLabel
+      if menuButton.Dropdown and menuButton.Dropdown.SetEnabled then
+        menuButton.Dropdown:SetEnabled(isEnabled)
       end
-      applySurfaceControlState(menuButton, isEnabled, false, popupFrame.IsShown and popupFrame:IsShown())
+      setDropdownDisplayText(menuButton.Dropdown, currentLabel)
+
+      local canDecrement = isEnabled and currentIndex and currentIndex > 1 or false -- 左箭头是否可用
+      local canIncrement = isEnabled and currentIndex and currentIndex < #choiceList or false -- 右箭头是否可用
+      menuButton:SetSteppersShown(#choiceList > 1)
+      menuButton:SetSteppersEnabled(canDecrement == true, canIncrement == true)
       setFontStringTextColor(titleLabel, isEnabled)
       setFontStringTextColor(descriptionLabel, isEnabled)
-      if menuArrow and menuArrow.SetTextColor then
-        if isEnabled == false then
-          menuArrow:SetTextColor(0.5, 0.52, 0.58)
-        else
-          menuArrow:SetTextColor(0.86, 0.88, 0.93)
-        end
-      end
-      ensureOptionButtons()
-      for _, optionButton in ipairs(optionButtonList) do
-        local isSelected = optionButton._toolboxValue == currentValue -- 当前按钮是否选中
-        optionButton:SetEnabled(isEnabled and not isSelected)
-        setControlLabelText(optionButton, tostring(optionButton._toolboxValueLabel or ""))
-        applySurfaceControlState(optionButton, isEnabled, isSelected, false)
-      end
-      if isEnabled == false then
-        hidePopup()
-      end
     end
 
-    menuButton:SetScript("OnClick", function()
-      if popupFrame.IsShown and popupFrame:IsShown() then
-        hidePopup()
-      else
-        ensureOptionButtons()
-        popupFrame:SetHeight(math.max(1, #optionButtonList) * 24)
-        popupFrame:Show()
+    local function commitValueByIndex(indexNumber)
+      local optionObject = choiceList[indexNumber] -- 目标选项
+      if not optionObject then
+        return
       end
-      applySurfaceControlState(menuButton, self:_IsRowEnabled(rowOptions), false, popupFrame.IsShown and popupFrame:IsShown())
-    end)
+      if type(rowOptions.setValue) == "function" then
+        rowOptions.setValue(optionObject.value)
+      end
+      if type(rowOptions.afterChange) == "function" then
+        rowOptions.afterChange(optionObject.value)
+      end
+      triggerBoxRefresh(self, rowOptions)
+    end
+
+    if menuButton.IncrementButton then
+      menuButton.IncrementButton:SetScript("OnClick", function()
+        local currentValue = getChoiceCurrentValue(rowOptions, choiceList) -- 当前归一后的取值
+        local currentIndex = findChoiceIndex(choiceList, currentValue) or 1 -- 当前索引
+        if currentIndex < #choiceList then
+          commitValueByIndex(currentIndex + 1)
+        end
+      end)
+    end
+    if menuButton.DecrementButton then
+      menuButton.DecrementButton:SetScript("OnClick", function()
+        local currentValue = getChoiceCurrentValue(rowOptions, choiceList) -- 当前归一后的取值
+        local currentIndex = findChoiceIndex(choiceList, currentValue) or 1 -- 当前索引
+        if currentIndex > 1 then
+          commitValueByIndex(currentIndex - 1)
+        end
+      end)
+    end
+
+    if menuButton.Dropdown and type(menuButton.Dropdown.SetupMenu) == "function" then
+      menuButton.Dropdown:SetupMenu(function(_, rootDescription)
+        for _, optionObject in ipairs(choiceList) do
+          local optionValue = optionObject.value -- 菜单项值
+          local optionLabel = optionObject.label or tostring(optionValue) -- 菜单项文本
+          rootDescription:CreateRadio(
+            optionLabel,
+            function()
+              return getChoiceCurrentValue(rowOptions, choiceList) == optionValue
+            end,
+            function()
+              if type(rowOptions.setValue) == "function" then
+                rowOptions.setValue(optionValue)
+              end
+              if type(rowOptions.afterChange) == "function" then
+                rowOptions.afterChange(optionValue)
+              end
+              triggerBoxRefresh(self, rowOptions)
+            end,
+            optionValue
+          )
+        end
+      end)
+    end
 
     self:_RegisterRefresher(refresh)
     refresh()
@@ -790,8 +905,8 @@ local function CreateSettingsBox(parentFrame, startY, pageKey)
     local optionTop = rowTop - rowHeight -- 第一项顶部
     for _, optionObject in ipairs(choiceList) do
       local checkButton = createCheckboxControl(self) -- 多选按钮
-      checkButton:SetSize(rowOptions.buttonWidth or 180, 22)
-      checkButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, optionTop - 2)
+      checkButton:SetSize(30, 29)
+      checkButton:SetPoint("TOPLEFT", self, "TOPLEFT", SETTINGS_ROW_CONTROL_LEFT, optionTop - 6)
       checkButton._toolboxValue = optionObject.value
       local optionLabel = checkButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 多选项文本
       optionLabel:SetPoint("LEFT", checkButton, "RIGHT", 8, 0)
@@ -1230,42 +1345,15 @@ function Toolbox.SettingsHost:BuildAboutPage(pageObject)
   clientLabel:SetText(localeTable.SETTINGS_ABOUT_CLIENT or "")
   yOffset = yOffset - 32
 
-  local commandsTitle = childFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 常用命令标题
-  commandsTitle:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
-  commandsTitle:SetText(localeTable.SETTINGS_ABOUT_COMMANDS_TITLE or "")
-  yOffset = yOffset - 24
-
-  for _, localeKey in ipairs({
-    "SETTINGS_ABOUT_COMMAND_1",
-    "SETTINGS_ABOUT_COMMAND_2",
-    "SETTINGS_ABOUT_COMMAND_3",
-    "SETTINGS_ABOUT_COMMAND_4",
-  }) do
-    local lineLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 命令文本
-    lineLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 16, yOffset)
-    lineLabel:SetWidth(560)
-    lineLabel:SetJustifyH("LEFT")
-    lineLabel:SetText("• " .. tostring(Toolbox.L[localeKey] or ""))
-    yOffset = yOffset - 20
-  end
-
-  yOffset = yOffset - 8
-  local docsTitle = childFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge") -- 文档标题
-  docsTitle:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
-  docsTitle:SetText(localeTable.SETTINGS_ABOUT_DOCS_TITLE or "")
-  yOffset = yOffset - 24
-
-  for _, localeKey in ipairs({
-    "SETTINGS_ABOUT_DOC_1",
-    "SETTINGS_ABOUT_DOC_2",
-    "SETTINGS_ABOUT_DOC_3",
-  }) do
-    local lineLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 文档文本
-    lineLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 16, yOffset)
-    lineLabel:SetWidth(560)
-    lineLabel:SetJustifyH("LEFT")
-    lineLabel:SetText("• " .. tostring(Toolbox.L[localeKey] or ""))
-    yOffset = yOffset - 20
+  local introText = localeTable.SETTINGS_ABOUT_INTRO or "" -- 对外插件说明
+  if introText ~= "" then
+    local introLabel = childFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall") -- 插件说明文本
+    introLabel:SetPoint("TOPLEFT", childFrame, "TOPLEFT", 0, yOffset)
+    introLabel:SetWidth(560)
+    introLabel:SetJustifyH("LEFT")
+    introLabel:SetWordWrap(true)
+    introLabel:SetText(introText)
+    yOffset = yOffset - math.max(24, math.ceil((introLabel:GetStringHeight() or 0) + 10))
   end
 
   setChildHeight(childFrame, yOffset)

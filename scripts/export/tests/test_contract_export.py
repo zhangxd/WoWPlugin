@@ -4,8 +4,10 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
+from scripts.export import toolbox_db_export
 from scripts.export.toolbox_db_export import export_targets
 
 
@@ -257,6 +259,589 @@ class ContractExportIntegrationTests(unittest.TestCase):
                     generated_by="test-suite",
                 )
 
+
+class NavigationWalkComponentExportTests(unittest.TestCase):
+    def test_enrich_walk_components_derives_transport_landing_components_without_override_file(self) -> None:
+        sqlite_conn = sqlite3.connect(":memory:")
+        synthetic_route_nodes = [
+            {
+                "node_id": 83,
+                "node_kind": "map_anchor",
+                "route_source": "uimap",
+                "source_id": 85,
+                "ui_map_id": 85,
+                "map_id": 1,
+                "node_name": "奥格瑞玛",
+                "walk_cluster_node_id": 83,
+                "pos_x": None,
+                "pos_y": None,
+                "pos_z": None,
+            },
+            {
+                "node_id": 3249,
+                "node_kind": "transport",
+                "route_source": "waypoint_transport",
+                "source_id": 148,
+                "ui_map_id": 85,
+                "map_id": 1,
+                "node_name": "乘坐奥格瑞玛的飞艇前往荆棘谷",
+                "walk_cluster_node_id": 83,
+                "pos_x": 1871.02,
+                "pos_y": -4419.94,
+                "pos_z": 135.233,
+            },
+            {
+                "node_id": 3251,
+                "node_kind": "transport",
+                "route_source": "waypoint_transport",
+                "source_id": 150,
+                "ui_map_id": 85,
+                "map_id": 1,
+                "node_name": "乘坐奥格瑞玛的飞艇前往北风苔原",
+                "walk_cluster_node_id": 83,
+                "pos_x": 1764.4,
+                "pos_y": -4285.97,
+                "pos_z": 133.107,
+            },
+        ]
+        synthetic_transport_rows = [
+            {
+                "waypoint_node_id": 148,
+                "node_type": 0,
+                "player_condition_id": 923,
+            },
+            {
+                "waypoint_node_id": 150,
+                "node_type": 0,
+                "player_condition_id": 923,
+            },
+        ]
+
+        with (
+            mock.patch.object(
+                toolbox_db_export,
+                "build_navigation_walk_component_route_datasets",
+                return_value={
+                    "nodes": synthetic_route_nodes,
+                    "transport_nodes_raw": synthetic_transport_rows,
+                },
+            ),
+        ):
+            datasets = toolbox_db_export.enrich_navigation_walk_component_datasets(
+                sqlite_conn,
+                {"seed": [{"placeholder": 1}]},
+            )
+
+        assignment_by_node_id = {
+            int(assignment_row["node_id"]): assignment_row
+            for assignment_row in datasets["node_assignments"]
+        }
+        component_ids = {
+            component_row["component_id"]
+            for component_row in datasets["components"]
+        }
+
+        self.assertIn(3249, assignment_by_node_id)
+        self.assertIn(3251, assignment_by_node_id)
+        self.assertTrue(any(component_id.endswith("_arrival_3249") for component_id in component_ids))
+        self.assertTrue(any(component_id.endswith("_arrival_3251") for component_id in component_ids))
+        self.assertNotIn("uimap_85_city", component_ids)
+
+    def test_enrich_walk_components_hides_generic_arrival_portal_without_override_file(self) -> None:
+        sqlite_conn = sqlite3.connect(":memory:")
+        synthetic_route_nodes = [
+            {
+                "node_id": 2805,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 101,
+                "ui_map_id": 85,
+                "map_id": 1,
+                "node_name": "探路者大厅",
+                "walk_cluster_node_id": 83,
+                "pos_x": 1445.21,
+                "pos_y": -4499.56,
+                "pos_z": 18.3064,
+            },
+            {
+                "node_id": 3198,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 527,
+                "ui_map_id": 85,
+                "map_id": 1,
+                "node_name": "通往奥格瑞玛的传送门",
+                "walk_cluster_node_id": 83,
+                "pos_x": 1445.21,
+                "pos_y": -4499.56,
+                "pos_z": 18.3067,
+            },
+        ]
+        synthetic_portal_rows = [
+            {
+                "waypoint_node_id": 101,
+                "node_type": 1,
+                "player_condition_id": 0,
+            },
+            {
+                "waypoint_node_id": 527,
+                "node_type": 2,
+                "player_condition_id": 0,
+            },
+        ]
+
+        with (
+            mock.patch.object(
+                toolbox_db_export,
+                "build_navigation_walk_component_route_datasets",
+                return_value={
+                    "nodes": synthetic_route_nodes,
+                    "portal_nodes_raw": synthetic_portal_rows,
+                },
+            ),
+        ):
+            datasets = toolbox_db_export.enrich_navigation_walk_component_datasets(
+                sqlite_conn,
+                {"seed": [{"placeholder": 1}]},
+            )
+
+        assignment_by_node_id = {
+            int(assignment_row["node_id"]): assignment_row
+            for assignment_row in datasets["node_assignments"]
+        }
+        proxy_by_node_id = {
+            int(proxy_row["node_id"]): proxy_row
+            for proxy_row in datasets["display_proxies"]
+        }
+        technical_assignment = assignment_by_node_id[3198]
+        proxy_row = proxy_by_node_id[3198]
+
+        self.assertTrue(technical_assignment["hidden_in_semantic_chain"])
+        self.assertEqual(technical_assignment["display_proxy_node_id"], 2805)
+        self.assertEqual(proxy_row["display_proxy_node_id"], 2805)
+
+    def test_enrich_walk_components_prefers_duplicate_name_anchor_with_real_local_support(self) -> None:
+        sqlite_conn = sqlite3.connect(":memory:")
+        synthetic_route_nodes = [
+            {
+                "node_id": 107,
+                "node_kind": "map_anchor",
+                "route_source": "uimap",
+                "source_id": 110,
+                "ui_map_id": 110,
+                "map_id": 530,
+                "node_name": "银月城",
+                "walk_cluster_node_id": 92,
+                "pos_x": None,
+                "pos_y": None,
+                "pos_z": None,
+            },
+            {
+                "node_id": 1554,
+                "node_kind": "map_anchor",
+                "route_source": "uimap",
+                "source_id": 2393,
+                "ui_map_id": 2393,
+                "map_id": 0,
+                "node_name": "银月城",
+                "walk_cluster_node_id": 1556,
+                "pos_x": None,
+                "pos_y": None,
+                "pos_z": None,
+            },
+            {
+                "node_id": 1583,
+                "node_kind": "map_anchor",
+                "route_source": "uimap",
+                "source_id": 2443,
+                "ui_map_id": 2443,
+                "map_id": 2907,
+                "node_name": "银月城",
+                "walk_cluster_node_id": 1556,
+                "pos_x": None,
+                "pos_y": None,
+                "pos_z": None,
+            },
+            {
+                "node_id": 3172,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 496,
+                "ui_map_id": 2393,
+                "map_id": 0,
+                "node_name": "使用银月城的传送门前往奥格瑞玛",
+                "walk_cluster_node_id": 1556,
+                "pos_x": 1.0,
+                "pos_y": 1.0,
+                "pos_z": 0.0,
+            },
+            {
+                "node_id": 3197,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 526,
+                "ui_map_id": 2393,
+                "map_id": 0,
+                "node_name": "通往银月城的传送门",
+                "walk_cluster_node_id": 1556,
+                "pos_x": 1.5,
+                "pos_y": 1.0,
+                "pos_z": 0.0,
+            },
+            {
+                "node_id": 3200,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 529,
+                "ui_map_id": 2393,
+                "map_id": 0,
+                "node_name": "通往银月城的传送门",
+                "walk_cluster_node_id": 1556,
+                "pos_x": 2.0,
+                "pos_y": 1.0,
+                "pos_z": 0.0,
+            },
+            {
+                "node_id": 2820,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 116,
+                "ui_map_id": 110,
+                "map_id": 530,
+                "node_name": "银月城",
+                "walk_cluster_node_id": 92,
+                "pos_x": 100.0,
+                "pos_y": 100.0,
+                "pos_z": 0.0,
+            },
+        ]
+        synthetic_portal_rows = [
+            {
+                "waypoint_node_id": 496,
+                "node_type": 1,
+                "player_condition_id": 0,
+            },
+            {
+                "waypoint_node_id": 526,
+                "node_type": 2,
+                "player_condition_id": 0,
+            },
+            {
+                "waypoint_node_id": 529,
+                "node_type": 2,
+                "player_condition_id": 0,
+            },
+            {
+                "waypoint_node_id": 116,
+                "node_type": 2,
+                "player_condition_id": 0,
+            },
+        ]
+
+        with (
+            mock.patch.object(
+                toolbox_db_export,
+                "build_navigation_walk_component_route_datasets",
+                return_value={
+                    "nodes": synthetic_route_nodes,
+                    "portal_nodes_raw": synthetic_portal_rows,
+                },
+            ),
+            mock.patch.object(
+                toolbox_db_export,
+                "query_navigation_walk_component_uimap_semantics",
+                return_value={
+                    110: {"ui_map_type": 3, "has_city_area_flag": False},
+                    2393: {"ui_map_type": 3, "has_city_area_flag": True},
+                    2443: {"ui_map_type": 3, "has_city_area_flag": False},
+                },
+            ),
+        ):
+            datasets = toolbox_db_export.enrich_navigation_walk_component_datasets(
+                sqlite_conn,
+                {"seed": [{"placeholder": 1}]},
+            )
+
+        component_rows = datasets["components"]
+        matched_component = None
+        for component_row in component_rows:
+            if 3197 in component_row["member_node_ids"] or 3200 in component_row["member_node_ids"]:
+                matched_component = component_row
+                break
+
+        self.assertIsNotNone(matched_component)
+        self.assertEqual(1554, matched_component["preferred_anchor_node_id"])
+
+    def test_enrich_walk_components_does_not_promote_single_arrival_portal_to_city_component(self) -> None:
+        sqlite_conn = sqlite3.connect(":memory:")
+        synthetic_route_nodes = [
+            {
+                "node_id": 500,
+                "node_kind": "map_anchor",
+                "route_source": "uimap",
+                "source_id": 900,
+                "ui_map_id": 900,
+                "map_id": 1,
+                "node_name": "普通区域",
+                "walk_cluster_node_id": 500,
+                "pos_x": None,
+                "pos_y": None,
+                "pos_z": None,
+            },
+            {
+                "node_id": 501,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 901,
+                "ui_map_id": 900,
+                "map_id": 1,
+                "node_name": "通往普通区域的传送门",
+                "walk_cluster_node_id": 500,
+                "pos_x": 50.0,
+                "pos_y": 50.0,
+                "pos_z": 0.0,
+            },
+        ]
+        synthetic_portal_rows = [
+            {
+                "waypoint_node_id": 501,
+                "node_type": 2,
+                "player_condition_id": 0,
+            }
+        ]
+
+        with (
+            mock.patch.object(
+                toolbox_db_export,
+                "build_navigation_walk_component_route_datasets",
+                return_value={
+                    "nodes": synthetic_route_nodes,
+                    "portal_nodes_raw": synthetic_portal_rows,
+                },
+            ),
+        ):
+            datasets = toolbox_db_export.enrich_navigation_walk_component_datasets(
+                sqlite_conn,
+                {"seed": [{"placeholder": 1}]},
+            )
+
+        city_component_ids = {
+            component_row["component_id"]
+            for component_row in datasets["components"]
+            if component_row["component_id"].endswith("_city")
+        }
+
+        self.assertNotIn("uimap_900_city", city_component_ids)
+
+    def test_enrich_walk_components_does_not_promote_duplicate_name_arrival_only_cluster_to_city_component(self) -> None:
+        sqlite_conn = sqlite3.connect(":memory:")
+        synthetic_route_nodes = [
+            {
+                "node_id": 1000,
+                "node_kind": "map_anchor",
+                "route_source": "uimap",
+                "source_id": 100,
+                "ui_map_id": 100,
+                "map_id": 1,
+                "node_name": "测试城",
+                "walk_cluster_node_id": 1000,
+                "pos_x": None,
+                "pos_y": None,
+                "pos_z": None,
+            },
+            {
+                "node_id": 1001,
+                "node_kind": "map_anchor",
+                "route_source": "uimap",
+                "source_id": 101,
+                "ui_map_id": 101,
+                "map_id": 0,
+                "node_name": "测试城",
+                "walk_cluster_node_id": 1001,
+                "pos_x": None,
+                "pos_y": None,
+                "pos_z": None,
+            },
+            {
+                "node_id": 1100,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 200,
+                "ui_map_id": 100,
+                "map_id": 1,
+                "node_name": "通往测试城的传送门",
+                "walk_cluster_node_id": 1000,
+                "pos_x": 10.0,
+                "pos_y": 10.0,
+                "pos_z": 0.0,
+            },
+            {
+                "node_id": 1101,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 201,
+                "ui_map_id": 101,
+                "map_id": 0,
+                "node_name": "通往测试城的传送门",
+                "walk_cluster_node_id": 1001,
+                "pos_x": 20.0,
+                "pos_y": 20.0,
+                "pos_z": 0.0,
+            },
+        ]
+        synthetic_portal_rows = [
+            {
+                "waypoint_node_id": 200,
+                "node_type": 2,
+                "player_condition_id": 0,
+            },
+            {
+                "waypoint_node_id": 201,
+                "node_type": 2,
+                "player_condition_id": 0,
+            },
+        ]
+
+        with (
+            mock.patch.object(
+                toolbox_db_export,
+                "build_navigation_walk_component_route_datasets",
+                return_value={
+                    "nodes": synthetic_route_nodes,
+                    "portal_nodes_raw": synthetic_portal_rows,
+                },
+            ),
+        ):
+            datasets = toolbox_db_export.enrich_navigation_walk_component_datasets(
+                sqlite_conn,
+                {"seed": [{"placeholder": 1}]},
+            )
+
+        city_component_ids = {
+            component_row["component_id"]
+            for component_row in datasets["components"]
+            if component_row["component_id"].endswith("_city")
+        }
+
+        self.assertNotIn("uimap_101_city", city_component_ids)
+
+    def test_enrich_walk_components_requires_city_semantics_for_duplicate_name_city_fallback(self) -> None:
+        sqlite_conn = sqlite3.connect(":memory:")
+        synthetic_route_nodes = [
+            {
+                "node_id": 2000,
+                "node_kind": "map_anchor",
+                "route_source": "uimap",
+                "source_id": 200,
+                "ui_map_id": 200,
+                "map_id": 1,
+                "node_name": "测试枢纽",
+                "walk_cluster_node_id": 2000,
+                "pos_x": None,
+                "pos_y": None,
+                "pos_z": None,
+            },
+            {
+                "node_id": 2001,
+                "node_kind": "map_anchor",
+                "route_source": "uimap",
+                "source_id": 201,
+                "ui_map_id": 201,
+                "map_id": 0,
+                "node_name": "测试枢纽",
+                "walk_cluster_node_id": 2001,
+                "pos_x": None,
+                "pos_y": None,
+                "pos_z": None,
+            },
+            {
+                "node_id": 2100,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 300,
+                "ui_map_id": 201,
+                "map_id": 0,
+                "node_name": "使用测试枢纽的传送门前往主城",
+                "walk_cluster_node_id": 2001,
+                "pos_x": 1.0,
+                "pos_y": 1.0,
+                "pos_z": 0.0,
+            },
+            {
+                "node_id": 2101,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 301,
+                "ui_map_id": 201,
+                "map_id": 0,
+                "node_name": "通往测试枢纽的传送门",
+                "walk_cluster_node_id": 2001,
+                "pos_x": 1.5,
+                "pos_y": 1.0,
+                "pos_z": 0.0,
+            },
+            {
+                "node_id": 2102,
+                "node_kind": "portal",
+                "route_source": "portal",
+                "source_id": 302,
+                "ui_map_id": 201,
+                "map_id": 0,
+                "node_name": "通往测试枢纽的传送门",
+                "walk_cluster_node_id": 2001,
+                "pos_x": 2.0,
+                "pos_y": 1.0,
+                "pos_z": 0.0,
+            },
+        ]
+        synthetic_portal_rows = [
+            {
+                "waypoint_node_id": 300,
+                "node_type": 1,
+                "player_condition_id": 0,
+            },
+            {
+                "waypoint_node_id": 301,
+                "node_type": 2,
+                "player_condition_id": 0,
+            },
+            {
+                "waypoint_node_id": 302,
+                "node_type": 2,
+                "player_condition_id": 0,
+            },
+        ]
+
+        with (
+            mock.patch.object(
+                toolbox_db_export,
+                "build_navigation_walk_component_route_datasets",
+                return_value={
+                    "nodes": synthetic_route_nodes,
+                    "portal_nodes_raw": synthetic_portal_rows,
+                },
+            ),
+            mock.patch.object(
+                toolbox_db_export,
+                "query_navigation_walk_component_uimap_semantics",
+                return_value={
+                    200: {"ui_map_type": 3, "has_city_area_flag": False},
+                    201: {"ui_map_type": 3, "has_city_area_flag": False},
+                },
+            ),
+        ):
+            datasets = toolbox_db_export.enrich_navigation_walk_component_datasets(
+                sqlite_conn,
+                {"seed": [{"placeholder": 1}]},
+            )
+
+        city_component_ids = {
+            component_row["component_id"]
+            for component_row in datasets["components"]
+            if component_row["component_id"].endswith("_city")
+        }
+
+        self.assertNotIn("uimap_201_city", city_component_ids)
 
 if __name__ == "__main__":
     unittest.main()

@@ -278,20 +278,17 @@
 | `DataContracts/navigation_walk_components.json` | 定义 `WalkComponent` 与节点归属 / 代理规则的正式契约。 |
 | `Toolbox/Data/NavigationWalkComponents.lua` | runtime 只读的步行组件数据出口。 |
 
-当前导出链路采用三层来源：
+当前导出链路改为“两层正式来源 + 自动归并”：
 
-1. `wow.db` 自动候选
-   - 复用当前已有的 `navigation_map_nodes / navigation_route_edges / waypoint / transport / portal` 来源，先生成“哪些节点大概率属于同一局部步行组件”的候选集。
-2. 源侧少量 override
-   - 只允许在导出侧维护，不允许散落到 runtime Lua。
-   - 主要解决 5 类问题：
-     - `merge`：应该合并，但机器不敢自动合并的节点；
-     - `split`：同一 `UiMap` 下其实并不互通的节点；
-     - `hidden / proxy`：技术方向节点应隐藏，并映射到玩家可见的动作 / 到站代理名；
-     - `preferred_anchor`：同一组件对外应该使用哪个锚点 / 到站点；
-     - `uimap / visible_name`：自动归属或自动命名不符合玩家语义的节点。
+1. 正式来源节点 / 边
+   - 复用当前已有的 `navigation_map_nodes / navigation_route_edges / waypoint / transport / portal` 正式来源。
+   - 先拿到 runtime 已确认存在的节点事实、节点类型、来源 ID、地图归属、落点关系和显式连接器。
+2. 规则化自动归并
+   - 导出脚本只允许基于正式来源事实自动推导 `WalkComponent`、节点归属、显示代理和首选锚点。
+   - 允许使用稳定规则，例如：同一局部交通房间、同一主城锚点、明确的 portal/transport 落点簇、技术入口与玩家可见落点之间的确定性代理关系。
+   - 若某个组件归属、`hidden / proxy`、`preferred_anchor` 或 `visible_name` 不能被稳定规则证明，就先不导出该节点或该组件；不再允许额外 override 文件补顶。
 3. 正式导出
-   - 当前只把首批确认后的 `WalkComponent` 局部真值、节点归属和代理信息写入 `NavigationWalkComponents.lua`，供 `Toolbox.Navigation` 与展示层统一消费。
+   - 当前只把首批自动确认后的 `WalkComponent` 局部真值、节点归属和代理信息写入 `NavigationWalkComponents.lua`，供 `Toolbox.Navigation` 与展示层统一消费。
 
 当前首批覆盖范围只落高价值局部区域，不承诺一口气闭合全世界：
 
@@ -511,7 +508,7 @@
   - `taxi` 不生成独立飞行点动作节点，但仍保留正确的 segment 和记步结果。
 - `walk component` 验证：
   - 首批覆盖范围只检查主城、传送门房、飞艇塔 / 港口和常用交通落点。
-  - 源侧 override 只能落在正式契约 / 导出链路，不允许回流成 runtime 手写导航数据。
+  - 组件归属与代理信息只能由正式来源表自动推导，不允许再引入源侧 override 或 runtime 手写导航数据。
 
 ## 9. 修订记录
 
@@ -534,6 +531,7 @@
 | 2026-05-01 | 规划期聊天输出定稿：仅在成功规划时输出一组排查诊断文本，包含起终点、总步数、节点摘要与逐段 `mode / from / to / traversedUiMapNames`；不新增实时导航聊天日志 |
 | 2026-05-01 | 展开态节点链起点/终点文本口径调整：位置与坐标合并为单行 `地址 x,y`，胶囊与聊天诊断输出保持不变 |
 | 2026-05-01 | 语义路线链定稿：玩家可见链路改为 `地图节点 / 动作节点` 分层表达，`walk_local` 只作隐藏接入，`taxi` 不单独生成动作节点，规划摘要与节点链禁止泄漏返程技术节点名 |
-| 2026-05-01 | `walk component` 方案定稿：新增正式契约与 runtime 出口方向，首批覆盖主城、传送门房、飞艇塔 / 港口与常用交通落点；人工修正只允许存在于源侧 override |
+| 2026-05-01 | `walk component` 方案定稿：新增正式契约与 runtime 出口方向，首批覆盖主城、传送门房、飞艇塔 / 港口与常用交通落点 |
 | 2026-05-02 | 路线图布局补充：精简胶囊宽度改为随文本长度自适应；展开态节点区底框必须随节点范围自动扩展，禁止尾部节点超框 |
-| 2026-05-02 | `walk component` 首批实现：`navigation_walk_components` 契约、源侧 override 与 `NavigationWalkComponents.lua` 已落地；runtime 本地接入优先读取 formal component，缺失时继续 fallback 到 `WalkClusterNodeID / WalkClusterKey` |
+| 2026-05-02 | `walk component` 首批实现：`navigation_walk_components` 契约与 `NavigationWalkComponents.lua` 已落地；runtime 本地接入优先读取 formal component，缺失时继续 fallback 到 `WalkClusterNodeID / WalkClusterKey` |
+| 2026-05-02 | 方案改口：移除 `navigation_walk_component_overrides.json` 与对应 enrichment；首批 walk component 改为只允许基于正式来源表全自动推导 |

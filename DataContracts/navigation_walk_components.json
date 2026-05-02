@@ -21,10 +21,10 @@
     ],
     "sql": "SELECT 1 AS placeholder",
     "query": {
-      "from": "navigation_route_edges runtime nodes + walk component override",
+      "from": "navigation_route_edges runtime nodes + portal/transport formal facts + walk component automatic inference",
       "joins": [
         "复用 navigation_route_edges 的 runtime 节点生成逻辑",
-        "源侧 override 仅锁定首批高价值组件与显示代理"
+        "结合 portal/transport 原始节点事实做局部 walk component 自动归并"
       ],
       "select": [
         "components",
@@ -33,7 +33,7 @@
       ],
       "where": [
         "只导出首批局部 walk component，不宣称全世界步行真值已闭合",
-        "人工修正仅允许存在于导出侧 override"
+        "自动规则无法稳定证明归属时宁缺毋滥，不额外引入人工 override"
       ],
       "group_by": [],
       "order_by": [

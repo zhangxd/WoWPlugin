@@ -33,6 +33,17 @@ describe("Navigation data", function()
     return nil
   end
 
+  -- 判断数组里是否包含指定数字节点 ID，避免组件键名变化导致测试耦合到命名。
+  local function arrayContainsNumericValue(valueArray, expectedValue)
+    for _, currentValue in ipairs(valueArray or {}) do
+      if tonumber(currentValue) == tonumber(expectedValue) then
+        return true
+      end
+    end
+
+    return false
+  end
+
   before_each(function()
     originalToolbox = rawget(_G, "Toolbox")
     rawset(_G, "Toolbox", {
@@ -309,7 +320,7 @@ describe("Navigation data", function()
     assert.is_table(findEdgeByNodeIDs(exportedData, zulamanHubTaxi.NodeID, zulamanTaxi.NodeID))
   end)
 
-  it("exports_the_orgrimmar_public_portal_arrival_into_the_silvermoon_walk_component", function()
+  it("exports_the_orgrimmar_public_portal_arrival_into_a_formal_walk_component_for_the_new_silvermoon_anchor", function()
     dofile("Toolbox/Data/NavigationRouteEdges.lua")
     dofile("Toolbox/Data/NavigationWalkComponents.lua")
 
@@ -317,29 +328,17 @@ describe("Navigation data", function()
     local walkComponentData = Toolbox.Data.NavigationWalkComponents -- 导出的正式步行组件数据
     local silvermoonPortalArrival = findNodeByOrigin(exportedRouteData, "portal", "portal", 116) -- 奥格公共传送门的银月城落点
     local silvermoonMapAnchor = findNodeByOrigin(exportedRouteData, "map_anchor", "uimap", 2393) -- 12.0 银月城锚点
-    local silvermoonComponent = walkComponentData.components["silvermoon_city"] -- 银月城正式步行组件
     local arrivalAssignment = walkComponentData.nodeAssignments[tonumber(silvermoonPortalArrival.NodeID)] -- 落点节点归属
-    local hasMemberNode = false -- 组件成员是否包含该落点
-    local hasEntryNode = false -- 组件入口是否包含该落点
+    local assignedComponent = nil -- 落点实际归属的正式步行组件
 
-    assert.is_table(silvermoonComponent)
     assert.is_table(arrivalAssignment)
-    assert.equals("silvermoon_city", arrivalAssignment.ComponentID)
-    assert.equals(tonumber(silvermoonMapAnchor.NodeID), tonumber(silvermoonComponent.PreferredAnchorNodeID))
+    assert.is_string(arrivalAssignment.ComponentID)
+    assignedComponent = walkComponentData.components[arrivalAssignment.ComponentID]
 
-    for _, nodeID in ipairs(silvermoonComponent.MemberNodeIDs or {}) do
-      if tonumber(nodeID) == tonumber(silvermoonPortalArrival.NodeID) then
-        hasMemberNode = true
-      end
-    end
-    for _, nodeID in ipairs(silvermoonComponent.EntryNodeIDs or {}) do
-      if tonumber(nodeID) == tonumber(silvermoonPortalArrival.NodeID) then
-        hasEntryNode = true
-      end
-    end
-
-    assert.is_true(hasMemberNode)
-    assert.is_true(hasEntryNode)
+    assert.is_table(assignedComponent)
+    assert.equals(tonumber(silvermoonMapAnchor.NodeID), tonumber(assignedComponent.PreferredAnchorNodeID))
+    assert.is_true(arrayContainsNumericValue(assignedComponent.MemberNodeIDs, silvermoonPortalArrival.NodeID))
+    assert.is_true(arrayContainsNumericValue(assignedComponent.EntryNodeIDs, silvermoonPortalArrival.NodeID))
   end)
 
   it("exports_navigation_map_assignments_without_region_coordinate_fields", function()
@@ -386,16 +385,25 @@ describe("Navigation data", function()
       assert.is_true(#componentDef.MemberNodeIDs > 0)
       assert.is_true(#componentDef.EntryNodeIDs > 0)
       assert.is_number(tonumber(componentDef.PreferredAnchorNodeID))
+      assert.is_true(arrayContainsNumericValue(componentDef.MemberNodeIDs, componentDef.PreferredAnchorNodeID))
     end
 
     for nodeID, assignmentDef in pairs(exportedData.nodeAssignments) do
       assignmentCount = assignmentCount + 1
+      local componentDef = exportedData.components[assignmentDef.ComponentID] -- 归属声明引用的正式组件
+      local proxyDef = assignmentDef.DisplayProxyNodeID ~= nil and exportedData.displayProxies[tonumber(nodeID)] or nil -- 当前节点的显示代理定义
+
       assert.equals(tonumber(nodeID), tonumber(assignmentDef.NodeID))
       assert.is_string(assignmentDef.ComponentID)
       assert.is_string(assignmentDef.Role)
       assert.is_boolean(assignmentDef.HiddenInSemanticChain)
+      assert.is_table(componentDef)
+      assert.is_true(arrayContainsNumericValue(componentDef.MemberNodeIDs, assignmentDef.NodeID))
       if assignmentDef.DisplayProxyNodeID ~= nil then
         assert.is_number(tonumber(assignmentDef.DisplayProxyNodeID))
+        assert.is_table(proxyDef)
+        assert.equals(assignmentDef.ComponentID, proxyDef.ComponentID)
+        assert.equals(tonumber(assignmentDef.DisplayProxyNodeID), tonumber(proxyDef.DisplayProxyNodeID))
       end
       if assignmentDef.VisibleName ~= nil then
         assert.is_string(assignmentDef.VisibleName)

@@ -34,6 +34,7 @@ describe("Toolbox.SettingsHost", function()
     end
 
     frameObject._settingsHostDecorated = true
+    frameObject._children = frameObject._children or {} -- 子控件列表
 
     if type(frameObject.SetAllPoints) ~= "function" then
       function frameObject:SetAllPoints(relativeFrame)
@@ -70,7 +71,9 @@ describe("Toolbox.SettingsHost", function()
     if type(originalCreateFontString) == "function" then
       frameObject.CreateFontString = function(self, ...)
         local childObject = originalCreateFontString(self, ...)
-        return decorateFrame(childObject)
+        childObject = decorateFrame(childObject)
+        self._children[#self._children + 1] = childObject
+        return childObject
       end
     end
 
@@ -78,11 +81,37 @@ describe("Toolbox.SettingsHost", function()
     if type(originalCreateTexture) == "function" then
       frameObject.CreateTexture = function(self, ...)
         local childObject = originalCreateTexture(self, ...)
-        return decorateFrame(childObject)
+        childObject = decorateFrame(childObject)
+        self._children[#self._children + 1] = childObject
+        return childObject
       end
     end
 
     return frameObject
+  end
+
+  local function collectFrameTexts(frameObject, textList)
+    if type(frameObject) ~= "table" then
+      return textList or {}
+    end
+
+    local collectedTextList = textList or {} -- 当前累计文本
+    if type(frameObject.GetText) == "function" then
+      local currentText = frameObject:GetText() -- 当前控件文本
+      if type(currentText) == "string" and currentText ~= "" then
+        collectedTextList[#collectedTextList + 1] = currentText
+      end
+    end
+
+    for _, childObject in ipairs(frameObject._children or {}) do
+      collectFrameTexts(childObject, collectedTextList)
+    end
+    return collectedTextList
+  end
+
+  local function joinFrameTexts(frameObject)
+    local textList = collectFrameTexts(frameObject, {}) -- 页面文本列表
+    return table.concat(textList, "\n")
   end
 
   local function installEnvironment()
@@ -155,6 +184,18 @@ describe("Toolbox.SettingsHost", function()
         SETTINGS_PAGE_ENCOUNTER_JOURNAL_INTRO = "EJ",
         SETTINGS_PAGE_ABOUT_TITLE = "关于",
         SETTINGS_PAGE_ABOUT_INTRO = "About",
+        SETTINGS_ABOUT_INTRO = "多个界面小功能打包成一个插件，在游戏「选项」里只占一条入口。",
+        SETTINGS_ABOUT_VERSION_FMT = "版本：%s",
+        SETTINGS_ABOUT_CLIENT = "客户端：魔兽世界正式服",
+        SETTINGS_ABOUT_COMMANDS_TITLE = "常用命令",
+        SETTINGS_ABOUT_COMMAND_1 = "/toolbox - 打开 Toolbox 设置",
+        SETTINGS_ABOUT_COMMAND_2 = "/toolbox instances - 打开冒险手册",
+        SETTINGS_ABOUT_COMMAND_3 = "窗口拖动：可移动的暴雪窗口由插件内固定名单决定。",
+        SETTINGS_ABOUT_COMMAND_4 = "ESC -> 工具箱 - 从游戏菜单打开同一设置页",
+        SETTINGS_ABOUT_DOCS_TITLE = "项目文档",
+        SETTINGS_ABOUT_DOC_1 = "README.md - 安装、命令与功能概览",
+        SETTINGS_ABOUT_DOC_2 = "docs/Toolbox-addon-design.md - 架构与模块映射",
+        SETTINGS_ABOUT_DOC_3 = "docs/AI-ONBOARDING.md - 协作流程与读档顺序",
         SETTINGS_MODULE_ENABLE = "启用",
         SETTINGS_MODULE_DEBUG = "调试",
         SETTINGS_MODULE_RESET_REBUILD = "重置",
@@ -369,13 +410,15 @@ describe("Toolbox.SettingsHost", function()
 
     assert.equals("default", moduleDb.mode)
     assert.is_truthy(menuButton)
-    assert.is_truthy(menuButton._toolboxPopupFrame)
-    assert.is_false(menuButton._toolboxPopupFrame:IsShown())
-    assert.equals("默认 v", menuButton:GetText())
-    menuButton:RunScript("OnClick")
-    assert.is_true(menuButton._toolboxPopupFrame:IsShown())
-    menuButton:RunScript("OnClick")
-    assert.is_false(menuButton._toolboxPopupFrame:IsShown())
+    assert.equals("SettingsDropdownWithButtonsTemplate", menuButton.templateName)
+    assert.is_truthy(menuButton.Dropdown)
+    assert.is_truthy(menuButton.IncrementButton)
+    assert.is_truthy(menuButton.DecrementButton)
+    assert.equals("默认", menuButton._toolboxCurrentLabel)
+    assert.is_false(menuButton.DecrementButton:IsEnabled())
+    assert.is_true(menuButton.IncrementButton:IsEnabled())
+    menuButton.IncrementButton:RunScript("OnClick")
+    assert.equals("cursor", moduleDb.mode)
   end)
 
   it("toggle_row_normalizes_missing_values_to_default", function()
@@ -419,7 +462,7 @@ describe("Toolbox.SettingsHost", function()
     rawset(_G, "ToolboxDB", nil)
 
     local toggleButton = nil -- 依赖父开关按钮
-    local choiceButtons = nil -- 依赖子项按钮
+    local choiceControl = nil -- 依赖子项控件
     moduleList = {
       {
         id = "mover",
@@ -442,7 +485,7 @@ describe("Toolbox.SettingsHost", function()
               moduleDb.allowDragInCombat = value == true
             end,
           })
-          choiceButtons = box:AddChoiceRow({
+          choiceControl = box:AddChoiceRow({
             label = "依赖项",
             defaultValue = "titlebar",
             enabledWhen = function()
@@ -474,11 +517,11 @@ describe("Toolbox.SettingsHost", function()
     local success, err = pcall(function()
       Toolbox.SettingsHost:BuildPage("interface")
       assert.is_truthy(toggleButton)
-      assert.is_truthy(choiceButtons)
-      assert.is_false(choiceButtons[2]:IsEnabled())
+      assert.is_truthy(choiceControl)
+      assert.is_false(choiceControl.Dropdown:IsEnabled())
       toggleButton:RunScript("OnClick")
       assert.equals(1, buildPageCallCount)
-      assert.is_true(choiceButtons[2]:IsEnabled())
+      assert.is_true(choiceControl.Dropdown:IsEnabled())
     end)
 
     Toolbox.SettingsHost.BuildPage = originalBuildPage
@@ -490,7 +533,7 @@ describe("Toolbox.SettingsHost", function()
     rawset(_G, "ToolboxDB", nil)
 
     local toggleControl = nil -- 开关控件
-    local choiceControls = nil -- 单选控件
+    local choiceControl = nil -- 单选控件
     local menuControl = nil -- 菜单控件
     local multiSelectControls = nil -- 多选控件
     local actionControl = nil -- 动作控件
@@ -515,7 +558,7 @@ describe("Toolbox.SettingsHost", function()
               moduleDb.enabled = value == true
             end,
           })
-          choiceControls = box:AddChoiceRow({
+          choiceControl = box:AddChoiceRow({
             label = "二选一",
             defaultValue = "titlebar",
             getValue = function()
@@ -568,20 +611,36 @@ describe("Toolbox.SettingsHost", function()
     Toolbox.SettingsHost:BuildPage("interface")
 
     assert.is_truthy(toggleControl)
-    assert.is_truthy(choiceControls)
+    assert.is_truthy(choiceControl)
     assert.is_truthy(menuControl)
     assert.is_truthy(multiSelectControls)
     assert.is_truthy(actionControl)
 
-    assert.not_equals("UIPanelButtonTemplate", toggleControl.templateName)
-    for _, choiceControl in ipairs(choiceControls) do
-      assert.not_equals("UIPanelButtonTemplate", choiceControl.templateName)
-    end
-    assert.not_equals("UIPanelButtonTemplate", menuControl.templateName)
+    assert.equals("SettingsCheckboxTemplate", toggleControl.templateName)
+    assert.equals("SettingsDropdownWithButtonsTemplate", choiceControl.templateName)
+    assert.equals("SettingsDropdownWithButtonsTemplate", menuControl.templateName)
     for _, multiSelectControl in ipairs(multiSelectControls) do
-      assert.not_equals("UIPanelButtonTemplate", multiSelectControl.templateName)
+      assert.equals("SettingsCheckboxTemplate", multiSelectControl.templateName)
     end
     assert.equals("UIPanelButtonTemplate", actionControl.templateName)
+  end)
+
+  it("about_page_only_exposes_public_addon_info", function()
+    installEnvironment()
+    rawset(_G, "ToolboxDB", nil)
+    loadConfigAndHost()
+
+    Toolbox.SettingsHost:BuildPage("about")
+
+    local aboutPage = Toolbox.SettingsHost:GetPageByKey("about") -- 关于页定义
+    local pageText = joinFrameTexts(aboutPage and aboutPage.panel and aboutPage.panel._toolboxChild) -- 页面文本
+
+    assert.is_truthy(string.find(pageText, "版本：test", 1, true))
+    assert.is_truthy(string.find(pageText, "客户端：魔兽世界正式服", 1, true))
+    assert.is_truthy(string.find(pageText, Toolbox.L.SETTINGS_ABOUT_INTRO, 1, true))
+    assert.is_falsy(string.find(pageText, "常用命令", 1, true))
+    assert.is_falsy(string.find(pageText, "项目文档", 1, true))
+    assert.is_falsy(string.find(pageText, "README.md", 1, true))
   end)
 
   it("refresh_all_pages_does_not_register_categories_again", function()

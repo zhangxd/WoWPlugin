@@ -9,10 +9,19 @@ Toolbox.Chat = Toolbox.Chat or {}
 ---@param text string|nil
 ---@return string
 local function stripChatFormattingForClipboard(text)
-  if not text or text == "" then
+  if type(text) ~= "string" then
     return ""
   end
-  local s = tostring(text)
+  if type(canaccessvalue) == "function" then
+    local ok, accessible = pcall(canaccessvalue, text) -- 当前执行上下文是否可安全访问该值
+    if not ok or accessible == false then
+      return ""
+    end
+  end
+  if text == "" then
+    return ""
+  end
+  local s = text
   s = s:gsub("|c%x%x%x%x%x%x%x%x", "")  -- 颜色开始
   s = s:gsub("|r", "")                   -- 颜色重置
   s = s:gsub("|H[^|]+|h(.-)|h", "%1")    -- 超链接（保留文本）
@@ -159,8 +168,9 @@ function Toolbox.Chat.CopyDefaultChatToClipboard(maxLines)
     local startIndex = math.max(1, n - maxLines + 1)
     for i = startIndex, n do
       local text = f:GetMessageInfo(i)
-      if text and text ~= "" then
-        parts[#parts + 1] = stripChatFormattingForClipboard(text)
+      local plainText = stripChatFormattingForClipboard(text) -- 已过滤 secret value 的安全文本
+      if plainText ~= "" then
+        parts[#parts + 1] = plainText
       end
     end
   end

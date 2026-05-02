@@ -31,6 +31,7 @@
   - 页面注册只在宿主初始化阶段执行一次；语言切换走 `RefreshAllPages()`；局部状态变化优先局部刷新；影响显隐 / 行数 / 高度时才走 `BuildPage()`。
   - 战斗内独立宿主模式的打开优先级为：显式目标页 > `settingsLastLeafPage` > `通用`；宿主内切页后要更新 `settingsLastLeafPage`，且不得重新注册类目、不得调用 `Settings.OpenToCategory`。
   - 用户 2026-05-02 明确确认采用“保留 helper、重写行控件观感”的方案 A；实施必须在隔离 worktree 分支 `codex/settings-ui-modernize` 中进行，避免影响当前主工作区未提交改动。
+  - 用户 2026-05-02 明确确认 `关于` 页采用“方案 C：只保留版本 / 客户端 / 简短公开说明”，不再显示命令清单或内部文档信息。
 
 ## 3. 影响文件
 
@@ -195,6 +196,21 @@
   - 结果：已通过
 - [ ] 步骤 28：补记本轮实现结果，并把计划状态推进到“待人工验证”或“已完成”。
 
+## Chunk 6: 关于页对外信息收口（2026-05-02）
+
+- [x] 步骤 29：先写失败测试，锁定 `关于` 页只显示公开对外信息。
+  - 修改：
+    - `tests/logic/spec/settings_host_spec.lua`
+  - 目标：
+    - 保留版本、客户端和简短公开说明
+    - 不再出现命令标题 / 命令条目
+    - 不再出现项目文档标题 / 文档条目
+- [x] 步骤 30：最小化修改 `Toolbox/UI/SettingsHost.lua` 与 `Toolbox/Core/Foundation/Locales.lua`，收紧 `关于` 页文案与布局。
+- [x] 步骤 31：运行定向与全量验证，并补记执行结果。
+  - `busted tests/logic/spec/settings_host_spec.lua`
+  - `python tests/validate_settings_subcategories.py`
+  - `python tests/run_all.py --ci`
+
 ## 5. 验证
 
 - 自动化检查 1：
@@ -246,6 +262,8 @@
 - 2026-05-01：自动化实现完成；`TooltipAnchor` 收口为 3 项菜单按钮，`SettingsHost` 菜单弹层抬到 `DIALOG` strata，`python tests/run_all.py --ci` 通过，当前待游戏内手工验证系统设置页与战斗内独立宿主路径。
 - 2026-05-02：用户确认继续按方案 A 收口“红底按钮”视觉偏差，并要求在隔离 worktree `codex/settings-ui-modernize` 中实施；该 worktree 基线 `python tests/run_all.py --ci` 已通过。
 - 2026-05-02：Chunk 5 自动化完成；`SettingsHost` 非动作项已改为自绘现代控件，新增“仅 action row 保留按钮模板”的测试约束，`python tests/run_all.py --ci` 再次通过。
+- 2026-05-02：用户确认 `关于` 页按“方案 C”收口为对外说明页；命令清单与内部文档信息从显示范围移除，进入测试先行实施。
+- 2026-05-02：Chunk 6 自动化完成；`关于` 页已改为“版本 + 客户端 + 公开插件说明”，并通过 `busted tests/logic/spec/settings_host_spec.lua`、`python tests/validate_settings_subcategories.py` 与 `python tests/run_all.py --ci`。
 
 ## 8. 修订记录
 
@@ -258,5 +276,6 @@
 | 2026-05-01 | 自动化实现完成：状态更新为待人工验证，补记菜单弹层层级修正与 `run_all.py --ci` 通过结果 |
 | 2026-05-02 | 因实机发现“非动作项被按钮化”为红底按钮墙，计划重新进入执行中，新增 Chunk 5 处理现代化视觉收口 |
 | 2026-05-02 | 记录用户确认的方案 A 与隔离 worktree 分支 `codex/settings-ui-modernize`，并补记基线测试通过 |
+| 2026-05-02 | 新增 Chunk 6，记录 `关于` 页按“方案 C”收口为公开对外信息页的实施步骤 |
 | 2026-05-02 | Chunk 5 自动化完成：`SettingsHost` 非动作项改为现代自绘控件，模板约束测试与 `run_all.py --ci` 通过 |
 

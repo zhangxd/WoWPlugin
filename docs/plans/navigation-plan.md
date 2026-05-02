@@ -62,7 +62,7 @@
 - 展开态节点区底框 / 背景框需要按实际节点范围自适应撑高，覆盖尾部节点、连线与外边距，不能再出现后半段节点超框。
 - 最近路线列表独立侧贴展开，不放到导航内容下方。
 - 本轮同时建立 `walk component` 正式契约框架，但首批覆盖只落：主城、传送门房、飞艇塔 / 港口、常用交通落点。
-- `walk component` 数据来源固定为“`wow.db` 自动候选 + 源侧少量 override + 正式导出”，不允许在 runtime Lua 手写补边。
+- `walk component` 数据来源固定为“`wow.db` + 已正式导出的 runtime 节点 / 边 -> 规则化自动归并 -> 正式导出”；自动规则不能稳定判定时宁缺毋滥，不允许源侧 override 或 runtime Lua 手写补边。
 
 ## 3. 文件布局
 
@@ -706,19 +706,17 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
    - [x] 已导出首批覆盖的组件、节点归属和显示代理；
    - [x] runtime 已优先读取正式 `PreferredAnchorNodeID / VisibleName / DisplayProxyNodeID`；
    - [x] formal 数据缺失时继续保留 `WalkClusterNodeID / WalkClusterKey` fallback。
-5. 用源侧 override 锁定以下人工修正类型：
-   - `merge`
-   - `split`
-   - `hidden / proxy`
-   - `preferred_anchor`
-   - `uimap / visible_name`
+5. 把首批 `navigation_walk_components` 收口为全自动导出：
+   - 组件归属只允许由正式来源表和规则化自动归并推导；
+   - `hidden / proxy / preferred_anchor / visible_name` 也必须从正式节点事实推导，不再依赖独立 override 文件；
+   - 归并规则不够稳时先不导出该节点或组件，不允许人工补顶。
 6. 最后跑导出、逻辑测试、文档回写与游戏内回归。
 
 **实现护栏：**
 
 - 不接受只在 `RouteBar.lua` 或 `WorldMap.lua` 里做字符串过滤的表面修复。
 - 不把 `WalkClusterNodeID / WalkClusterKey` 直接升级成 world walk truth。
-- 少量人工修正只允许存在于源侧 override / 契约导出，不允许回流成 runtime 手写导航数据。
+- 不允许再引入源侧 override 文件参与 walk component 真值判定，也不允许回流成 runtime 手写导航数据。
 - `areatrigger` 仍然不伪造目标端；该模态继续等正式来源闭合。
 
 ## 7. 风险与处置
@@ -745,6 +743,7 @@ git commit -m "docs: finalize navigation v1 minimum-step route plan and validati
 | 2026-04-30 | 路线图改造确认：顶部文本条升级为可折叠路线图组件；交互、存档、实时刷新与最近 10 条历史记录的执行边界写入本计划 |
 | 2026-05-01 | 路线图节点文本补充确认：展开态起点/终点节点改为单行 `地址 x,y`，胶囊与聊天诊断输出不在本轮调整范围 |
 | 2026-05-01 | 根治方向确认：路线显示改为 `raw path -> semantic path -> display` 三层；玩家链路显式区分地图节点与动作节点，`taxi` 不单独生成动作节点 |
-| 2026-05-01 | `walk component` 计划补充：新增正式契约 / 导出 / runtime 出口方向，首批覆盖主城、传送门房、飞艇塔 / 港口与常用交通落点，人工修正只允许留在源侧 override |
+| 2026-05-01 | `walk component` 计划补充：新增正式契约 / 导出 / runtime 出口方向，首批覆盖主城、传送门房、飞艇塔 / 港口与常用交通落点 |
 | 2026-05-02 | 路线图布局修复补充：实现范围新增胶囊宽度自适应与展开态节点区底框按节点范围自动撑开两项回归要求 |
-| 2026-05-02 | `walk component` 首批出口落地：新增 `navigation_walk_components` 契约、源侧 override、`NavigationWalkComponents.lua`、runtime 优先消费与 fallback 回归测试；全世界真值闭合继续留在后续阶段 |
+| 2026-05-02 | `walk component` 首批出口落地：新增 `navigation_walk_components` 契约、`NavigationWalkComponents.lua`、runtime 优先消费与 fallback 回归测试；全世界真值闭合继续留在后续阶段 |
+| 2026-05-02 | 方案改口：用户确认移除 `navigation_walk_component_overrides.json` 与对应 enrichment；后续首批 walk component 只能由正式来源表全自动推导 |
